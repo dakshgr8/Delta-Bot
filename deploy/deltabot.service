@@ -1,0 +1,63 @@
+[Unit]
+Description=Delta-Bot Quantitative Algorithmic Trading Daemon
+Documentation=https://github.com/deltabot/delta-bot
+After=network-online.target systemd-time-wait-sync.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deltabot
+Group=deltabot
+WorkingDirectory=/opt/deltabot
+EnvironmentFile=-/etc/deltabot/deltabot.env
+EnvironmentFile=-/opt/deltabot/.env
+
+# Execute trading daemon with embedded Web Dashboard and Control Gateway
+ExecStart=/opt/deltabot/venv/bin/python run_bot.py --mode live --web --host 127.0.0.1 --port 8000 --flatten-on-shutdown
+
+# Lifecycle Resilience & Auto-Restart
+Restart=always
+RestartSec=5s
+TimeoutStopSec=30s
+KillMode=mixed
+KillSignal=SIGTERM
+SendSIGKILL=yes
+
+# -----------------------------------------------------------------------------
+# Linux Security Sandboxing & Hardening Directives
+# -----------------------------------------------------------------------------
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+
+# Restrict Network & System Calls
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+
+# Capabilities & Privileges (Drop all capabilities for unprivileged execution)
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Process & Resource Limits
+LimitNOFILE=65536
+LimitNPROC=4096
+TasksMax=1024
+
+# Journal Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=deltabot
+
+[Install]
+WantedBy=multi-user.target

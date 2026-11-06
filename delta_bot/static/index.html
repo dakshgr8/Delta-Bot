@@ -1,0 +1,1274 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Delta-Bot | Quantitative Terminal</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#ecfeff', 500: '#06b6d4', 600: '#0891b2', 700: '#0e7490' },
+            slate: { 850: '#111827', 900: '#0b0f19', 950: '#020617' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col selection:bg-brand-500 selection:text-white">
+
+  <!-- TOP HEADER & CONTROLS -->
+  <header class="bg-slate-900 border-b border-slate-800 sticky top-0 z-40 backdrop-blur bg-opacity-95 px-6 py-3">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3">
+        <div class="h-9 w-9 rounded-lg bg-gradient-to-tr from-brand-600 to-emerald-500 flex items-center justify-center font-bold text-white shadow-lg shadow-cyan-950 text-lg">Δ</div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="font-bold text-lg tracking-tight">DELTA-BOT</h1>
+            <!-- Interactive Live/Paper Mode Toggle -->
+            <button id="btn-mode-toggle" onclick="promptSwitchMode()" class="text-xs px-2.5 py-0.5 rounded-full font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 shadow-sm border" title="Click to switch execution mode (Paper/Live)">
+              <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" id="mode-dot"></span>
+              <span id="mode-badge">PAPER</span>
+            </button>
+          </div>
+          <p class="text-[11px] text-slate-400 mono">Breakout Quant Engine • 4 Perpetual Assets</p>
+        </div>
+      </div>
+
+      <!-- Quick Telemetry & PnL Bar -->
+      <div class="flex items-center space-x-5 text-xs mono">
+        <div>
+          <span class="text-[10px] text-slate-400 block tracking-wider uppercase">Equity</span>
+          <span class="font-semibold text-emerald-400 text-sm" id="top-equity">$10,000.00</span>
+        </div>
+        <div>
+          <span class="text-[10px] text-slate-400 block tracking-wider uppercase">Unrealized PnL</span>
+          <span class="font-semibold text-sm" id="top-upnl">+$0.00</span>
+        </div>
+        <div>
+          <span class="text-[10px] text-slate-400 block tracking-wider uppercase">Realized PnL</span>
+          <span class="font-semibold text-slate-200 text-sm" id="top-rpnl">+$0.00</span>
+        </div>
+        <div>
+          <span class="text-[10px] text-slate-400 block tracking-wider uppercase">Win Rate</span>
+          <span class="font-semibold text-slate-200" id="top-winrate">0.0% (0/0)</span>
+        </div>
+        <div>
+          <span class="text-[10px] text-slate-400 block tracking-wider uppercase">Max DD</span>
+          <span class="font-semibold text-rose-400" id="top-maxdd">0.00%</span>
+        </div>
+      </div>
+
+      <!-- Action Controls -->
+      <div class="flex items-center space-x-2">
+        <!-- Start/Stop Strategy Toggle -->
+        <button id="btn-toggle-trading" onclick="toggleTrading()" class="px-3 py-1.5 rounded-md font-semibold text-xs tracking-wider uppercase transition flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow cursor-pointer">
+          <span class="h-2 w-2 rounded-full bg-white animate-pulse"></span>
+          <span id="btn-trading-text">RUNNING</span>
+        </button>
+
+        <!-- Emergency Kill-Switch -->
+        <button id="btn-kill-switch" onclick="triggerEmergencyFlatten()" class="px-3 py-1.5 rounded-md font-semibold text-xs tracking-wider uppercase transition bg-rose-700 hover:bg-rose-600 text-white shadow flex items-center gap-1.5 cursor-pointer" title="Cancel all resting orders and market-close all positions">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          KILL SWITCH
+        </button>
+
+        <!-- Backend API Server Button -->
+        <button id="btn-backend-server" onclick="openBackendModal()" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1.5 cursor-pointer" title="Configure Backend Server Host (Render/Localhost)">
+          <span>🌐</span>
+          <span id="backend-status-text">SERVER</span>
+        </button>
+
+        <!-- Auth Token Modal Button -->
+        <button id="btn-auth-token" onclick="openAuthModal()" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1.5 cursor-pointer" title="Configure Dashboard Auth Token">
+          <span id="auth-status-icon">🔑</span>
+          <span id="auth-status-text">AUTH</span>
+        </button>
+
+        <!-- Settings Modal Button -->
+        <button onclick="openConfigModal()" class="px-3 py-1.5 rounded-md text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center gap-1 cursor-pointer" title="Hot-reload risk and strategy configuration">
+          <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          CONFIG
+        </button>
+      </div>
+    </div>
+
+    <!-- Sub-bar: Real-Time Connection Telemetry -->
+    <div class="max-w-7xl mx-auto flex items-center justify-between text-[11px] mono text-slate-400 pt-2 mt-2 border-t border-slate-800/60">
+      <div class="flex items-center space-x-4">
+        <span class="flex items-center gap-1.5">
+          <span class="h-2 w-2 rounded-full bg-emerald-500" id="ws-dot"></span>
+          <span id="ws-latency-indicator" class="text-emerald-400">WebSocket: Connected (500ms)</span>
+        </span>
+        <span>Ping: <span id="ws-ping-badge" class="text-slate-200">-- ms</span></span>
+        <span>Uptime: <span id="top-uptime" class="text-slate-200">--</span></span>
+        <span>Memory: <span id="top-mem" class="text-slate-200">-- MB</span></span>
+      </div>
+      <div class="flex items-center space-x-4">
+        <span>Server: <span id="top-backend-badge" class="text-cyan-400 font-medium">--</span></span>
+        <span>Timeframe: <span id="top-timeframe" class="text-cyan-400 font-semibold">1m</span></span>
+        <span>Circuit Breaker: <span id="top-cb-status" class="text-emerald-400 font-semibold">NORMAL</span></span>
+        <span>Session Rollover: <span class="text-slate-200">00:00:00 UTC</span></span>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN DASHBOARD CONTENT -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-6 py-6 space-y-6">
+
+    <!-- ASSET TELEMETRY & SIGNAL CARDS (4 TARGET ASSETS) -->
+    <section>
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center space-x-2">
+          <h2 class="font-bold text-sm text-slate-200 tracking-wide uppercase flex items-center gap-2">
+            <span class="h-2 w-2 rounded-full bg-brand-500"></span>
+            Target Asset Telemetry & Breakout Gauges
+          </h2>
+          <span class="text-[11px] text-slate-400 mono">(BTC, ETH, SOL, XRP Perpetual Futures)</span>
+        </div>
+        <span class="text-xs text-slate-400 mono">Filter: ADX &ge; 20 &bull; ATR Expansion &bull; Session VWAP</span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" id="asset-cards-grid">
+        <!-- Rendered dynamically for BTC, ETH, SOL, XRP -->
+      </div>
+    </section>
+
+    <!-- LIVE POSITIONS & RESTING ORDERS WORKSPACE -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+      <!-- OPEN POSITIONS TABLE -->
+      <section class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm flex flex-col">
+        <div class="px-5 py-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
+          <div class="flex items-center space-x-2">
+            <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
+            <h3 class="font-semibold text-sm">Open Positions</h3>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 mono" id="positions-count-badge">0</span>
+          </div>
+          <span class="text-xs text-slate-400 mono">Trailing SL & Brackets Managed</span>
+        </div>
+        <div class="overflow-x-auto flex-1">
+          <table class="w-full text-left text-xs mono">
+            <thead class="bg-slate-950 text-slate-400 uppercase border-b border-slate-800 text-[10px]">
+              <tr>
+                <th class="px-3 py-2">Symbol</th>
+                <th class="px-3 py-2">Side</th>
+                <th class="px-3 py-2">Size</th>
+                <th class="px-3 py-2">Entry</th>
+                <th class="px-3 py-2">Mark</th>
+                <th class="px-3 py-2">UPnL</th>
+                <th class="px-3 py-2">Stop Loss</th>
+                <th class="px-3 py-2">Take Profit</th>
+                <th class="px-3 py-2">Liquidation</th>
+                <th class="px-3 py-2 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody id="positions-table-body" class="divide-y divide-slate-800/60">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+          <div id="no-positions-msg" class="py-12 text-center text-slate-500 text-xs">No active open positions.</div>
+        </div>
+      </section>
+
+      <!-- RESTING BREAKOUT ORDERS TABLE -->
+      <section class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-sm flex flex-col">
+        <div class="px-5 py-3 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
+          <div class="flex items-center space-x-2">
+            <span class="h-2 w-2 rounded-full bg-cyan-400"></span>
+            <h3 class="font-semibold text-sm">Pending Breakout Stop Orders</h3>
+            <span class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 mono" id="orders-count-badge">0</span>
+          </div>
+          <span class="text-xs text-slate-400 mono">TTL: 3 Bars &bull; EMA Guard</span>
+        </div>
+        <div class="overflow-x-auto flex-1">
+          <table class="w-full text-left text-xs mono">
+            <thead class="bg-slate-950 text-slate-400 uppercase border-b border-slate-800 text-[10px]">
+              <tr>
+                <th class="px-3 py-2">Order ID</th>
+                <th class="px-3 py-2">Symbol</th>
+                <th class="px-3 py-2">Side</th>
+                <th class="px-3 py-2">Lots</th>
+                <th class="px-3 py-2">Trigger Px</th>
+                <th class="px-3 py-2">Attached SL/TP</th>
+                <th class="px-3 py-2">TTL Countdown</th>
+                <th class="px-3 py-2 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody id="orders-table-body" class="divide-y divide-slate-800/60">
+              <!-- Rendered dynamically -->
+            </tbody>
+          </table>
+          <div id="no-orders-msg" class="py-12 text-center text-slate-500 text-xs">No pending breakout orders resting in book.</div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- LIVE TERMINAL LOG CONSOLE STREAM -->
+    <section class="bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-sm">
+      <div class="px-4 py-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <div class="flex space-x-1.5">
+            <span class="h-2.5 w-2.5 rounded-full bg-rose-500/80"></span>
+            <span class="h-2.5 w-2.5 rounded-full bg-amber-500/80"></span>
+            <span class="h-2.5 w-2.5 rounded-full bg-emerald-500/80"></span>
+          </div>
+          <span class="text-xs font-semibold mono text-slate-300 ml-2">Daemon Live Console Stream</span>
+        </div>
+        <div class="flex items-center space-x-2 text-xs">
+          <!-- Filter Buttons -->
+          <div class="flex items-center bg-slate-950 rounded-lg p-0.5 border border-slate-800 text-[11px] mono">
+            <button onclick="setLogFilter('ALL')" id="filter-all" class="px-2 py-0.5 rounded bg-slate-800 text-white font-medium cursor-pointer">ALL</button>
+            <button onclick="setLogFilter('INFO')" id="filter-info" class="px-2 py-0.5 rounded text-slate-400 hover:text-slate-200 cursor-pointer">INFO</button>
+            <button onclick="setLogFilter('WARNING')" id="filter-warning" class="px-2 py-0.5 rounded text-slate-400 hover:text-slate-200 cursor-pointer">WARN</button>
+            <button onclick="setLogFilter('ERROR')" id="filter-error" class="px-2 py-0.5 rounded text-slate-400 hover:text-slate-200 cursor-pointer">ERROR</button>
+            <button onclick="setLogFilter('TRADE')" id="filter-trade" class="px-2 py-0.5 rounded text-slate-400 hover:text-slate-200 cursor-pointer">TRADE</button>
+          </div>
+          <!-- Auto-scroll toggle -->
+          <button id="btn-autoscroll" onclick="toggleAutoScroll()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] mono border border-slate-700 cursor-pointer">Scroll: ON</button>
+          <button onclick="clearConsole()" class="px-2 py-1 text-slate-400 hover:text-slate-200 text-[11px] mono cursor-pointer">Clear</button>
+        </div>
+      </div>
+      <div id="console-logs" class="p-4 h-52 overflow-y-auto space-y-1 text-xs mono bg-black/60">
+        <div class="text-slate-500">[SYSTEM] Initializing real-time console feed...</div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: STRATEGY & RISK CONFIGURATION HOT-RELOAD -->
+  <!-- ========================================================================= -->
+  <div id="config-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl max-w-xl w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="font-bold text-base text-white flex items-center gap-2">
+          <span>⚙</span> Strategy & Risk Configuration Hot-Reload
+        </h3>
+        <button onclick="closeConfigModal()" class="text-slate-400 hover:text-white text-lg cursor-pointer">&times;</button>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4 text-xs">
+        <div>
+          <label class="block text-slate-400 mb-1 font-medium">Candle Timeframe Resolution</label>
+          <select id="cfg-timeframe" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200">
+            <option value="1m">1m (Default Breakout)</option>
+            <option value="3m">3m Resolution</option>
+            <option value="5m">5m Intermediate</option>
+            <option value="15m">15m Trend Breakout</option>
+            <option value="1h">1h Macro Trend</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1 font-medium">Risk Per Trade (% of Equity)</label>
+          <input type="number" id="cfg-risk" step="0.1" min="0.1" max="10.0" value="1.0" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono">
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1 font-medium">Leverage Tier (1x to 20x)</label>
+          <input type="number" id="cfg-leverage" min="1" max="50" value="5" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono">
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1 font-medium">Daily Max Drawdown % (Circuit Breaker)</label>
+          <input type="number" id="cfg-maxdd" step="0.5" min="0.5" max="25.0" value="4.0" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono">
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1 font-medium">Order Time-to-Live (TTL Bars)</label>
+          <input type="number" id="cfg-ttl" min="1" max="10" value="3" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono">
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1 font-medium">ADX Filter Threshold</label>
+          <input type="number" id="cfg-adx-threshold" step="1.0" min="10" max="40" value="20.0" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono">
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1 font-medium">Breakout Buffer (Ticks)</label>
+          <input type="number" id="cfg-buffer" step="0.5" min="0.0" max="10.0" value="1.0" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono">
+        </div>
+
+        <div>
+          <label class="block text-slate-400 mb-1 font-medium">Trailing Stop ATR Multiplier</label>
+          <input type="number" id="cfg-atr-mult" step="0.1" min="0.5" max="5.0" value="2.0" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono">
+        </div>
+
+        <div class="col-span-2 pt-2 border-t border-slate-800 flex items-center justify-between">
+          <label class="flex items-center space-x-2 text-slate-300 cursor-pointer">
+            <input type="checkbox" id="cfg-trailing-sl" checked class="rounded bg-slate-950 border-slate-700 text-brand-600 focus:ring-0">
+            <span>Enable Dynamic Trailing Stop Loss Ratchet (vs Fixed Stop)</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="flex justify-end space-x-2 pt-3 border-t border-slate-800">
+        <button onclick="closeConfigModal()" class="px-4 py-2 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer">Cancel</button>
+        <button onclick="saveConfig()" class="px-4 py-2 text-xs rounded bg-brand-600 hover:bg-brand-500 font-semibold text-white shadow cursor-pointer">Apply & Hot-Reload</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: BACKEND SERVER CONNECTION CONFIGURATION -->
+  <!-- ========================================================================= -->
+  <div id="backend-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="font-bold text-base text-white flex items-center gap-2">
+          <span>🌐</span> Backend Server Connection
+        </h3>
+        <button onclick="closeBackendModal()" class="text-slate-400 hover:text-white text-lg cursor-pointer">&times;</button>
+      </div>
+      <p class="text-xs text-slate-400 leading-relaxed">
+        If hosting this dashboard on <strong class="text-cyan-400">Vercel</strong>, enter your <strong class="text-cyan-400">Render backend URL</strong> below (e.g., <code class="text-amber-400 font-mono">https://delta-bot-backend.onrender.com</code>).
+      </p>
+      <div>
+        <label class="block text-slate-400 mb-1 text-xs font-medium">Backend URL</label>
+        <input type="text" id="input-backend-url" placeholder="https://delta-bot-backend.onrender.com" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono text-xs focus:border-brand-500">
+      </div>
+      <div id="backend-test-result" class="text-xs hidden p-2.5 rounded bg-slate-950 border border-slate-800"></div>
+      <div class="flex justify-between items-center pt-2 border-t border-slate-800">
+        <button onclick="resetBackendUrl()" class="px-3 py-1.5 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer">Use Current Origin</button>
+        <div class="flex space-x-2">
+          <button onclick="testBackendConnection()" class="px-3 py-1.5 text-xs rounded bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-cyan-800 cursor-pointer">Test Connection</button>
+          <button onclick="saveBackendUrlFromModal()" class="px-4 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 font-semibold text-white shadow cursor-pointer">Save & Connect</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: AUTHENTICATION TOKEN MANAGEMENT -->
+  <!-- ========================================================================= -->
+  <div id="auth-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+        <h3 class="font-bold text-base text-white flex items-center gap-2">
+          <span>🔒</span> Dashboard Authentication Token
+        </h3>
+        <button onclick="closeAuthModal()" class="text-slate-400 hover:text-white text-lg cursor-pointer">&times;</button>
+      </div>
+      <p class="text-xs text-slate-400">
+        If <code class="text-cyan-400 font-mono">DASHBOARD_AUTH_TOKEN</code> is configured in <code class="text-cyan-400 font-mono">.env</code>, enter it below to authorize control mutations, mode switching, and WebSocket streaming.
+      </p>
+      <div>
+        <label class="block text-slate-400 mb-1 text-xs font-medium">Shared Secret Token</label>
+        <input type="password" id="input-auth-token" placeholder="Paste your DASHBOARD_AUTH_TOKEN here..." class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono text-xs focus:border-brand-500">
+      </div>
+      <div class="flex justify-between items-center pt-2 border-t border-slate-800">
+        <button onclick="clearAuthToken()" class="px-3 py-1.5 text-xs rounded bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-rose-300 border border-slate-700 cursor-pointer">Clear Stored Token</button>
+        <div class="flex space-x-2">
+          <button onclick="closeAuthModal()" class="px-4 py-1.5 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer">Cancel</button>
+          <button onclick="saveAuthTokenFromModal()" class="px-4 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 font-semibold text-white shadow cursor-pointer">Save Token</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- MODAL: LIVE / PAPER MODE SWITCH CONFIRMATION -->
+  <!-- ========================================================================= -->
+  <div id="mode-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4">
+      <div class="flex items-center space-x-2 text-amber-400">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        <h3 class="font-bold text-base text-white" id="mode-modal-title">Confirm Operational Mode Switch</h3>
+      </div>
+      <p class="text-xs text-slate-300 leading-relaxed" id="mode-modal-desc">
+        Are you sure you want to switch execution modes?
+      </p>
+      <div class="flex justify-end space-x-2 pt-3 border-t border-slate-800">
+        <button onclick="closeModeModal()" class="px-4 py-2 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer">Cancel</button>
+        <button id="btn-mode-confirm" onclick="executeModeSwitch()" class="px-4 py-2 text-xs rounded font-semibold text-white shadow cursor-pointer bg-brand-600 hover:bg-brand-500">Confirm Switch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- JAVASCRIPT APPLICATION LOGIC -->
+  <!-- ========================================================================= -->
+  <script>
+    let isRunning = true;
+    let currentMode = 'PAPER';
+    let targetSwitchMode = 'LIVE';
+    let ws = null;
+    let reconnectTimer = null;
+    let pingIntervalTimer = null;
+    let wsPingStartTime = 0;
+    let activeLogFilter = 'ALL';
+    let autoScrollEnabled = true;
+
+    // -------------------------------------------------------------------------
+    // 1. Authentication Token Helpers
+    // -------------------------------------------------------------------------
+    function getAuthToken() {
+      return localStorage.getItem('delta_bot_auth_token') || '';
+    }
+
+    function setAuthToken(token) {
+      if (token && token.trim()) {
+        localStorage.setItem('delta_bot_auth_token', token.trim());
+      } else {
+        localStorage.removeItem('delta_bot_auth_token');
+      }
+      updateAuthBadge();
+    }
+
+    function updateAuthBadge() {
+      const token = getAuthToken();
+      const textElem = document.getElementById('auth-status-text');
+      const iconElem = document.getElementById('auth-status-icon');
+      if (textElem && iconElem) {
+        if (token) {
+          iconElem.textContent = '🔒';
+          textElem.textContent = 'TOKEN SET';
+        } else {
+          iconElem.textContent = '🔑';
+          textElem.textContent = 'AUTH';
+        }
+      }
+    }
+
+    function openAuthModal() {
+      document.getElementById('input-auth-token').value = getAuthToken();
+      document.getElementById('auth-modal').classList.remove('hidden');
+    }
+
+    function closeAuthModal() {
+      document.getElementById('auth-modal').classList.add('hidden');
+    }
+
+    function saveAuthTokenFromModal() {
+      const val = document.getElementById('input-auth-token').value.trim();
+      setAuthToken(val);
+      closeAuthModal();
+      if (ws) {
+        try { ws.close(); } catch (_) {}
+      }
+      initWebSocket();
+    }
+
+    function clearAuthToken() {
+      setAuthToken('');
+      document.getElementById('input-auth-token').value = '';
+      closeAuthModal();
+      if (ws) {
+        try { ws.close(); } catch (_) {}
+      }
+      initWebSocket();
+    }
+
+    function getAuthHeaders() {
+      const headers = { 'Content-Type': 'application/json' };
+      const token = getAuthToken();
+      if (token) {
+        headers['X-Dashboard-Token'] = token;
+        headers['Authorization'] = 'Bearer ' + token;
+      }
+      return headers;
+    }
+
+    async function handleAuthError(res) {
+      if (res.status === 401) {
+        alert('Authentication Required or Token Invalid. Please set your DASHBOARD_AUTH_TOKEN.');
+        openAuthModal();
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Backend Server Connection & API Helpers
+    // -------------------------------------------------------------------------
+    function getBackendUrl() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const qBackend = urlParams.get('backend');
+      if (qBackend && qBackend.trim()) {
+        let clean = qBackend.trim().replace(/\/+$/, '');
+        if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+          clean = (window.location.protocol === 'https:' ? 'https://' : 'http://') + clean;
+        }
+        localStorage.setItem('delta_bot_backend_url', clean);
+        return clean;
+      }
+      const stored = localStorage.getItem('delta_bot_backend_url');
+      if (stored && stored.trim()) {
+        return stored.trim().replace(/\/+$/, '');
+      }
+      return window.location.origin;
+    }
+
+    function setBackendUrl(url) {
+      if (!url || !url.trim()) {
+        localStorage.removeItem('delta_bot_backend_url');
+      } else {
+        let clean = url.trim();
+        if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
+          clean = (window.location.protocol === 'https:' ? 'https://' : 'http://') + clean;
+        }
+        clean = clean.replace(/\/+$/, '');
+        localStorage.setItem('delta_bot_backend_url', clean);
+      }
+      updateBackendBadge();
+    }
+
+    function getApiUrl(endpoint) {
+      const base = getBackendUrl();
+      const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+      return `${base}${cleanEndpoint}`;
+    }
+
+    function getWsUrl() {
+      const backend = getBackendUrl();
+      const token = getAuthToken();
+      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+      try {
+        const u = new URL(backend);
+        const wsProto = u.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${wsProto}//${u.host}/ws/live${tokenParam}`;
+      } catch (_) {
+        const loc = window.location;
+        const wsProto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+        return `${wsProto}//${loc.host}/ws/live${tokenParam}`;
+      }
+    }
+
+    function openBackendModal() {
+      const stored = localStorage.getItem('delta_bot_backend_url') || '';
+      document.getElementById('input-backend-url').value = stored;
+      const resDiv = document.getElementById('backend-test-result');
+      if (resDiv) {
+        resDiv.classList.add('hidden');
+        resDiv.textContent = '';
+      }
+      document.getElementById('backend-modal').classList.remove('hidden');
+    }
+
+    function closeBackendModal() {
+      document.getElementById('backend-modal').classList.add('hidden');
+    }
+
+    function saveBackendUrlFromModal() {
+      const val = document.getElementById('input-backend-url').value.trim();
+      setBackendUrl(val);
+      closeBackendModal();
+      if (ws) {
+        try { ws.close(); } catch (_) {}
+      }
+      initWebSocket();
+    }
+
+    function resetBackendUrl() {
+      setBackendUrl('');
+      document.getElementById('input-backend-url').value = '';
+      closeBackendModal();
+      if (ws) {
+        try { ws.close(); } catch (_) {}
+      }
+      initWebSocket();
+    }
+
+    async function testBackendConnection() {
+      const input = document.getElementById('input-backend-url').value.trim();
+      const resultDiv = document.getElementById('backend-test-result');
+      resultDiv.className = 'text-xs p-2.5 rounded bg-slate-950 border border-slate-700 text-slate-300';
+      resultDiv.textContent = 'Testing connection...';
+
+      let target = input;
+      if (!target) target = window.location.origin;
+      if (!target.startsWith('http://') && !target.startsWith('https://')) {
+        target = 'https://' + target;
+      }
+      target = target.replace(/\/+$/, '');
+
+      try {
+        const res = await fetch(`${target}/api/status`, { mode: 'cors' });
+        if (res.ok) {
+          const data = await res.json();
+          resultDiv.className = 'text-xs p-2.5 rounded bg-emerald-950/40 border border-emerald-700 text-emerald-400';
+          resultDiv.textContent = `✅ Connected! Daemon status: ${data.status?.mode || 'active'} mode | Collateral: $${(data.collateral?.balance || 0).toLocaleString()}`;
+        } else {
+          resultDiv.className = 'text-xs p-2.5 rounded bg-amber-950/40 border border-amber-700 text-amber-400';
+          resultDiv.textContent = `⚠️ Reached server but received HTTP status: ${res.status}`;
+        }
+      } catch (err) {
+        resultDiv.className = 'text-xs p-2.5 rounded bg-rose-950/40 border border-rose-700 text-rose-400';
+        resultDiv.textContent = `❌ Failed to connect to ${target}. Verify server is running and CORS is enabled.`;
+      }
+    }
+
+    function updateBackendBadge() {
+      const badge = document.getElementById('top-backend-badge');
+      const btn = document.getElementById('backend-status-text');
+      const stored = localStorage.getItem('delta_bot_backend_url');
+      if (stored) {
+        try {
+          const u = new URL(stored);
+          if (badge) badge.textContent = u.host;
+          if (btn) btn.textContent = u.host.length > 15 ? u.host.slice(0, 12) + '...' : u.host;
+        } catch (_) {
+          if (badge) badge.textContent = stored;
+          if (btn) btn.textContent = 'SERVER';
+        }
+      } else {
+        if (badge) badge.textContent = window.location.host || 'local';
+        if (btn) btn.textContent = 'SERVER';
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. Real-Time WebSocket Connection & Lifecycle
+    // -------------------------------------------------------------------------
+    function initWebSocket() {
+      const wsUrl = getWsUrl();
+
+      document.getElementById('ws-latency-indicator').textContent = 'WebSocket: Connecting...';
+      document.getElementById('ws-dot').className = 'h-2 w-2 rounded-full bg-amber-400 animate-pulse';
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        document.getElementById('ws-latency-indicator').textContent = 'WebSocket: Connected (500ms)';
+        document.getElementById('ws-latency-indicator').className = 'text-xs text-emerald-400 mono';
+        document.getElementById('ws-dot').className = 'h-2 w-2 rounded-full bg-emerald-500';
+        if (reconnectTimer) clearInterval(reconnectTimer);
+
+        // Start periodic ping measurement
+        if (pingIntervalTimer) clearInterval(pingIntervalTimer);
+        pingIntervalTimer = setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            wsPingStartTime = performance.now();
+            ws.send('ping');
+          }
+        }, 5000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const packet = JSON.parse(event.data);
+          if (packet.type === 'state_update') {
+            updateDashboard(packet);
+          } else if (packet.type === 'pong') {
+            const rtt = Math.round(performance.now() - wsPingStartTime);
+            document.getElementById('ws-ping-badge').textContent = `${rtt} ms`;
+          }
+        } catch (err) {
+          console.error('Error parsing state packet:', err);
+        }
+      };
+
+      ws.onclose = (event) => {
+        if (pingIntervalTimer) clearInterval(pingIntervalTimer);
+        if (event.code === 1008) {
+          document.getElementById('ws-latency-indicator').textContent = 'WebSocket: Auth Rejected (1008)';
+          document.getElementById('ws-latency-indicator').className = 'text-xs text-rose-400 mono';
+          document.getElementById('ws-dot').className = 'h-2 w-2 rounded-full bg-rose-500';
+          openAuthModal();
+          return;
+        }
+        document.getElementById('ws-latency-indicator').textContent = 'WebSocket: Disconnected (Retrying...)';
+        document.getElementById('ws-latency-indicator').className = 'text-xs text-rose-400 mono';
+        document.getElementById('ws-dot').className = 'h-2 w-2 rounded-full bg-rose-500';
+        if (!reconnectTimer) {
+          reconnectTimer = setInterval(initWebSocket, 3000);
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error('WebSocket encountered error:', err);
+      };
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. UI Update Engine (State Synchronization)
+    // -------------------------------------------------------------------------
+    function updateDashboard(data) {
+      // 1. Status Bar & Execution Mode
+      isRunning = data.status.is_running;
+      currentMode = data.status.mode;
+      const btn = document.getElementById('btn-toggle-trading');
+      const btnText = document.getElementById('btn-trading-text');
+      if (isRunning) {
+        btn.className = 'px-3 py-1.5 rounded-md font-semibold text-xs tracking-wider uppercase transition flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow cursor-pointer';
+        btnText.textContent = 'RUNNING';
+      } else {
+        btn.className = 'px-3 py-1.5 rounded-md font-semibold text-xs tracking-wider uppercase transition flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white shadow cursor-pointer';
+        btnText.textContent = 'PAUSED';
+      }
+
+      const modeBtn = document.getElementById('btn-mode-toggle');
+      const modeBadge = document.getElementById('mode-badge');
+      const modeDot = document.getElementById('mode-dot');
+      modeBadge.textContent = currentMode;
+      if (currentMode === 'LIVE') {
+        modeBtn.className = 'text-xs px-2.5 py-0.5 rounded-full font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-sm';
+        modeDot.className = 'h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse';
+      } else {
+        modeBtn.className = 'text-xs px-2.5 py-0.5 rounded-full font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-sm';
+        modeDot.className = 'h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse';
+      }
+
+      // Telemetry sub-bar
+      document.getElementById('top-uptime').textContent = data.status.uptime_human || '--';
+      document.getElementById('top-mem').textContent = `${data.status.memory_mb || 0} MB`;
+      document.getElementById('top-timeframe').textContent = data.status.timeframe || '1m';
+      
+      const cbElem = document.getElementById('top-cb-status');
+      if (data.status.circuit_breaker_tripped) {
+        cbElem.textContent = 'TRIPPED (HALTED)';
+        cbElem.className = 'text-rose-400 font-bold';
+      } else {
+        cbElem.textContent = 'NORMAL';
+        cbElem.className = 'text-emerald-400 font-semibold';
+      }
+
+      // Collateral & PnL
+      document.getElementById('top-equity').textContent = `$${data.collateral.equity.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+      
+      const upnlElem = document.getElementById('top-upnl');
+      const upnl = data.collateral.unrealized_pnl;
+      upnlElem.textContent = `${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}`;
+      upnlElem.className = upnl >= 0 ? 'font-semibold text-emerald-400 text-sm' : 'font-semibold text-rose-400 text-sm';
+
+      const rpnlElem = document.getElementById('top-rpnl');
+      const rpnl = data.collateral.realized_pnl;
+      rpnlElem.textContent = `${rpnl >= 0 ? '+' : ''}$${rpnl.toFixed(2)}`;
+      rpnlElem.className = rpnl >= 0 ? 'font-semibold text-emerald-400 text-sm' : 'font-semibold text-rose-400 text-sm';
+
+      document.getElementById('top-winrate').textContent = `${data.collateral.win_rate_pct.toFixed(1)}% (${data.collateral.winning_trades}/${data.collateral.total_trades})`;
+      document.getElementById('top-maxdd').textContent = `${data.collateral.max_drawdown_pct.toFixed(2)}%`;
+
+      // 2. Asset Cards Grid
+      renderAssetCards(data.tickers, data.indicators);
+
+      // 3. Tables
+      renderPositionsTable(data.positions);
+      renderOrdersTable(data.orders);
+
+      // 4. Logs Stream
+      renderConsoleLogs(data.logs);
+
+      // Pre-fill config modal if open
+      if (data.status.config) {
+        populateConfigModal(data.status.config);
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // 4. Asset Telemetry & Signal Cards Renderer
+    // -------------------------------------------------------------------------
+    function renderAssetCards(tickers, indicators) {
+      const container = document.getElementById('asset-cards-grid');
+      container.replaceChildren();
+
+      const symbols = Object.keys(tickers);
+      symbols.forEach(sym => {
+        const t = tickers[sym];
+        const ind = indicators[sym] || {};
+
+        const card = document.createElement('div');
+        card.className = 'bg-slate-900 rounded-xl border border-slate-800 p-4 shadow-sm hover:border-slate-700 transition flex flex-col justify-between space-y-3';
+
+        // Header: Symbol + Per-Symbol Trading Toggle
+        const topRow = document.createElement('div');
+        topRow.className = 'flex items-center justify-between border-b border-slate-800/80 pb-2';
+
+        const symCol = document.createElement('div');
+        const symTitle = document.createElement('span');
+        symTitle.className = 'font-bold text-sm tracking-wide text-white';
+        symTitle.textContent = sym;
+        const perpBadge = document.createElement('span');
+        perpBadge.className = 'ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 mono';
+        perpBadge.textContent = 'PERP';
+        symCol.appendChild(symTitle);
+        symCol.appendChild(perpBadge);
+
+        // Per-Symbol Toggle Button
+        const toggleBtn = document.createElement('button');
+        toggleBtn.className = t.trading_enabled
+          ? 'px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 transition cursor-pointer'
+          : 'px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 transition cursor-pointer';
+        toggleBtn.textContent = t.trading_enabled ? 'Trading: ACTIVE' : 'Trading: PAUSED';
+        toggleBtn.onclick = () => toggleSymbolTrading(sym, !t.trading_enabled);
+
+        topRow.appendChild(symCol);
+        topRow.appendChild(toggleBtn);
+        card.appendChild(topRow);
+
+        // Pricing Row
+        const priceRow = document.createElement('div');
+        priceRow.className = 'flex items-baseline justify-between';
+        
+        const markElem = document.createElement('div');
+        markElem.className = 'text-lg font-bold mono text-white';
+        markElem.textContent = t.mark_price > 0 ? `$${t.mark_price.toLocaleString('en-US', {minimumFractionDigits: 2})}` : '--';
+
+        const chgElem = document.createElement('div');
+        const isPos = t.change_24h_pct >= 0;
+        chgElem.className = `text-xs font-semibold mono ${isPos ? 'text-emerald-400' : 'text-rose-400'}`;
+        chgElem.textContent = `${isPos ? '+' : ''}${t.change_24h_pct.toFixed(2)}% (${isPos ? '+' : ''}$${t.change_24h_usd.toFixed(2)})`;
+
+        priceRow.appendChild(markElem);
+        priceRow.appendChild(chgElem);
+        card.appendChild(priceRow);
+
+        // Top-of-Book and Spread
+        const bookRow = document.createElement('div');
+        bookRow.className = 'flex items-center justify-between text-[11px] mono text-slate-400 bg-slate-950/60 p-2 rounded border border-slate-800/60';
+        bookRow.innerHTML = `<span>Bid: <span class="text-slate-200">$${t.bid_price.toFixed(2)}</span></span><span>Ask: <span class="text-slate-200">$${t.ask_price.toFixed(2)}</span></span><span>Spread: <span class="text-cyan-400">${t.spread_bps.toFixed(1)} bps</span></span>`;
+        card.appendChild(bookRow);
+
+        // Session Indicators (EMA 20, VWAP, PDH, PDL)
+        const indGrid = document.createElement('div');
+        indGrid.className = 'grid grid-cols-2 gap-1.5 text-[11px] mono text-slate-400';
+        
+        const emaVal = ind.ema_20 ? `$${ind.ema_20.toFixed(2)}` : '--';
+        const vwapVal = ind.session_vwap ? `$${ind.session_vwap.toFixed(2)}` : '--';
+        const pdhVal = ind.pdh ? `$${ind.pdh.toFixed(2)}` : '--';
+        const pdlVal = ind.pdl ? `$${ind.pdl.toFixed(2)}` : '--';
+
+        indGrid.innerHTML = `
+          <div class="flex justify-between"><span>EMA 20:</span><span class="text-slate-200">${emaVal}</span></div>
+          <div class="flex justify-between"><span>VWAP:</span><span class="text-slate-200">${vwapVal}</span></div>
+          <div class="flex justify-between"><span>PDH:</span><span class="text-amber-400/90">${pdhVal}</span></div>
+          <div class="flex justify-between"><span>PDL:</span><span class="text-amber-400/90">${pdlVal}</span></div>
+        `;
+        card.appendChild(indGrid);
+
+        // Breakout Readiness Gauge (ADX + ATR Expansion)
+        const gaugeRow = document.createElement('div');
+        gaugeRow.className = 'pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] mono';
+
+        const adxVal = ind.adx_14 !== null && ind.adx_14 !== undefined ? ind.adx_14.toFixed(1) : '--';
+        const isBreakout = ind.adx_14 >= 20;
+
+        const adxBadge = document.createElement('span');
+        adxBadge.className = isBreakout
+          ? 'px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+          : 'px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30';
+        adxBadge.textContent = isBreakout ? `ADX: ${adxVal} (TREND)` : `ADX: ${adxVal} (SQUEEZE)`;
+
+        const atrBadge = document.createElement('span');
+        atrBadge.className = ind.is_volatility_expanded
+          ? 'px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400'
+          : 'px-2 py-0.5 rounded text-[10px] text-slate-400 bg-slate-800';
+        atrBadge.textContent = ind.is_volatility_expanded ? 'ATR EXPANDED' : 'ATR NORMAL';
+
+        gaugeRow.appendChild(adxBadge);
+        gaugeRow.appendChild(atrBadge);
+        card.appendChild(gaugeRow);
+
+        container.appendChild(card);
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // 5. Open Positions Table Renderer
+    // -------------------------------------------------------------------------
+    function renderPositionsTable(positions) {
+      const tbody = document.getElementById('positions-table-body');
+      const emptyMsg = document.getElementById('no-positions-msg');
+      const countBadge = document.getElementById('positions-count-badge');
+
+      countBadge.textContent = positions.length;
+      tbody.replaceChildren();
+
+      if (!positions || positions.length === 0) {
+        emptyMsg.classList.remove('hidden');
+        return;
+      }
+      emptyMsg.classList.add('hidden');
+
+      positions.forEach(pos => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-800/40 transition';
+
+        tr.appendChild(createTd(pos.symbol, 'font-bold text-white'));
+        
+        const sideTd = document.createElement('td');
+        sideTd.className = 'px-3 py-2';
+        const sideBadge = document.createElement('span');
+        sideBadge.className = pos.side === 'BUY'
+          ? 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400'
+          : 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400';
+        sideBadge.textContent = pos.side === 'BUY' ? 'LONG' : 'SHORT';
+        sideTd.appendChild(sideBadge);
+        tr.appendChild(sideTd);
+
+        tr.appendChild(createTd(`${pos.size} lots (${pos.native_value})`));
+        tr.appendChild(createTd(`$${pos.entry_price.toFixed(2)}`));
+        tr.appendChild(createTd(`$${pos.mark_price.toFixed(2)}`));
+
+        const pnlTd = document.createElement('td');
+        pnlTd.className = `px-3 py-2 font-bold ${pos.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+        pnlTd.textContent = `${pos.unrealized_pnl >= 0 ? '+' : ''}$${pos.unrealized_pnl.toFixed(2)}`;
+        tr.appendChild(pnlTd);
+
+        tr.appendChild(createTd(pos.stop_loss_price ? `$${pos.stop_loss_price.toFixed(2)}` : '--', 'text-amber-400'));
+        tr.appendChild(createTd(pos.take_profit_price ? `$${pos.take_profit_price.toFixed(2)}` : '--', 'text-emerald-400'));
+
+        const liqText = pos.liquidation_price ? `$${pos.liquidation_price.toFixed(2)} (${pos.liquidation_distance_pct}%)` : '--';
+        tr.appendChild(createTd(liqText, 'text-rose-400/90'));
+
+        const actionTd = document.createElement('td');
+        actionTd.className = 'px-3 py-2 text-right';
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'px-2 py-0.5 rounded bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-rose-300 text-[10px] font-semibold border border-slate-700 transition cursor-pointer';
+        closeBtn.textContent = 'Close';
+        closeBtn.onclick = () => closePosition(pos.product_id, pos.symbol);
+        actionTd.appendChild(closeBtn);
+        tr.appendChild(actionTd);
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // 6. Pending Breakout Orders Table Renderer
+    // -------------------------------------------------------------------------
+    function renderOrdersTable(orders) {
+      const tbody = document.getElementById('orders-table-body');
+      const emptyMsg = document.getElementById('no-orders-msg');
+      const countBadge = document.getElementById('orders-count-badge');
+
+      countBadge.textContent = orders.length;
+      tbody.replaceChildren();
+
+      if (!orders || orders.length === 0) {
+        emptyMsg.classList.remove('hidden');
+        return;
+      }
+      emptyMsg.classList.add('hidden');
+
+      orders.forEach(o => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-800/40 transition';
+
+        tr.appendChild(createTd(`#${o.order_id}`, 'text-slate-400'));
+        tr.appendChild(createTd(o.symbol, 'font-bold text-white'));
+        
+        const sideTd = document.createElement('td');
+        sideTd.className = 'px-3 py-2';
+        const sideBadge = document.createElement('span');
+        sideBadge.className = o.side === 'BUY'
+          ? 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400'
+          : 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400';
+        sideBadge.textContent = o.side;
+        sideTd.appendChild(sideBadge);
+        tr.appendChild(sideTd);
+
+        tr.appendChild(createTd(`${o.size}`));
+        tr.appendChild(createTd(`$${o.stop_price.toFixed(2)}`, 'text-cyan-400 font-bold'));
+
+        const slTpText = `SL: ${o.bracket_stop_loss_price ? '$' + o.bracket_stop_loss_price.toFixed(2) : '--'} | TP: ${o.bracket_take_profit_price ? '$' + o.bracket_take_profit_price.toFixed(2) : '--'}`;
+        tr.appendChild(createTd(slTpText, 'text-slate-300'));
+
+        const ttlText = `${o.ttl_remaining || 0}/${o.ttl_bars || 3} bars left`;
+        tr.appendChild(createTd(ttlText, 'text-amber-400 font-semibold'));
+
+        const actionTd = document.createElement('td');
+        actionTd.className = 'px-3 py-2 text-right';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] border border-slate-700 transition cursor-pointer';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.onclick = () => cancelPendingOrder(o.order_id);
+        actionTd.appendChild(cancelBtn);
+        tr.appendChild(actionTd);
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // 7. Console Log Stream Renderer
+    // -------------------------------------------------------------------------
+    let bufferedLogs = [];
+
+    function renderConsoleLogs(logs) {
+      if (!logs) return;
+      bufferedLogs = logs;
+
+      const consoleDiv = document.getElementById('console-logs');
+      consoleDiv.replaceChildren();
+
+      const filtered = logs.filter(e => {
+        if (activeLogFilter === 'ALL') return true;
+        if (activeLogFilter === 'TRADE') return e.message.includes('Trade') || e.message.includes('Order') || e.message.includes('Breakout');
+        return e.level === activeLogFilter;
+      });
+
+      filtered.forEach(e => {
+        const line = document.createElement('div');
+        line.className = 'flex items-start space-x-2 text-[11px]';
+
+        const ts = document.createElement('span');
+        ts.className = 'text-slate-500 select-none';
+        ts.textContent = `[${e.time_str}]`;
+
+        const lvl = document.createElement('span');
+        if (e.level === 'ERROR') lvl.className = 'text-rose-400 font-bold';
+        else if (e.level === 'WARNING') lvl.className = 'text-amber-400 font-bold';
+        else if (e.message.includes('Breakout') || e.message.includes('Order')) lvl.className = 'text-emerald-400 font-bold';
+        else lvl.className = 'text-cyan-400';
+        lvl.textContent = `[${e.level}]`;
+
+        const msg = document.createElement('span');
+        msg.className = 'text-slate-300 flex-1';
+        msg.textContent = e.message;
+
+        line.appendChild(ts);
+        line.appendChild(lvl);
+        line.appendChild(msg);
+        consoleDiv.appendChild(line);
+      });
+
+      if (autoScrollEnabled) {
+        consoleDiv.scrollTop = consoleDiv.scrollHeight;
+      }
+    }
+
+    function setLogFilter(level) {
+      activeLogFilter = level;
+      ['all', 'info', 'warning', 'error', 'trade'].forEach(k => {
+        const b = document.getElementById(`filter-${k}`);
+        if (b) {
+          if (k.toUpperCase() === level) {
+            b.className = 'px-2 py-0.5 rounded bg-slate-800 text-white font-medium cursor-pointer';
+          } else {
+            b.className = 'px-2 py-0.5 rounded text-slate-400 hover:text-slate-200 cursor-pointer';
+          }
+        }
+      });
+      renderConsoleLogs(bufferedLogs);
+    }
+
+    function toggleAutoScroll() {
+      autoScrollEnabled = !autoScrollEnabled;
+      const b = document.getElementById('btn-autoscroll');
+      b.textContent = autoScrollEnabled ? 'Scroll: ON' : 'Scroll: PAUSED';
+      b.className = autoScrollEnabled
+        ? 'px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] mono border border-slate-700 cursor-pointer'
+        : 'px-2.5 py-1 rounded bg-amber-900/60 text-amber-300 text-[11px] mono border border-amber-700 cursor-pointer';
+    }
+
+    function clearConsole() {
+      bufferedLogs = [];
+      document.getElementById('console-logs').replaceChildren();
+    }
+
+    function createTd(text, extraClasses = '') {
+      const td = document.createElement('td');
+      td.className = `px-3 py-2 ${extraClasses}`;
+      td.textContent = text;
+      return td;
+    }
+
+    // -------------------------------------------------------------------------
+    // 8. Control Actions (API Calls)
+    // -------------------------------------------------------------------------
+    async function toggleTrading() {
+      const endpoint = isRunning ? getApiUrl('/api/control/stop') : getApiUrl('/api/control/start');
+      try {
+        const res = await fetch(endpoint, { method: 'POST', headers: getAuthHeaders() });
+        if (res.status === 401) {
+          await handleAuthError(res);
+          return;
+        }
+        if (res.ok) isRunning = !isRunning;
+      } catch (err) {
+        alert(`Failed to toggle trading: ${err}`);
+      }
+    }
+
+    function promptSwitchMode() {
+      targetSwitchMode = currentMode === 'PAPER' ? 'live' : 'paper';
+      const titleElem = document.getElementById('mode-modal-title');
+      const descElem = document.getElementById('mode-modal-desc');
+      const confirmBtn = document.getElementById('btn-mode-confirm');
+
+      if (targetSwitchMode === 'live') {
+        titleElem.textContent = 'Switch to LIVE Trading Mode?';
+        descElem.textContent = 'CRITICAL WARNING: Switching to LIVE mode will dispatch real orders to Delta Exchange with real funds. Ensure DELTA_API_KEY and DELTA_API_SECRET are valid in your .env.';
+        confirmBtn.className = 'px-4 py-2 text-xs rounded font-semibold text-white shadow cursor-pointer bg-amber-600 hover:bg-amber-500';
+        confirmBtn.textContent = 'Confirm LIVE Mode';
+      } else {
+        titleElem.textContent = 'Switch to PAPER Simulation Mode?';
+        descElem.textContent = 'Switch back to PAPER mode? All subsequent breakout orders will be matched virtually using simulated market depth.';
+        confirmBtn.className = 'px-4 py-2 text-xs rounded font-semibold text-white shadow cursor-pointer bg-emerald-600 hover:bg-emerald-500';
+        confirmBtn.textContent = 'Confirm PAPER Mode';
+      }
+      document.getElementById('mode-modal').classList.remove('hidden');
+    }
+
+    function closeModeModal() {
+      document.getElementById('mode-modal').classList.add('hidden');
+    }
+
+    async function executeModeSwitch() {
+      try {
+        const res = await fetch(getApiUrl('/api/control/mode'), {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ mode: targetSwitchMode }),
+        });
+        if (res.status === 401) {
+          await handleAuthError(res);
+          return;
+        }
+        const data = await res.json();
+        if (!res.ok) {
+          alert(`Mode switch failed: ${data.detail || data.message}`);
+        } else {
+          closeModeModal();
+        }
+      } catch (err) {
+        alert(`Failed to switch operational mode: ${err}`);
+      }
+    }
+
+    async function toggleSymbolTrading(symbol, enable) {
+      try {
+        const res = await fetch(getApiUrl('/api/control/symbol_toggle'), {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ symbol: symbol, enabled: enable }),
+        });
+        if (res.status === 401) {
+          await handleAuthError(res);
+          return;
+        }
+      } catch (err) {
+        alert(`Failed to toggle symbol: ${err}`);
+      }
+    }
+
+    async function triggerEmergencyFlatten() {
+      if (!confirm('EMERGENCY KILL SWITCH: Are you sure you want to market-close ALL active positions and cancel resting orders?')) {
+        return;
+      }
+      try {
+        const res = await fetch(getApiUrl('/api/control/flatten'), { method: 'POST', headers: getAuthHeaders() });
+        if (res.status === 401) {
+          await handleAuthError(res);
+          return;
+        }
+        const data = await res.json();
+        alert(data.message);
+      } catch (err) {
+        alert(`Emergency flatten failed: ${err}`);
+      }
+    }
+
+    async function closePosition(productId, symbol) {
+      if (!confirm(`Close position for ${symbol} (product #${productId}) at market?`)) return;
+      try {
+        const res = await fetch(getApiUrl(`/api/positions/${productId}/close`), { method: 'POST', headers: getAuthHeaders() });
+        if (res.status === 401) {
+          await handleAuthError(res);
+          return;
+        }
+        const data = await res.json();
+        alert(data.message);
+      } catch (err) {
+        alert(`Failed to close position: ${err}`);
+      }
+    }
+
+    async function cancelPendingOrder(orderId) {
+      if (!confirm(`Cancel resting breakout order #${orderId}?`)) return;
+      try {
+        const res = await fetch(getApiUrl(`/api/orders/${orderId}/cancel`), { method: 'POST', headers: getAuthHeaders() });
+        if (res.status === 401) {
+          await handleAuthError(res);
+          return;
+        }
+        const data = await res.json();
+        alert(data.message);
+      } catch (err) {
+        alert(`Failed to cancel order: ${err}`);
+      }
+    }
+
+    function openConfigModal() {
+      document.getElementById('config-modal').classList.remove('hidden');
+    }
+
+    function closeConfigModal() {
+      document.getElementById('config-modal').classList.add('hidden');
+    }
+
+    let configInitialized = false;
+    function populateConfigModal(cfg) {
+      if (configInitialized) return;
+      if (cfg.timeframe) document.getElementById('cfg-timeframe').value = cfg.timeframe;
+      if (cfg.risk_pct) document.getElementById('cfg-risk').value = cfg.risk_pct;
+      if (cfg.leverage) document.getElementById('cfg-leverage').value = cfg.leverage;
+      if (cfg.max_drawdown_pct) document.getElementById('cfg-maxdd').value = cfg.max_drawdown_pct;
+      if (cfg.max_pending_bars) document.getElementById('cfg-ttl').value = cfg.max_pending_bars;
+      if (cfg.adx_threshold) document.getElementById('cfg-adx-threshold').value = cfg.adx_threshold;
+      if (cfg.breakout_buffer_ticks) document.getElementById('cfg-buffer').value = cfg.breakout_buffer_ticks;
+      if (cfg.trailing_stop_atr_mult) document.getElementById('cfg-atr-mult').value = cfg.trailing_stop_atr_mult;
+      if (cfg.trailing_sl_enabled !== undefined) document.getElementById('cfg-trailing-sl').checked = cfg.trailing_sl_enabled;
+      configInitialized = true;
+    }
+
+    async function saveConfig() {
+      const payload = {};
+      const tf = document.getElementById('cfg-timeframe').value;
+      const risk = parseFloat(document.getElementById('cfg-risk').value);
+      const lev = parseInt(document.getElementById('cfg-leverage').value);
+      const maxdd = parseFloat(document.getElementById('cfg-maxdd').value);
+      const ttl = parseInt(document.getElementById('cfg-ttl').value);
+      const adx = parseFloat(document.getElementById('cfg-adx-threshold').value);
+      const buffer = parseFloat(document.getElementById('cfg-buffer').value);
+      const atrMult = parseFloat(document.getElementById('cfg-atr-mult').value);
+      const trailing = document.getElementById('cfg-trailing-sl').checked;
+
+      if (tf) payload.timeframe = tf;
+      if (!isNaN(risk)) payload.risk_pct = risk;
+      if (!isNaN(lev)) payload.leverage = lev;
+      if (!isNaN(maxdd)) payload.max_drawdown_pct = maxdd;
+      if (!isNaN(ttl)) payload.max_pending_bars = ttl;
+      if (!isNaN(adx)) payload.min_adx_threshold = adx;
+      if (!isNaN(buffer)) payload.breakout_entry_buffer = buffer;
+      if (!isNaN(atrMult)) payload.trailing_stop_atr_mult = atrMult;
+      payload.trailing_sl_enabled = trailing;
+
+      try {
+        const res = await fetch(getApiUrl('/api/config'), {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(payload)
+        });
+        if (res.status === 401) {
+          await handleAuthError(res);
+          return;
+        }
+        const data = await res.json();
+        alert(data.message);
+        closeConfigModal();
+      } catch (err) {
+        alert(`Failed to apply config: ${err}`);
+      }
+    }
+
+    // Initialize on page load
+    window.addEventListener('DOMContentLoaded', () => {
+      updateAuthBadge();
+      updateBackendBadge();
+      if ((window.location.hostname.endsWith('.vercel.app') || window.location.hostname.endsWith('.now.sh')) && !localStorage.getItem('delta_bot_backend_url')) {
+        openBackendModal();
+      }
+      initWebSocket();
+    });
+  </script>
+</body>
+</html>

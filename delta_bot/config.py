@@ -1,0 +1,318 @@
+"""
+delta_bot.config
+~~~~~~~~~~~~~~~~
+
+Production-grade typed configuration using Pydantic Settings.
+Enforces credential masking, environment validation, and base URL normalization.
+"""
+
+from enum import Enum
+from typing import Any
+from urllib.parse import urlparse
+
+from pydantic import AliasChoices, Field, SecretStr, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class DeltaEnvironment(str, Enum):
+    """Officially supported Delta Exchange environment endpoints."""
+
+    INDIA = "https://api.india.delta.exchange"
+    GLOBAL = "https://api.delta.exchange"
+    TESTNET = "https://testnet-api.delta.exchange"
+
+
+class DeltaWebSocketEnvironment(str, Enum):
+    """Officially supported Delta Exchange WebSocket endpoints."""
+
+    INDIA = "wss://socket.india.delta.exchange"
+    GLOBAL = "wss://socket.delta.exchange"
+
+
+class BotConfig(BaseSettings):
+    """
+    Centralized configuration engine reading from environment variables or .env file.
+    Protects private keys via Pydantic SecretStr and explicit redaction routines.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
+        populate_by_name=True,
+    )
+
+    # API Credentials (Masked automatically by SecretStr)
+    delta_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("DELTA_API_KEY", "delta_api_key"),
+        description="Delta Exchange API Key",
+    )
+    delta_api_secret: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("DELTA_API_SECRET", "delta_api_secret"),
+        description="Delta Exchange API Secret",
+    )
+
+    # Base URL configuration (Supports India, Global, and Testnet)
+    delta_base_url: str = Field(
+        default=DeltaEnvironment.GLOBAL.value,
+        validation_alias=AliasChoices("DELTA_BASE_URL", "delta_base_url"),
+        description="Delta Exchange base API URL",
+    )
+
+    # WebSocket URL configuration (Supports India and Global)
+    delta_ws_url: str = Field(
+        default=DeltaWebSocketEnvironment.GLOBAL.value,
+        validation_alias=AliasChoices("DELTA_WS_URL", "delta_ws_url"),
+        description="Delta Exchange WebSocket API URL",
+    )
+    ws_heartbeat_interval_sec: float = Field(
+        default=20.0,
+        validation_alias=AliasChoices("WS_HEARTBEAT_INTERVAL_SEC", "ws_heartbeat_interval_sec"),
+        ge=5.0,
+        le=60.0,
+        description="WebSocket ping heartbeat frequency in seconds",
+    )
+    ws_reconnect_max_attempts: int = Field(
+        default=0,
+        validation_alias=AliasChoices("WS_RECONNECT_MAX_ATTEMPTS", "ws_reconnect_max_attempts"),
+        ge=0,
+        description="Max reconnection attempts (0 for infinite/persistent)",
+    )
+    bar_cache_capacity: int = Field(
+        default=500,
+        validation_alias=AliasChoices("BAR_CACHE_CAPACITY", "bar_cache_capacity"),
+        ge=50,
+        le=5000,
+        description="RingBuffer capacity for closed candlestick bars",
+    )
+
+    # HTTP Client timeouts & reliability
+    request_timeout_sec: float = Field(
+        default=10.0,
+        validation_alias=AliasChoices("REQUEST_TIMEOUT_SEC", "request_timeout_sec"),
+        ge=0.5,
+        le=60.0,
+        description="Client request timeout in seconds",
+    )
+    max_retries: int = Field(
+        default=3,
+        validation_alias=AliasChoices("MAX_RETRIES", "max_retries"),
+        ge=0,
+        le=10,
+        description="Maximum retry attempts on transient network or server errors",
+    )
+    backoff_base_sec: float = Field(
+        default=0.5,
+        validation_alias=AliasChoices("BACKOFF_BASE_SEC", "backoff_base_sec"),
+        ge=0.05,
+        le=10.0,
+        description="Base multiplier for exponential backoff",
+    )
+    backoff_max_sec: float = Field(
+        default=8.0,
+        validation_alias=AliasChoices("BACKOFF_MAX_SEC", "backoff_max_sec"),
+        ge=0.5,
+        le=60.0,
+        description="Ceiling for exponential backoff delay",
+    )
+
+    # User Agent
+    user_agent: str = Field(
+        default="DeltaBot-QuantEngine/1.0.0 (Python 3.11+; AsyncIO; HighPerformance)",
+        validation_alias=AliasChoices("USER_AGENT", "user_agent"),
+        description="Custom User-Agent header sent to the exchange",
+    )
+
+    # Logging
+    log_level: str = Field(
+        default="INFO",
+        validation_alias=AliasChoices("LOG_LEVEL", "log_level"),
+        description="Standard library log level",
+    )
+
+    # Deployment & Orchestrator Configuration (Phase 6)
+    execution_mode: str = Field(
+        default="paper",
+        validation_alias=AliasChoices("EXECUTION_MODE", "execution_mode"),
+        description="Execution mode: 'paper' (dry_run simulator) or 'live' (real exchange)",
+    )
+    flatten_on_shutdown: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("FLATTEN_ON_SHUTDOWN", "flatten_on_shutdown"),
+        description="Whether to market-close active positions when SIGINT/SIGTERM is received",
+    )
+    target_symbols_str: str = Field(
+        default="BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT",
+        validation_alias=AliasChoices("TARGET_SYMBOLS", "target_symbols"),
+        description="Comma-separated target assets (e.g. BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT)",
+    )
+    timeframe: str = Field(
+        default="1m",
+        validation_alias=AliasChoices("TIMEFRAME", "timeframe"),
+        description="Candle resolution timeframe (e.g. 1m, 5m, 15m)",
+    )
+    default_leverage: int = Field(
+        default=5,
+        validation_alias=AliasChoices("DEFAULT_LEVERAGE", "default_leverage"),
+        ge=1,
+        le=100,
+        description="Default leverage tier",
+    )
+    default_risk_pct: float = Field(
+        default=1.0,
+        validation_alias=AliasChoices("DEFAULT_RISK_PCT", "default_risk_pct"),
+        ge=0.1,
+        le=10.0,
+        description="Account equity percentage at risk per breakout trade",
+    )
+    status_interval_sec: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices("STATUS_INTERVAL_SEC", "status_interval_sec"),
+        ge=5.0,
+        le=600.0,
+        description="Terminal heartbeat telemetry interval in seconds",
+    )
+    breakout_entry_buffer: float = Field(
+        default=1.0,
+        validation_alias=AliasChoices("BREAKOUT_ENTRY_BUFFER", "breakout_entry_buffer"),
+        ge=0.0,
+        le=50.0,
+        description="Entry price buffer in tick size increments",
+    )
+    min_adx_threshold: float = Field(
+        default=20.0,
+        validation_alias=AliasChoices("MIN_ADX_THRESHOLD", "min_adx_threshold"),
+        ge=5.0,
+        le=60.0,
+        description="Minimum ADX threshold for trend strength filter",
+    )
+    max_drawdown_pct: float = Field(
+        default=5.0,
+        validation_alias=AliasChoices("MAX_DRAWDOWN_PCT", "max_drawdown_pct"),
+        ge=0.5,
+        le=50.0,
+        description="Circuit breaker daily maximum account drawdown percentage",
+    )
+    trailing_atr_multiplier: float = Field(
+        default=2.0,
+        validation_alias=AliasChoices("TRAILING_ATR_MULTIPLIER", "trailing_atr_multiplier"),
+        ge=0.5,
+        le=10.0,
+        description="ATR multiplier for dynamic trailing stop ratchet",
+    )
+    order_ttl_bars: int = Field(
+        default=3,
+        validation_alias=AliasChoices("ORDER_TTL_BARS", "order_ttl_bars"),
+        ge=1,
+        le=20,
+        description="Candle bar TTL before un-triggered breakout order invalidation",
+    )
+
+    # Dashboard & Web Control API Authentication (Phase 8)
+    dashboard_auth_token: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("DASHBOARD_AUTH_TOKEN", "dashboard_auth_token"),
+        description="Optional shared secret token protecting Dashboard control endpoints and WebSocket",
+    )
+
+    @property
+    def target_symbols(self) -> list[str]:
+        """Parsed list of target contract symbols."""
+        return [s.strip().upper() for s in self.target_symbols_str.split(",") if s.strip()]
+
+    @field_validator("delta_base_url", mode="before")
+    @classmethod
+    def normalize_base_url(cls, v: Any) -> str:
+        """Strips whitespace, removes trailing slashes, and verifies scheme."""
+        if not isinstance(v, str):
+            raise ValueError(f"Invalid base URL type: {type(v).__name__}")
+        cleaned = v.strip().rstrip("/")
+        parsed = urlparse(cleaned)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Invalid URL scheme '{parsed.scheme}' in base URL: {cleaned}")
+        if not parsed.netloc:
+            raise ValueError(f"Missing host netloc in base URL: {cleaned}")
+        return cleaned
+
+    @field_validator("delta_ws_url", mode="before")
+    @classmethod
+    def normalize_ws_url(cls, v: Any) -> str:
+        """Strips whitespace, removes trailing slashes, and verifies WebSocket scheme."""
+        if not isinstance(v, str):
+            raise ValueError(f"Invalid WebSocket URL type: {type(v).__name__}")
+        cleaned = v.strip().rstrip("/")
+        parsed = urlparse(cleaned)
+        if parsed.scheme not in ("ws", "wss"):
+            raise ValueError(f"Invalid WebSocket scheme '{parsed.scheme}' in URL: {cleaned}")
+        if not parsed.netloc:
+            raise ValueError(f"Missing host netloc in WebSocket URL: {cleaned}")
+        return cleaned
+
+    @property
+    def api_key_str(self) -> str:
+        """Retrieves raw unmasked API key for HMAC signing."""
+        return self.delta_api_key.get_secret_value()
+
+    @property
+    def api_secret_str(self) -> str:
+        """Retrieves raw unmasked API secret for HMAC signing."""
+        return self.delta_api_secret.get_secret_value()
+
+    @property
+    def dashboard_auth_token_str(self) -> str | None:
+        """Retrieves raw unmasked dashboard token if configured and non-empty."""
+        if self.dashboard_auth_token is None:
+            return None
+        val = self.dashboard_auth_token.get_secret_value().strip()
+        return val if val else None
+
+    def has_valid_credentials(self) -> bool:
+        """Determines if credentials have been populated with non-dummy values."""
+        key = self.api_key_str.strip()
+        secret = self.api_secret_str.strip()
+        dummy_markers = ("your_api_key", "dummy", "placeholder")
+        if not key or not secret:
+            return False
+        for marker in dummy_markers:
+            if marker in key.lower() or marker in secret.lower():
+                return False
+        return True
+
+    def safe_summary(self) -> dict[str, Any]:
+        """Provides a sanitized dictionary view suitable for structured logging."""
+        raw_key = self.api_key_str
+        masked_key = (
+            f"{raw_key[:4]}...{raw_key[-4:]}" if len(raw_key) >= 10 else ("********" if raw_key else "<not set>")
+        )
+        return {
+            "delta_base_url": self.delta_base_url,
+            "delta_ws_url": self.delta_ws_url,
+            "delta_api_key": masked_key,
+            "delta_api_secret": "********" if self.api_secret_str else "<not set>",
+            "request_timeout_sec": self.request_timeout_sec,
+            "ws_heartbeat_interval_sec": self.ws_heartbeat_interval_sec,
+            "bar_cache_capacity": self.bar_cache_capacity,
+            "max_retries": self.max_retries,
+            "backoff_base_sec": self.backoff_base_sec,
+            "backoff_max_sec": self.backoff_max_sec,
+            "user_agent": self.user_agent,
+            "log_level": self.log_level,
+            "dashboard_auth_token": "********" if self.dashboard_auth_token_str else "<not set>",
+        }
+
+    def __repr__(self) -> str:
+        summary = self.safe_summary()
+        items = [f"{k}={v!r}" for k, v in summary.items()]
+        return f"BotConfig({', '.join(items)})"
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
+
+def get_config(**overrides: Any) -> BotConfig:
+    """Helper function to obtain a configured BotConfig instance with optional overrides."""
+    return BotConfig(**overrides)
+
