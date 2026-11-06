@@ -56,7 +56,7 @@ class TenantConfig(BaseModel):
     tenant_id: str
     user_id: str | None = None
     name: str
-    mode: str = "paper"  # "paper" or "live"
+    mode: str = "live"  # Exclusively "live" for real trading
     initial_balance: float = 10000.0
     delta_api_key: str = ""
     delta_api_secret: str = ""
@@ -132,7 +132,7 @@ class TenantInstance:
         )
 
         # Simulator or Live Execution Manager
-        if self.mode == ExecutionMode.LIVE:
+        if self.mode == ExecutionMode.LIVE and config.delta_api_key and config.delta_api_secret:
             self.paper_simulator = None
             exec_cfg = ExecutionConfig(leverage=config.leverage)
             self.execution_manager: ExecutionManager | None = ExecutionManager(
@@ -251,6 +251,35 @@ class TenantInstance:
             self.config.mode = "paper"
             logger.info("[TENANT %s] Switched to PAPER simulation mode", self.config.tenant_id)
         return self.mode
+
+    def reload_credentials(self) -> None:
+        """Re-initializes REST client and ExecutionManager when user API keys change."""
+        self.bot_config = BotConfig(
+            delta_api_key=self.config.delta_api_key,
+            delta_api_secret=self.config.delta_api_secret,
+            delta_base_url=self.config.delta_base_url,
+            delta_ws_url=self.config.delta_ws_url,
+            execution_mode="live",
+            default_leverage=self.config.leverage,
+            default_risk_pct=self.config.risk_pct,
+            timeframe=self.config.timeframe,
+            target_symbols_str=",".join(self.config.symbols),
+        )
+        self.rest_client = DeltaRestClient(config=self.bot_config)
+        self.state_manager = TradingStateManager(client=self.rest_client)
+        if self.config.delta_api_key and self.config.delta_api_secret:
+            exec_cfg = ExecutionConfig(leverage=self.config.leverage)
+            self.execution_manager = ExecutionManager(
+                client=self.rest_client,
+                config=exec_cfg,
+                state_manager=self.state_manager,
+            )
+            self.mode = ExecutionMode.LIVE
+            self.config.mode = "live"
+            self.paper_simulator = None
+            logger.info("[TENANT %s] Live execution manager activated with user API credentials", self.config.tenant_id)
+        else:
+            self.execution_manager = None
 
     async def emergency_flatten(self) -> dict[str, Any]:
         """Emergency market-closes all active positions and cancels resting orders for this tenant."""
@@ -400,7 +429,7 @@ class TenantManager:
             tenant_id=slug,
             user_id=user_id,
             name=f"{name_part}'s Trading Desk",
-            mode="paper",
+            mode="live",
             initial_balance=10000.0,
             leverage=5,
             risk_pct=1.0,
@@ -477,6 +506,13 @@ class TenantManager:
             tenant.config.risk_pct = float(updates["risk_pct"])
         if "mode" in updates:
             tenant.set_execution_mode(updates["mode"])
+        if (
+            "delta_api_key" in updates
+            or "delta_api_secret" in updates
+            or "delta_base_url" in updates
+            or "delta_ws_url" in updates
+        ):
+            tenant.reload_credentials()
 
         self.save_to_disk()
         self.sync_tenant_to_supabase(tenant)

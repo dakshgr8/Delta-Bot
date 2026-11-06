@@ -135,9 +135,9 @@ class BotConfig(BaseSettings):
 
     # Deployment & Orchestrator Configuration (Phase 6)
     execution_mode: str = Field(
-        default="paper",
+        default="live",
         validation_alias=AliasChoices("EXECUTION_MODE", "execution_mode"),
-        description="Execution mode: 'paper' (dry_run simulator) or 'live' (real exchange)",
+        description="Execution mode: 'live' (real exchange)",
     )
     flatten_on_shutdown: bool = Field(
         default=False,

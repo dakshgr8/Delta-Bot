@@ -138,7 +138,7 @@ class TenantCreateRequest(BaseModel):
 
     tenant_id: str | None = Field(default=None, description="Custom unique tenant slug/ID")
     name: str = Field(description="Display name for the tenant (e.g. Alpha Desk)")
-    mode: str = Field(default="paper", description="Execution mode: 'paper' or 'live'")
+    mode: str = Field(default="live", description="Execution mode: 'live'")
     initial_balance: float = Field(default=10000.0, ge=100.0, description="Virtual starting collateral in USD")
     delta_api_key: str = Field(default="", description="Delta Exchange API Key")
     delta_api_secret: str = Field(default="", description="Delta Exchange API Secret")
