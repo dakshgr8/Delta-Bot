@@ -949,6 +949,11 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 "collateral": packet["collateral"],
                 "tenants": packet.get("tenants", []),
                 "current_tenant": packet.get("current_tenant", {}),
+                "tickers": packet.get("tickers", {}),
+                "indicators": packet.get("indicators", {}),
+                "positions": packet.get("positions", []),
+                "orders": packet.get("orders", []),
+                "logs": packet.get("logs", []),
                 "auth_user": {
                     "user_id": auth.user_id,
                     "email": auth.email,

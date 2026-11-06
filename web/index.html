@@ -199,6 +199,34 @@
   <!-- MAIN DASHBOARD CONTENT -->
   <main class="flex-1 max-w-7xl w-full mx-auto px-6 py-6 space-y-6">
 
+    <!-- GUEST ONBOARDING & WELCOME BANNER (Shown when unauthenticated) -->
+    <div id="guest-welcome-banner" class="hidden bg-gradient-to-r from-brand-950/80 via-slate-900 to-brand-950/80 border border-brand-700/50 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 shadow-lg">
+      <div class="flex items-center space-x-3">
+        <div class="h-10 w-10 rounded-lg bg-brand-600/30 border border-brand-500/40 flex items-center justify-center text-xl shrink-0">
+          ⚡
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h3 class="font-bold text-sm text-brand-300">Welcome to Delta-Bot Quantitative Terminal</h3>
+            <span class="text-[10px] px-2 py-0.5 rounded bg-brand-900/60 text-brand-200 border border-brand-800 font-mono">GUEST / PUBLIC VIEW</span>
+          </div>
+          <p class="text-xs text-slate-300 mt-0.5">
+            You are viewing live market feeds. <strong class="text-white">Sign In or Register</strong> to launch your private multi-tenant trading desk, deposit margin, and enter your Delta Exchange API keys for real trading.
+          </p>
+        </div>
+      </div>
+      <div class="flex items-center space-x-2">
+        <button onclick="openAuthModal('signin')" class="px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-semibold text-xs transition cursor-pointer shadow-md shadow-brand-950 flex items-center gap-1.5">
+          <span>👤</span>
+          <span>Sign In / Register</span>
+        </button>
+        <button onclick="demoTraderLogin()" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-brand-300 border border-brand-800/60 text-xs font-semibold transition cursor-pointer flex items-center gap-1">
+          <span>🚀</span>
+          <span>Demo Trader 1-Click</span>
+        </button>
+      </div>
+    </div>
+
     <!-- ASSET TELEMETRY & SIGNAL CARDS (4 TARGET ASSETS) -->
     <section>
       <div class="flex items-center justify-between mb-3">
@@ -774,8 +802,10 @@
       const userEmailEl = document.getElementById('auth-user-email');
       const dropdownEmailEl = document.getElementById('user-dropdown-email');
       const dropdownTenantEl = document.getElementById('user-dropdown-tenant');
+      const guestBanner = document.getElementById('guest-welcome-banner');
 
       if (sbToken && currentUser) {
+        if (guestBanner) guestBanner.classList.add('hidden');
         if (loginPrompt) loginPrompt.classList.add('hidden');
         if (userWrapper) userWrapper.classList.remove('hidden');
         const email = currentUser.email || 'Trader';
@@ -783,6 +813,7 @@
         if (dropdownEmailEl) dropdownEmailEl.textContent = email;
         if (dropdownTenantEl) dropdownTenantEl.textContent = currentTenantId;
       } else if (masterToken) {
+        if (guestBanner) guestBanner.classList.add('hidden');
         if (loginPrompt) {
           loginPrompt.classList.remove('hidden');
           const txt = document.getElementById('auth-status-text');
@@ -790,6 +821,7 @@
         }
         if (userWrapper) userWrapper.classList.add('hidden');
       } else {
+        if (guestBanner) guestBanner.classList.remove('hidden');
         if (loginPrompt) {
           loginPrompt.classList.remove('hidden');
           const txt = document.getElementById('auth-status-text');
@@ -1214,8 +1246,48 @@
     }
 
     // -------------------------------------------------------------------------
-    // 2. Real-Time WebSocket Connection & Lifecycle
+    // 2. Real-Time WebSocket Connection, REST Live Sync & Lifecycle
     // -------------------------------------------------------------------------
+    let restPollingTimer = null;
+
+    async function fetchLatestStatus() {
+      try {
+        const res = await fetch(getApiUrl('/api/status'), {
+          headers: getAuthHeaders(),
+          mode: 'cors'
+        });
+        if (res.ok) {
+          const data = await res.json();
+          updateDashboard(data);
+          if (!ws || ws.readyState !== WebSocket.OPEN) {
+            const ind = document.getElementById('ws-latency-indicator');
+            const dot = document.getElementById('ws-dot');
+            if (ind && dot) {
+              ind.textContent = 'REST Live Sync (2s)';
+              ind.className = 'text-xs text-cyan-400 mono';
+              dot.className = 'h-2 w-2 rounded-full bg-cyan-500';
+            }
+          }
+        }
+      } catch (err) {
+        console.debug('REST status fetch error:', err);
+      }
+    }
+
+    function startRestPolling() {
+      if (!restPollingTimer) {
+        fetchLatestStatus();
+        restPollingTimer = setInterval(fetchLatestStatus, 2500);
+      }
+    }
+
+    function stopRestPolling() {
+      if (restPollingTimer) {
+        clearInterval(restPollingTimer);
+        restPollingTimer = null;
+      }
+    }
+
     function initWebSocket() {
       const wsUrl = getWsUrl();
 
@@ -1229,10 +1301,14 @@
       ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
+        stopRestPolling();
         document.getElementById('ws-latency-indicator').textContent = 'WebSocket: Connected (500ms)';
         document.getElementById('ws-latency-indicator').className = 'text-xs text-emerald-400 mono';
         document.getElementById('ws-dot').className = 'h-2 w-2 rounded-full bg-emerald-500';
-        if (reconnectTimer) clearInterval(reconnectTimer);
+        if (reconnectTimer) {
+          clearInterval(reconnectTimer);
+          reconnectTimer = null;
+        }
 
         // Start periodic ping measurement
         if (pingIntervalTimer) clearInterval(pingIntervalTimer);
@@ -1260,23 +1336,26 @@
 
       ws.onclose = (event) => {
         if (pingIntervalTimer) clearInterval(pingIntervalTimer);
-        if (event.code === 1008) {
-          document.getElementById('ws-latency-indicator').textContent = 'WebSocket: Auth Rejected (1008)';
-          document.getElementById('ws-latency-indicator').className = 'text-xs text-rose-400 mono';
-          document.getElementById('ws-dot').className = 'h-2 w-2 rounded-full bg-rose-500';
-          openAuthModal();
+        startRestPolling();
+
+        const token = getAuthToken();
+        if (event.code === 1008 || (!token && event.code === 1006)) {
+          document.getElementById('ws-latency-indicator').textContent = 'Live Feed (Guest Mode)';
+          document.getElementById('ws-latency-indicator').className = 'text-xs text-brand-300 mono';
+          document.getElementById('ws-dot').className = 'h-2 w-2 rounded-full bg-cyan-400';
           return;
         }
-        document.getElementById('ws-latency-indicator').textContent = 'WebSocket: Disconnected (Retrying...)';
-        document.getElementById('ws-latency-indicator').className = 'text-xs text-rose-400 mono';
-        document.getElementById('ws-dot').className = 'h-2 w-2 rounded-full bg-rose-500';
+        document.getElementById('ws-latency-indicator').textContent = 'WebSocket: Reconnecting...';
+        document.getElementById('ws-latency-indicator').className = 'text-xs text-amber-400 mono';
+        document.getElementById('ws-dot').className = 'h-2 w-2 rounded-full bg-amber-400 animate-pulse';
         if (!reconnectTimer) {
-          reconnectTimer = setInterval(initWebSocket, 3000);
+          reconnectTimer = setInterval(initWebSocket, 4000);
         }
       };
 
       ws.onerror = (err) => {
-        console.error('WebSocket encountered error:', err);
+        console.debug('WebSocket notification:', err);
+        startRestPolling();
       };
     }
 
@@ -1284,17 +1363,23 @@
     // 3. UI Update Engine (State Synchronization)
     // -------------------------------------------------------------------------
     function updateDashboard(data) {
+      if (!data) return;
+      const status = data.status || {};
+      const col = data.collateral || {};
+
       // 1. Status Bar & Execution Mode
-      isRunning = data.status.is_running;
-      currentMode = data.status.mode;
+      isRunning = Boolean(status.is_running);
+      currentMode = status.mode || 'LIVE';
       const btn = document.getElementById('btn-toggle-trading');
       const btnText = document.getElementById('btn-trading-text');
-      if (isRunning) {
-        btn.className = 'px-3 py-1.5 rounded-md font-semibold text-xs tracking-wider uppercase transition flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow cursor-pointer';
-        btnText.textContent = 'RUNNING';
-      } else {
-        btn.className = 'px-3 py-1.5 rounded-md font-semibold text-xs tracking-wider uppercase transition flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white shadow cursor-pointer';
-        btnText.textContent = 'PAUSED';
+      if (btn && btnText) {
+        if (isRunning) {
+          btn.className = 'px-3 py-1.5 rounded-md font-semibold text-xs tracking-wider uppercase transition flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow cursor-pointer';
+          btnText.textContent = 'RUNNING';
+        } else {
+          btn.className = 'px-3 py-1.5 rounded-md font-semibold text-xs tracking-wider uppercase transition flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white shadow cursor-pointer';
+          btnText.textContent = 'PAUSED';
+        }
       }
 
       // Check if current tenant has configured API keys
@@ -1316,34 +1401,47 @@
       }
 
       // Telemetry sub-bar
-      document.getElementById('top-uptime').textContent = data.status.uptime_human || '--';
-      document.getElementById('top-mem').textContent = `${data.status.memory_mb || 0} MB`;
-      document.getElementById('top-timeframe').textContent = data.status.timeframe || '1m';
+      const upHuman = document.getElementById('top-uptime');
+      if (upHuman) upHuman.textContent = status.uptime_human || '--';
+      const memElem = document.getElementById('top-mem');
+      if (memElem) memElem.textContent = `${status.memory_mb || 0} MB`;
+      const tfElem = document.getElementById('top-timeframe');
+      if (tfElem) tfElem.textContent = status.timeframe || '1m';
       
       const cbElem = document.getElementById('top-cb-status');
-      if (data.status.circuit_breaker_tripped) {
-        cbElem.textContent = 'TRIPPED (HALTED)';
-        cbElem.className = 'text-rose-400 font-bold';
-      } else {
-        cbElem.textContent = 'NORMAL';
-        cbElem.className = 'text-emerald-400 font-semibold';
+      if (cbElem) {
+        if (status.circuit_breaker_tripped) {
+          cbElem.textContent = 'TRIPPED (HALTED)';
+          cbElem.className = 'text-rose-400 font-bold';
+        } else {
+          cbElem.textContent = 'NORMAL';
+          cbElem.className = 'text-emerald-400 font-semibold';
+        }
       }
 
       // Collateral & PnL
-      document.getElementById('top-equity').textContent = `$${data.collateral.equity.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+      const eqVal = Number(col.equity ?? col.balance ?? 10000);
+      const eqElem = document.getElementById('top-equity');
+      if (eqElem) eqElem.textContent = `$${eqVal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
       
       const upnlElem = document.getElementById('top-upnl');
-      const upnl = data.collateral.unrealized_pnl;
-      upnlElem.textContent = `${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}`;
-      upnlElem.className = upnl >= 0 ? 'font-semibold text-emerald-400 text-sm' : 'font-semibold text-rose-400 text-sm';
+      const upnl = Number(col.unrealized_pnl ?? 0);
+      if (upnlElem) {
+        upnlElem.textContent = `${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}`;
+        upnlElem.className = upnl >= 0 ? 'font-semibold text-emerald-400 text-sm' : 'font-semibold text-rose-400 text-sm';
+      }
 
       const rpnlElem = document.getElementById('top-rpnl');
-      const rpnl = data.collateral.realized_pnl;
-      rpnlElem.textContent = `${rpnl >= 0 ? '+' : ''}$${rpnl.toFixed(2)}`;
-      rpnlElem.className = rpnl >= 0 ? 'font-semibold text-emerald-400 text-sm' : 'font-semibold text-rose-400 text-sm';
+      const rpnl = Number(col.realized_pnl ?? 0);
+      if (rpnlElem) {
+        rpnlElem.textContent = `${rpnl >= 0 ? '+' : ''}$${rpnl.toFixed(2)}`;
+        rpnlElem.className = rpnl >= 0 ? 'font-semibold text-emerald-400 text-sm' : 'font-semibold text-rose-400 text-sm';
+      }
 
-      document.getElementById('top-winrate').textContent = `${data.collateral.win_rate_pct.toFixed(1)}% (${data.collateral.winning_trades}/${data.collateral.total_trades})`;
-      document.getElementById('top-maxdd').textContent = `${data.collateral.max_drawdown_pct.toFixed(2)}%`;
+      const wrElem = document.getElementById('top-winrate');
+      if (wrElem) wrElem.textContent = `${Number(col.win_rate_pct ?? 0).toFixed(1)}% (${col.winning_trades || 0}/${col.total_trades || 0})`;
+      const ddElem = document.getElementById('top-maxdd');
+      if (ddElem) ddElem.textContent = `${Number(col.max_drawdown_pct ?? 0).toFixed(2)}%`;
 
       // 2. Tenants Sync & Dropdown Update
       if (data.tenants && Array.isArray(data.tenants)) {
@@ -1356,18 +1454,20 @@
       renderTenantDropdown(knownTenants, currentTenantId);
 
       // 3. Asset Cards Grid
-      renderAssetCards(data.tickers, data.indicators);
+      renderAssetCards(data.tickers || {}, data.indicators || {});
 
       // 4. Tables
-      renderPositionsTable(data.positions);
-      renderOrdersTable(data.orders);
+      renderPositionsTable(data.positions || []);
+      renderOrdersTable(data.orders || []);
 
       // 5. Logs Stream
-      renderConsoleLogs(data.logs);
+      if (data.logs) {
+        renderConsoleLogs(data.logs);
+      }
 
       // Pre-fill config modal if open
-      if (data.status.config) {
-        populateConfigModal(data.status.config);
+      if (status.config) {
+        populateConfigModal(status.config);
       }
     }
 
@@ -1765,12 +1865,29 @@
     // -------------------------------------------------------------------------
     function renderAssetCards(tickers, indicators) {
       const container = document.getElementById('asset-cards-grid');
+      if (!container) return;
       container.replaceChildren();
 
-      const symbols = Object.keys(tickers);
+      const safeTickers = tickers || {};
+      const safeIndicators = indicators || {};
+      let symbols = Object.keys(safeTickers);
+
+      // If no live tickers streamed yet, display placeholder cards for primary assets
+      if (symbols.length === 0) {
+        symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+      }
+
       symbols.forEach(sym => {
-        const t = tickers[sym];
-        const ind = indicators[sym] || {};
+        const t = safeTickers[sym] || {
+          trading_enabled: true,
+          mark_price: 0,
+          bid_price: 0,
+          ask_price: 0,
+          spread_bps: 0,
+          change_24h_pct: 0,
+          change_24h_usd: 0
+        };
+        const ind = safeIndicators[sym] || {};
 
         const card = document.createElement('div');
         card.className = 'bg-slate-900 rounded-xl border border-slate-800 p-4 shadow-sm hover:border-slate-700 transition flex flex-col justify-between space-y-3';
@@ -1807,12 +1924,15 @@
         
         const markElem = document.createElement('div');
         markElem.className = 'text-lg font-bold mono text-white';
-        markElem.textContent = t.mark_price > 0 ? `$${t.mark_price.toLocaleString('en-US', {minimumFractionDigits: 2})}` : '--';
+        const markVal = Number(t.mark_price || 0);
+        markElem.textContent = markVal > 0 ? `$${markVal.toLocaleString('en-US', {minimumFractionDigits: 2})}` : '--';
 
         const chgElem = document.createElement('div');
-        const isPos = t.change_24h_pct >= 0;
+        const chgPct = Number(t.change_24h_pct || 0);
+        const chgUsd = Number(t.change_24h_usd || 0);
+        const isPos = chgPct >= 0;
         chgElem.className = `text-xs font-semibold mono ${isPos ? 'text-emerald-400' : 'text-rose-400'}`;
-        chgElem.textContent = `${isPos ? '+' : ''}${t.change_24h_pct.toFixed(2)}% (${isPos ? '+' : ''}$${t.change_24h_usd.toFixed(2)})`;
+        chgElem.textContent = `${isPos ? '+' : ''}${chgPct.toFixed(2)}% (${isPos ? '+' : ''}$${chgUsd.toFixed(2)})`;
 
         priceRow.appendChild(markElem);
         priceRow.appendChild(chgElem);
@@ -1821,17 +1941,20 @@
         // Top-of-Book and Spread
         const bookRow = document.createElement('div');
         bookRow.className = 'flex items-center justify-between text-[11px] mono text-slate-400 bg-slate-950/60 p-2 rounded border border-slate-800/60';
-        bookRow.innerHTML = `<span>Bid: <span class="text-slate-200">$${t.bid_price.toFixed(2)}</span></span><span>Ask: <span class="text-slate-200">$${t.ask_price.toFixed(2)}</span></span><span>Spread: <span class="text-cyan-400">${t.spread_bps.toFixed(1)} bps</span></span>`;
+        const bidVal = Number(t.bid_price || 0);
+        const askVal = Number(t.ask_price || 0);
+        const spreadVal = Number(t.spread_bps || 0);
+        bookRow.innerHTML = `<span>Bid: <span class="text-slate-200">${bidVal > 0 ? '$' + bidVal.toFixed(2) : '--'}</span></span><span>Ask: <span class="text-slate-200">${askVal > 0 ? '$' + askVal.toFixed(2) : '--'}</span></span><span>Spread: <span class="text-cyan-400">${spreadVal.toFixed(1)} bps</span></span>`;
         card.appendChild(bookRow);
 
         // Session Indicators (EMA 20, VWAP, PDH, PDL)
         const indGrid = document.createElement('div');
         indGrid.className = 'grid grid-cols-2 gap-1.5 text-[11px] mono text-slate-400';
         
-        const emaVal = ind.ema_20 ? `$${ind.ema_20.toFixed(2)}` : '--';
-        const vwapVal = ind.session_vwap ? `$${ind.session_vwap.toFixed(2)}` : '--';
-        const pdhVal = ind.pdh ? `$${ind.pdh.toFixed(2)}` : '--';
-        const pdlVal = ind.pdl ? `$${ind.pdl.toFixed(2)}` : '--';
+        const emaVal = ind.ema_20 ? `$${Number(ind.ema_20).toFixed(2)}` : '--';
+        const vwapVal = ind.session_vwap ? `$${Number(ind.session_vwap).toFixed(2)}` : '--';
+        const pdhVal = ind.pdh ? `$${Number(ind.pdh).toFixed(2)}` : '--';
+        const pdlVal = ind.pdl ? `$${Number(ind.pdl).toFixed(2)}` : '--';
 
         indGrid.innerHTML = `
           <div class="flex justify-between"><span>EMA 20:</span><span class="text-slate-200">${emaVal}</span></div>
@@ -1845,7 +1968,7 @@
         const gaugeRow = document.createElement('div');
         gaugeRow.className = 'pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] mono';
 
-        const adxVal = ind.adx_14 !== null && ind.adx_14 !== undefined ? ind.adx_14.toFixed(1) : '--';
+        const adxVal = ind.adx_14 !== null && ind.adx_14 !== undefined ? Number(ind.adx_14).toFixed(1) : '--';
         const isBreakout = ind.adx_14 >= 20;
 
         const adxBadge = document.createElement('span');
@@ -1875,17 +1998,19 @@
       const tbody = document.getElementById('positions-table-body');
       const emptyMsg = document.getElementById('no-positions-msg');
       const countBadge = document.getElementById('positions-count-badge');
+      const safePositions = positions || [];
 
-      countBadge.textContent = positions.length;
+      if (countBadge) countBadge.textContent = safePositions.length;
+      if (!tbody) return;
       tbody.replaceChildren();
 
-      if (!positions || positions.length === 0) {
-        emptyMsg.classList.remove('hidden');
+      if (safePositions.length === 0) {
+        if (emptyMsg) emptyMsg.classList.remove('hidden');
         return;
       }
-      emptyMsg.classList.add('hidden');
+      if (emptyMsg) emptyMsg.classList.add('hidden');
 
-      positions.forEach(pos => {
+      safePositions.forEach(pos => {
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-slate-800/40 transition';
 
@@ -1902,18 +2027,19 @@
         tr.appendChild(sideTd);
 
         tr.appendChild(createTd(`${pos.size} lots (${pos.native_value})`));
-        tr.appendChild(createTd(`$${pos.entry_price.toFixed(2)}`));
-        tr.appendChild(createTd(`$${pos.mark_price.toFixed(2)}`));
+        tr.appendChild(createTd(`$${Number(pos.entry_price || 0).toFixed(2)}`));
+        tr.appendChild(createTd(`$${Number(pos.mark_price || 0).toFixed(2)}`));
 
         const pnlTd = document.createElement('td');
-        pnlTd.className = `px-3 py-2 font-bold ${pos.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
-        pnlTd.textContent = `${pos.unrealized_pnl >= 0 ? '+' : ''}$${pos.unrealized_pnl.toFixed(2)}`;
+        const upnl = Number(pos.unrealized_pnl || 0);
+        pnlTd.className = `px-3 py-2 font-bold ${upnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+        pnlTd.textContent = `${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}`;
         tr.appendChild(pnlTd);
 
-        tr.appendChild(createTd(pos.stop_loss_price ? `$${pos.stop_loss_price.toFixed(2)}` : '--', 'text-amber-400'));
-        tr.appendChild(createTd(pos.take_profit_price ? `$${pos.take_profit_price.toFixed(2)}` : '--', 'text-emerald-400'));
+        tr.appendChild(createTd(pos.stop_loss_price ? `$${Number(pos.stop_loss_price).toFixed(2)}` : '--', 'text-amber-400'));
+        tr.appendChild(createTd(pos.take_profit_price ? `$${Number(pos.take_profit_price).toFixed(2)}` : '--', 'text-emerald-400'));
 
-        const liqText = pos.liquidation_price ? `$${pos.liquidation_price.toFixed(2)} (${pos.liquidation_distance_pct}%)` : '--';
+        const liqText = pos.liquidation_price ? `$${Number(pos.liquidation_price).toFixed(2)} (${pos.liquidation_distance_pct}%)` : '--';
         tr.appendChild(createTd(liqText, 'text-rose-400/90'));
 
         const actionTd = document.createElement('td');
@@ -1936,18 +2062,56 @@
       const tbody = document.getElementById('orders-table-body');
       const emptyMsg = document.getElementById('no-orders-msg');
       const countBadge = document.getElementById('orders-count-badge');
+      const safeOrders = orders || [];
 
-      countBadge.textContent = orders.length;
+      if (countBadge) countBadge.textContent = safeOrders.length;
+      if (!tbody) return;
       tbody.replaceChildren();
 
-      if (!orders || orders.length === 0) {
-        emptyMsg.classList.remove('hidden');
+      if (safeOrders.length === 0) {
+        if (emptyMsg) emptyMsg.classList.remove('hidden');
         return;
       }
-      emptyMsg.classList.add('hidden');
+      if (emptyMsg) emptyMsg.classList.add('hidden');
 
-      orders.forEach(o => {
+      safeOrders.forEach(o => {
         const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-800/40 transition';
+
+        tr.appendChild(createTd(`#${o.order_id}`, 'text-slate-400'));
+        tr.appendChild(createTd(o.symbol, 'font-bold text-white'));
+        
+        const sideTd = document.createElement('td');
+        sideTd.className = 'px-3 py-2';
+        const sideBadge = document.createElement('span');
+        sideBadge.className = o.side === 'BUY'
+          ? 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400'
+          : 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400';
+        sideBadge.textContent = o.side;
+        sideTd.appendChild(sideBadge);
+        tr.appendChild(sideTd);
+
+        tr.appendChild(createTd(`${o.size}`));
+        tr.appendChild(createTd(`$${Number(o.stop_price || 0).toFixed(2)}`, 'text-cyan-400 font-bold'));
+
+        const slTpText = `SL: ${o.bracket_stop_loss_price ? '$' + Number(o.bracket_stop_loss_price).toFixed(2) : '--'} | TP: ${o.bracket_take_profit_price ? '$' + Number(o.bracket_take_profit_price).toFixed(2) : '--'}`;
+        tr.appendChild(createTd(slTpText, 'text-slate-300'));
+
+        const ttlText = `${o.ttl_remaining || 0}/${o.ttl_bars || 3} bars left`;
+        tr.appendChild(createTd(ttlText, 'text-amber-400 font-semibold'));
+
+        const actionTd = document.createElement('td');
+        actionTd.className = 'px-3 py-2 text-right';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] border border-slate-700 transition cursor-pointer';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.onclick = () => cancelPendingOrder(o.order_id);
+        actionTd.appendChild(cancelBtn);
+        tr.appendChild(actionTd);
+
+        tbody.appendChild(tr);
+      });
+    }
         tr.className = 'hover:bg-slate-800/40 transition';
 
         tr.appendChild(createTd(`#${o.order_id}`, 'text-slate-400'));
@@ -2279,6 +2443,12 @@
       await checkSupabaseSession();
       updateAuthBadge();
       updateBackendBadge();
+
+      // Immediately fetch snapshot via REST so dashboard populates instantly
+      await fetchLatestStatus();
+      startRestPolling();
+
+      // Connect real-time WebSocket
       initWebSocket();
     });
   </script>
