@@ -218,6 +218,28 @@ class BotConfig(BaseSettings):
         description="Optional shared secret token protecting Dashboard control endpoints and WebSocket",
     )
 
+    # Supabase Multi-Tenant Auth & Storage Settings
+    supabase_url: str = Field(
+        default="https://clkkzwgpumbnbtvsxkmw.supabase.co",
+        validation_alias=AliasChoices("SUPABASE_URL", "supabase_url"),
+        description="Supabase Project API URL",
+    )
+    supabase_key: str = Field(
+        default="sb_publishable_rvcmboPnre20bT51oz82qQ_q3SvnIZY",
+        validation_alias=AliasChoices("SUPABASE_KEY", "supabase_key", "SUPABASE_ANON_KEY"),
+        description="Supabase Publishable / Anon Client Key",
+    )
+    supabase_secret_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("SUPABASE_SECRET_KEY", "supabase_secret_key", "SUPABASE_SERVICE_ROLE_KEY"),
+        description="Supabase Secret / Admin Key",
+    )
+    supabase_db_url: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("SUPABASE_DB_URL", "supabase_db_url"),
+        description="Supabase PostgreSQL Direct / Pooler Database URL",
+    )
+
     @property
     def target_symbols(self) -> list[str]:
         """Parsed list of target contract symbols."""
@@ -269,6 +291,16 @@ class BotConfig(BaseSettings):
         val = self.dashboard_auth_token.get_secret_value().strip()
         return val if val else None
 
+    @property
+    def supabase_secret_key_str(self) -> str:
+        """Retrieves raw unmasked Supabase Secret Key."""
+        return self.supabase_secret_key.get_secret_value()
+
+    @property
+    def supabase_db_url_str(self) -> str:
+        """Retrieves raw unmasked Supabase Database connection string."""
+        return self.supabase_db_url.get_secret_value()
+
     def has_valid_credentials(self) -> bool:
         """Determines if credentials have been populated with non-dummy values."""
         key = self.api_key_str.strip()
@@ -301,6 +333,8 @@ class BotConfig(BaseSettings):
             "user_agent": self.user_agent,
             "log_level": self.log_level,
             "dashboard_auth_token": "********" if self.dashboard_auth_token_str else "<not set>",
+            "supabase_url": self.supabase_url,
+            "supabase_key": f"{self.supabase_key[:8]}..." if self.supabase_key else "<not set>",
         }
 
     def __repr__(self) -> str:

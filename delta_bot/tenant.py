@@ -54,6 +54,7 @@ class TenantConfig(BaseModel):
     """Data specification and serialized configuration for an isolated tenant."""
 
     tenant_id: str
+    user_id: str | None = None
     name: str
     mode: str = "paper"  # "paper" or "live"
     initial_balance: float = 10000.0
@@ -309,6 +310,7 @@ class TenantInstance:
 
         return {
             "tenant_id": self.config.tenant_id,
+            "user_id": self.config.user_id,
             "name": self.config.name,
             "mode": self.mode.value.upper(),
             "is_running": self.is_running,
@@ -337,8 +339,12 @@ class TenantManager:
         self,
         storage_path: str = "data/tenants.json",
         default_instance: TenantInstance | None = None,
+        supabase_url: str | None = None,
+        supabase_secret_key: str | None = None,
     ) -> None:
         self.storage_path = storage_path
+        self.supabase_url = supabase_url
+        self.supabase_secret_key = supabase_secret_key
         self.tenants: dict[str, TenantInstance] = {}
         self.active_tenant_id: str = "default"
         if default_instance:
@@ -359,9 +365,74 @@ class TenantManager:
             return next(iter(self.tenants.values()))
         return None
 
+    def get_tenant_by_user_id(self, user_id: str) -> TenantInstance | None:
+        """Finds active tenant belonging to a Supabase user."""
+        if not user_id:
+            return None
+        clean_uid = str(user_id).strip()
+        for t in self.tenants.values():
+            if t.config.user_id == clean_uid:
+                return t
+        prefix = f"user-{clean_uid[:8]}"
+        for t_id, t in self.tenants.items():
+            if t_id == clean_uid or t_id == prefix:
+                t.config.user_id = clean_uid
+                return t
+        return None
+
+    def get_or_create_user_tenant(
+        self,
+        user_id: str,
+        email: str,
+        contract_specs: dict[str, ContractSpec] | None = None,
+    ) -> TenantInstance:
+        """Retrieves existing tenant for user or provisions a new isolated one."""
+        existing = self.get_tenant_by_user_id(user_id)
+        if existing:
+            return existing
+
+        name_part = email.split("@")[0].replace(".", " ").title() if email else "User Desk"
+        slug = f"user-{user_id[:8]}"
+        if slug in self.tenants:
+            slug = f"user-{user_id[:12]}"
+
+        cfg = TenantConfig(
+            tenant_id=slug,
+            user_id=user_id,
+            name=f"{name_part}'s Trading Desk",
+            mode="paper",
+            initial_balance=10000.0,
+            leverage=5,
+            risk_pct=1.0,
+            timeframe="1m",
+            max_drawdown_pct=4.0,
+            symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"],
+            is_active=True,
+        )
+        instance = TenantInstance(config=cfg, contract_specs=contract_specs or {})
+        self.tenants[slug] = instance
+        self.save_to_disk()
+        self.sync_tenant_to_supabase(instance)
+        logger.info("[USER TENANT PROVISIONED] Created isolated desk '%s' for user %s", slug, email)
+        return instance
+
     def list_tenants(self) -> list[dict[str, Any]]:
         """Returns a list of status summaries across all registered tenants."""
         return [t.get_summary() for t in self.tenants.values()]
+
+    def list_tenants_for_user(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        """Returns summaries filtered by user, or all if user_id is None (admin)."""
+        if user_id is None:
+            return [t.get_summary() for t in self.tenants.values()]
+
+        clean_uid = str(user_id).strip()
+        user_tenants = [t.get_summary() for t in self.tenants.values() if t.config.user_id == clean_uid]
+        if not user_tenants:
+            prefix = f"user-{clean_uid[:8]}"
+            user_tenants = [
+                t.get_summary() for t in self.tenants.values() if t.config.tenant_id in (clean_uid, prefix)
+            ]
+        return user_tenants
 
     def create_tenant(
         self,
@@ -378,6 +449,7 @@ class TenantManager:
         instance = TenantInstance(config=config, contract_specs=contract_specs)
         self.tenants[clean_id] = instance
         self.save_to_disk()
+        self.sync_tenant_to_supabase(instance)
         logger.info("[TENANT CREATED] Successfully initialized tenant '%s' (ID: %s)", config.name, clean_id)
         return instance
 
@@ -407,6 +479,7 @@ class TenantManager:
             tenant.set_execution_mode(updates["mode"])
 
         self.save_to_disk()
+        self.sync_tenant_to_supabase(tenant)
         logger.info("[TENANT UPDATED] Updated settings for tenant ID '%s'", tenant_id)
         return tenant
 
@@ -428,6 +501,7 @@ class TenantManager:
             self.active_tenant_id = "default"
 
         self.save_to_disk()
+        self.delete_tenant_from_supabase(clean_id)
         logger.info("[TENANT DELETED] Permanently removed tenant ID '%s'", clean_id)
         return True
 
@@ -456,6 +530,164 @@ class TenantManager:
         """Loads and bootstraps saved tenant instances from JSON storage."""
         if not os.path.isfile(self.storage_path):
             return
+
+        try:
+            with open(self.storage_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            loaded = 0
+            for t_id, c_dict in data.items():
+                if t_id in self.tenants:
+                    continue
+                cfg = TenantConfig(**c_dict)
+                instance = TenantInstance(config=cfg, contract_specs=contract_specs)
+                self.tenants[t_id] = instance
+                loaded += 1
+            logger.info("Loaded %d custom tenants from %s", loaded, self.storage_path)
+        except Exception as e:
+            logger.error("Error reading tenants from %s: %s", self.storage_path, e)
+
+    def load_from_supabase(self, contract_specs: dict[str, ContractSpec]) -> int:
+        """Loads and bootstraps saved tenant instances from Supabase PostgreSQL."""
+        if not self.supabase_url or not self.supabase_secret_key:
+            return 0
+
+        try:
+            import httpx
+            headers = {
+                "apikey": self.supabase_secret_key,
+                "Authorization": f"Bearer {self.supabase_secret_key}",
+            }
+            url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants?select=*"
+            with httpx.Client(timeout=10.0) as client:
+                res = client.get(url, headers=headers)
+            if res.status_code != 200:
+                logger.warning("Supabase load tenants HTTP status %d: %s", res.status_code, res.text)
+                return 0
+
+            data = res.json()
+            loaded = 0
+            for row in data:
+                t_id = row.get("tenant_id")
+                if not t_id or t_id == "default":
+                    continue
+                if t_id in self.tenants:
+                    if row.get("user_id"):
+                        self.tenants[t_id].config.user_id = str(row["user_id"])
+                    continue
+                cfg = TenantConfig(
+                    tenant_id=t_id,
+                    user_id=str(row["user_id"]) if row.get("user_id") else None,
+                    name=row.get("name", t_id),
+                    mode=row.get("mode", "paper"),
+                    initial_balance=float(row.get("initial_balance", 10000.0)),
+                    delta_api_key=row.get("delta_api_key") or "",
+                    delta_api_secret=row.get("delta_api_secret") or "",
+                    delta_base_url=row.get("delta_base_url") or "https://api.delta.exchange",
+                    delta_ws_url=row.get("delta_ws_url") or "wss://socket.delta.exchange",
+                    risk_pct=float(row.get("risk_pct", 1.0)),
+                    leverage=int(row.get("leverage", 5)),
+                    timeframe=row.get("timeframe", "1m"),
+                    max_drawdown_pct=float(row.get("max_drawdown_pct", 4.0)),
+                    symbols=row.get("symbols") or ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"],
+                    is_active=bool(row.get("is_active", True)),
+                    created_at=row.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                )
+                inst = TenantInstance(config=cfg, contract_specs=contract_specs)
+                if inst.paper_simulator and "balance" in row:
+                    inst.paper_simulator.wallet.balance = float(row["balance"])
+                    if "initial_balance" in row and row["initial_balance"]:
+                        inst.paper_simulator.wallet.initial_balance = float(row["initial_balance"])
+                self.tenants[t_id] = inst
+                loaded += 1
+            logger.info("Loaded %d tenants from Supabase", loaded)
+            return loaded
+        except Exception as e:
+            logger.error("Error reading tenants from Supabase: %s", e)
+            return 0
+
+    def sync_tenant_to_supabase(self, instance: TenantInstance) -> bool:
+        """Synchronizes tenant state and configuration to Supabase PostgreSQL."""
+        if not self.supabase_url or not self.supabase_secret_key:
+            return False
+
+        try:
+            import httpx
+            headers = {
+                "apikey": self.supabase_secret_key,
+                "Authorization": f"Bearer {self.supabase_secret_key}",
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates",
+            }
+            url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants"
+
+            bal = (
+                instance.paper_simulator.wallet.balance
+                if instance.paper_simulator
+                else instance.config.initial_balance
+            )
+            eq = (
+                instance.paper_simulator.wallet.equity
+                if instance.paper_simulator
+                else instance.config.initial_balance
+            )
+            upnl = (
+                instance.paper_simulator.wallet.unrealized_pnl
+                if instance.paper_simulator
+                else 0.0
+            )
+            rpnl = (
+                instance.paper_simulator.wallet.realized_pnl
+                if instance.paper_simulator
+                else 0.0
+            )
+
+            payload = {
+                "tenant_id": instance.config.tenant_id,
+                "user_id": instance.config.user_id,
+                "name": instance.config.name,
+                "mode": instance.config.mode,
+                "initial_balance": float(instance.config.initial_balance),
+                "balance": round(float(bal), 4),
+                "equity": round(float(eq), 4),
+                "realized_pnl": round(float(rpnl), 4),
+                "unrealized_pnl": round(float(upnl), 4),
+                "leverage": int(instance.config.leverage),
+                "risk_pct": float(instance.config.risk_pct),
+                "timeframe": instance.config.timeframe,
+                "max_drawdown_pct": float(instance.config.max_drawdown_pct),
+                "delta_api_key": instance.config.delta_api_key or None,
+                "delta_api_secret": instance.config.delta_api_secret or None,
+                "symbols": instance.config.symbols,
+                "is_running": instance.is_running,
+                "is_active": instance.config.is_active,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+            with httpx.Client(timeout=10.0) as client:
+                res = client.post(url, headers=headers, json=payload)
+            return res.status_code in (200, 201)
+        except Exception as e:
+            logger.debug("Failed to sync tenant %s to Supabase: %s", instance.config.tenant_id, e)
+            return False
+
+    def delete_tenant_from_supabase(self, tenant_id: str) -> bool:
+        """Removes tenant record from Supabase PostgreSQL."""
+        if not self.supabase_url or not self.supabase_secret_key:
+            return False
+        try:
+            import httpx
+            headers = {
+                "apikey": self.supabase_secret_key,
+                "Authorization": f"Bearer {self.supabase_secret_key}",
+            }
+            url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants?tenant_id=eq.{tenant_id}"
+            with httpx.Client(timeout=10.0) as client:
+                res = client.delete(url, headers=headers)
+            return res.status_code in (200, 204)
+        except Exception as e:
+            logger.debug("Failed to delete tenant %s from Supabase: %s", tenant_id, e)
+            return False
 
         try:
             with open(self.storage_path, "r", encoding="utf-8") as f:

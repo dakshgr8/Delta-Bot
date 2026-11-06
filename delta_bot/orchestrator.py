@@ -184,8 +184,14 @@ class TradingBotOrchestrator:
             paper_simulator=self.paper_simulator,
             strategies=self.strategies,
         )
-        self.tenant_manager = TenantManager(default_instance=default_instance)
+        self.tenant_manager = TenantManager(
+            default_instance=default_instance,
+            supabase_url=self.config.supabase_url,
+            supabase_secret_key=self.config.supabase_secret_key_str,
+        )
         self.tenant_manager.load_from_disk(contract_specs=self.contract_specs)
+        if self.config.supabase_url and self.config.supabase_secret_key_str:
+            self.tenant_manager.load_from_supabase(contract_specs=self.contract_specs)
 
     def set_symbol_trading_enabled(self, symbol: str, enabled: bool) -> bool:
         """Enables or disables signal evaluation and order placement for a symbol."""

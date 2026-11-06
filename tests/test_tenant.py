@@ -36,8 +36,13 @@ def multi_tenant_orchestrator(tmp_path) -> TradingBotOrchestrator:
     paper_sim = PaperExchangeSimulator(initial_balance=10000.0)
     orch = TradingBotOrchestrator(config=cfg, mode=ExecutionMode.PAPER, paper_simulator=paper_sim)
 
-    # Point tenant storage to isolated temp dir
+    # Point tenant storage to isolated temp dir and disable external sync for unit tests
+    orch.tenant_manager.supabase_url = None
+    orch.tenant_manager.supabase_secret_key = None
     orch.tenant_manager.storage_path = str(tmp_path / "tenants.json")
+    orch.tenant_manager.tenants = {
+        "default": orch.tenant_manager.tenants["default"]
+    }
 
     # Seed contract specs
     btc_spec = ContractSpec(

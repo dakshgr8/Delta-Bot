@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Delta-Bot | Quantitative Terminal</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -120,11 +121,46 @@
           <span id="backend-status-text">SERVER</span>
         </button>
 
-        <!-- Auth Token Modal Button -->
-        <button id="btn-auth-token" onclick="openAuthModal()" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1.5 cursor-pointer" title="Configure Dashboard Auth Token">
-          <span id="auth-status-icon">🔑</span>
-          <span id="auth-status-text">AUTH</span>
-        </button>
+        <!-- Supabase Auth / User Profile Button -->
+        <div id="auth-header-container" class="relative inline-block text-left">
+          <!-- Unauthenticated Button -->
+          <button id="btn-login-prompt" onclick="openAuthModal('signin')" class="px-3 py-1.5 rounded-md text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow transition flex items-center gap-1.5 cursor-pointer" title="Sign In or Register with Supabase Auth">
+            <span>👤</span>
+            <span id="auth-status-text">SIGN IN</span>
+          </button>
+          
+          <!-- Authenticated User Menu (Hidden by default) -->
+          <div id="user-menu-wrapper" class="hidden">
+            <button id="btn-user-profile" onclick="toggleUserDropdown()" class="px-2.5 py-1.5 rounded-md text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 transition flex items-center gap-1.5 cursor-pointer">
+              <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span id="auth-user-email" class="mono max-w-[130px] truncate">user@domain.com</span>
+              <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div id="user-dropdown-menu" class="hidden absolute right-0 mt-2 w-64 rounded-lg shadow-2xl bg-slate-900 border border-slate-700 z-50 py-2 divide-y divide-slate-800 text-xs">
+              <div class="px-4 py-2">
+                <div class="text-[10px] text-slate-400 uppercase font-semibold">User Email</div>
+                <div class="text-slate-100 font-mono truncate" id="user-dropdown-email">--</div>
+              </div>
+              <div class="px-4 py-2">
+                <div class="text-[10px] text-slate-400 uppercase font-semibold">Tenant Account</div>
+                <div class="font-mono text-cyan-300 font-semibold truncate" id="user-dropdown-tenant">user-xxx</div>
+              </div>
+              <div class="px-4 py-2 flex items-center justify-between">
+                <span class="text-slate-400">Auth Engine</span>
+                <span class="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-mono">SUPABASE</span>
+              </div>
+              <div class="p-2 space-y-1">
+                <button onclick="openConfigModal(); toggleUserDropdown();" class="w-full text-left px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 transition cursor-pointer flex items-center justify-between">
+                  <span>Desk Settings</span>
+                  <span class="text-slate-400 text-[10px]">⚙️</span>
+                </button>
+                <button onclick="signOutSupabase()" class="w-full text-center py-1.5 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/50 font-semibold transition cursor-pointer">
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <!-- Settings Modal Button -->
         <button onclick="openConfigModal()" class="px-3 py-1.5 rounded-md text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center gap-1 cursor-pointer" title="Hot-reload risk and strategy configuration">
@@ -381,28 +417,107 @@
   </div>
 
   <!-- ========================================================================= -->
-  <!-- MODAL: AUTHENTICATION TOKEN MANAGEMENT -->
+  <!-- MODAL: SUPABASE AUTH & MULTI-TENANT ACCESS PORTAL -->
   <!-- ========================================================================= -->
   <div id="auth-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden">
     <div class="bg-slate-900 border border-slate-800 rounded-xl max-w-md w-full p-6 shadow-2xl space-y-4">
       <div class="flex items-center justify-between border-b border-slate-800 pb-3">
-        <h3 class="font-bold text-base text-white flex items-center gap-2">
-          <span>🔒</span> Dashboard Authentication Token
-        </h3>
+        <div class="flex items-center space-x-2">
+          <div class="h-7 w-7 rounded-lg bg-gradient-to-tr from-brand-600 to-emerald-500 flex items-center justify-center font-bold text-white text-xs">Δ</div>
+          <div>
+            <h3 class="font-bold text-base text-white">Delta-Bot Trader Portal</h3>
+            <p class="text-[10px] text-slate-400 mono">Supabase Multi-Tenant Auth</p>
+          </div>
+        </div>
         <button onclick="closeAuthModal()" class="text-slate-400 hover:text-white text-lg cursor-pointer">&times;</button>
       </div>
-      <p class="text-xs text-slate-400">
-        If <code class="text-cyan-400 font-mono">DASHBOARD_AUTH_TOKEN</code> is configured in <code class="text-cyan-400 font-mono">.env</code>, enter it below to authorize control mutations, mode switching, and WebSocket streaming.
-      </p>
-      <div>
-        <label class="block text-slate-400 mb-1 text-xs font-medium">Shared Secret Token</label>
-        <input type="password" id="input-auth-token" placeholder="Paste your DASHBOARD_AUTH_TOKEN here..." class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono text-xs focus:border-brand-500">
+
+      <!-- Navigation Tabs -->
+      <div class="flex border-b border-slate-800 text-xs">
+        <button id="auth-tab-signin" onclick="switchAuthTab('signin')" class="flex-1 py-2 font-semibold text-center border-b-2 border-brand-500 text-brand-400 cursor-pointer transition">
+          Sign In
+        </button>
+        <button id="auth-tab-signup" onclick="switchAuthTab('signup')" class="flex-1 py-2 font-semibold text-center border-b-2 border-transparent text-slate-400 hover:text-slate-200 cursor-pointer transition">
+          Create Account
+        </button>
+        <button id="auth-tab-token" onclick="switchAuthTab('token')" class="flex-1 py-2 font-semibold text-center border-b-2 border-transparent text-slate-400 hover:text-slate-200 cursor-pointer transition">
+          Admin Token
+        </button>
       </div>
-      <div class="flex justify-between items-center pt-2 border-t border-slate-800">
-        <button onclick="clearAuthToken()" class="px-3 py-1.5 text-xs rounded bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-rose-300 border border-slate-700 cursor-pointer">Clear Stored Token</button>
-        <div class="flex space-x-2">
-          <button onclick="closeAuthModal()" class="px-4 py-1.5 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer">Cancel</button>
-          <button onclick="saveAuthTokenFromModal()" class="px-4 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 font-semibold text-white shadow cursor-pointer">Save Token</button>
+
+      <!-- Alert / Status Notification -->
+      <div id="auth-feedback-msg" class="hidden text-xs p-2.5 rounded border"></div>
+
+      <!-- TAB 1: SIGN IN -->
+      <div id="auth-panel-signin" class="space-y-3">
+        <p class="text-xs text-slate-400">
+          Sign in to connect to your isolated trading desk, custom portfolio, and Supabase database records.
+        </p>
+        <div>
+          <label class="block text-slate-400 mb-1 text-xs font-medium">Email Address</label>
+          <input type="email" id="login-email" placeholder="trader@domain.com" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono text-xs focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1 text-xs font-medium">Password</label>
+          <input type="password" id="login-password" placeholder="••••••••" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono text-xs focus:border-brand-500">
+        </div>
+        <button id="btn-submit-signin" onclick="loginWithSupabase()" class="w-full py-2 text-xs rounded bg-brand-600 hover:bg-brand-500 font-semibold text-white shadow cursor-pointer transition flex items-center justify-center gap-1.5">
+          <span>Sign In to Trading Desk</span>
+        </button>
+
+        <div class="relative flex py-1 items-center">
+          <div class="flex-grow border-t border-slate-800"></div>
+          <span class="flex-shrink mx-2 text-[10px] text-slate-500 uppercase font-mono">Or Quick Test</span>
+          <div class="flex-grow border-t border-slate-800"></div>
+        </div>
+
+        <!-- 1-Click Demo Login -->
+        <button onclick="demoTraderLogin()" class="w-full py-2 text-xs rounded bg-slate-800 hover:bg-slate-700 border border-emerald-500/30 text-emerald-300 font-semibold cursor-pointer transition flex items-center justify-center gap-1.5">
+          <span>⚡ 1-Click Demo Trader Login</span>
+        </button>
+      </div>
+
+      <!-- TAB 2: CREATE ACCOUNT -->
+      <div id="auth-panel-signup" class="space-y-3 hidden">
+        <p class="text-xs text-slate-400">
+          Create a new user account. An isolated tenant workspace with virtual wallet will be auto-provisioned in Supabase.
+        </p>
+        <div>
+          <label class="block text-slate-400 mb-1 text-xs font-medium">Email Address</label>
+          <input type="email" id="signup-email" placeholder="newtrader@domain.com" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono text-xs focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1 text-xs font-medium">Password (min. 6 characters)</label>
+          <input type="password" id="signup-password" placeholder="••••••••" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono text-xs focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1 text-xs font-medium">Trading Desk / Account Name</label>
+          <input type="text" id="signup-name" placeholder="Apex Quantitative" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono text-xs focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-slate-400 mb-1 text-xs font-medium">Initial Paper Balance (USD)</label>
+          <input type="number" id="signup-balance" value="10000" min="100" step="500" class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono text-xs focus:border-brand-500">
+        </div>
+        <button id="btn-submit-signup" onclick="signupWithSupabase()" class="w-full py-2 text-xs rounded bg-emerald-600 hover:bg-emerald-500 font-semibold text-white shadow cursor-pointer transition flex items-center justify-center gap-1.5">
+          <span>Create Account & Provision Desk</span>
+        </button>
+      </div>
+
+      <!-- TAB 3: ADMIN MASTER TOKEN -->
+      <div id="auth-panel-token" class="space-y-3 hidden">
+        <p class="text-xs text-slate-400">
+          For daemon administrators: provide the master <code class="text-cyan-400 font-mono">DASHBOARD_AUTH_TOKEN</code> to manage all tenants globally.
+        </p>
+        <div>
+          <label class="block text-slate-400 mb-1 text-xs font-medium">Shared Secret Token</label>
+          <input type="password" id="input-auth-token" placeholder="Paste your DASHBOARD_AUTH_TOKEN here..." class="w-full bg-slate-950 border border-slate-800 rounded p-2 text-slate-200 mono text-xs focus:border-brand-500">
+        </div>
+        <div class="flex justify-between items-center pt-2 border-t border-slate-800">
+          <button onclick="clearAuthToken()" class="px-3 py-1.5 text-xs rounded bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-rose-300 border border-slate-700 cursor-pointer">Clear Token</button>
+          <div class="flex space-x-2">
+            <button onclick="closeAuthModal()" class="px-4 py-1.5 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer">Cancel</button>
+            <button onclick="saveAuthTokenFromModal()" class="px-4 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 font-semibold text-white shadow cursor-pointer">Save Admin Token</button>
+          </div>
         </div>
       </div>
     </div>
@@ -565,6 +680,19 @@
   <!-- ========================================================================= -->
   <script>
     const DEFAULT_RENDER_BACKEND = 'https://delta-bot-07e2.onrender.com';
+    const SUPABASE_URL = 'https://clkkzwgpumbnbtvsxkmw.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_rvcmboPnre20bT51oz82qQ_q3SvnIZY';
+
+    let supabaseClient = null;
+    try {
+      if (window.supabase) {
+        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      }
+    } catch (e) {
+      console.warn('Failed to initialize Supabase client:', e);
+    }
+
+    let currentUser = null;
     let isRunning = true;
     let currentMode = 'PAPER';
     let targetSwitchMode = 'LIVE';
@@ -579,9 +707,11 @@
     let autoScrollEnabled = true;
 
     // -------------------------------------------------------------------------
-    // 1. Authentication Token Helpers
+    // 1. Supabase Auth & Multi-Tenant Helpers
     // -------------------------------------------------------------------------
     function getAuthToken() {
+      const sbToken = localStorage.getItem('delta_supabase_token');
+      if (sbToken && sbToken.trim()) return sbToken.trim();
       return localStorage.getItem('delta_bot_auth_token') || '';
     }
 
@@ -594,28 +724,272 @@
       updateAuthBadge();
     }
 
+    function setSupabaseUserSession(session) {
+      if (session && session.access_token) {
+        localStorage.setItem('delta_supabase_token', session.access_token);
+        currentUser = session.user || null;
+      } else {
+        localStorage.removeItem('delta_supabase_token');
+        currentUser = null;
+      }
+      updateAuthBadge();
+    }
+
+    function clearSupabaseUserSession() {
+      localStorage.removeItem('delta_supabase_token');
+      currentUser = null;
+      updateAuthBadge();
+    }
+
     function updateAuthBadge() {
-      const token = getAuthToken();
-      const textElem = document.getElementById('auth-status-text');
-      const iconElem = document.getElementById('auth-status-icon');
-      if (textElem && iconElem) {
-        if (token) {
-          iconElem.textContent = '🔒';
-          textElem.textContent = 'TOKEN SET';
-        } else {
-          iconElem.textContent = '🔑';
-          textElem.textContent = 'AUTH';
+      const sbToken = localStorage.getItem('delta_supabase_token');
+      const masterToken = localStorage.getItem('delta_bot_auth_token');
+      const loginPrompt = document.getElementById('btn-login-prompt');
+      const userWrapper = document.getElementById('user-menu-wrapper');
+      const userEmailEl = document.getElementById('auth-user-email');
+      const dropdownEmailEl = document.getElementById('user-dropdown-email');
+      const dropdownTenantEl = document.getElementById('user-dropdown-tenant');
+
+      if (sbToken && currentUser) {
+        if (loginPrompt) loginPrompt.classList.add('hidden');
+        if (userWrapper) userWrapper.classList.remove('hidden');
+        const email = currentUser.email || 'Trader';
+        if (userEmailEl) userEmailEl.textContent = email;
+        if (dropdownEmailEl) dropdownEmailEl.textContent = email;
+        if (dropdownTenantEl) dropdownTenantEl.textContent = currentTenantId;
+      } else if (masterToken) {
+        if (loginPrompt) {
+          loginPrompt.classList.remove('hidden');
+          const txt = document.getElementById('auth-status-text');
+          if (txt) txt.textContent = 'ADMIN TOKEN';
         }
+        if (userWrapper) userWrapper.classList.add('hidden');
+      } else {
+        if (loginPrompt) {
+          loginPrompt.classList.remove('hidden');
+          const txt = document.getElementById('auth-status-text');
+          if (txt) txt.textContent = 'SIGN IN';
+        }
+        if (userWrapper) userWrapper.classList.add('hidden');
       }
     }
 
-    function openAuthModal() {
-      document.getElementById('input-auth-token').value = getAuthToken();
+    function toggleUserDropdown() {
+      const menu = document.getElementById('user-dropdown-menu');
+      if (menu) menu.classList.toggle('hidden');
+    }
+
+    function openAuthModal(preferredTab = 'signin') {
+      switchAuthTab(preferredTab);
+      const tokenInput = document.getElementById('input-auth-token');
+      if (tokenInput) tokenInput.value = localStorage.getItem('delta_bot_auth_token') || '';
       document.getElementById('auth-modal').classList.remove('hidden');
     }
 
     function closeAuthModal() {
       document.getElementById('auth-modal').classList.add('hidden');
+    }
+
+    function switchAuthTab(tab) {
+      const tabs = ['signin', 'signup', 'token'];
+      tabs.forEach(t => {
+        const tabBtn = document.getElementById(`auth-tab-${t}`);
+        const panel = document.getElementById(`auth-panel-${t}`);
+        if (tabBtn && panel) {
+          if (t === tab) {
+            tabBtn.className = 'flex-1 py-2 font-semibold text-center border-b-2 border-brand-500 text-brand-400 cursor-pointer transition';
+            panel.classList.remove('hidden');
+          } else {
+            tabBtn.className = 'flex-1 py-2 font-semibold text-center border-b-2 border-transparent text-slate-400 hover:text-slate-200 cursor-pointer transition';
+            panel.classList.add('hidden');
+          }
+        }
+      });
+      const fb = document.getElementById('auth-feedback-msg');
+      if (fb) fb.classList.add('hidden');
+    }
+
+    function showAuthFeedback(msg, isError) {
+      const fb = document.getElementById('auth-feedback-msg');
+      if (!fb) return;
+      fb.textContent = msg;
+      fb.className = `text-xs p-2.5 rounded border ${
+        isError
+          ? 'bg-rose-950/60 border-rose-800 text-rose-300'
+          : 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
+      }`;
+      fb.classList.remove('hidden');
+    }
+
+    async function loginWithSupabase() {
+      if (!supabaseClient) {
+        showAuthFeedback('Supabase client failed to initialize. Check network.', true);
+        return;
+      }
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value.trim();
+      if (!email || !password) {
+        showAuthFeedback('Please enter your email and password.', true);
+        return;
+      }
+      const btn = document.getElementById('btn-submit-signin');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Authenticating...';
+      }
+      try {
+        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) {
+          showAuthFeedback(error.message, true);
+          return;
+        }
+        if (data.session) {
+          setSupabaseUserSession(data.session);
+          await fetchAuthMe();
+          closeAuthModal();
+          if (ws) {
+            try { ws.close(); } catch (_) {}
+          }
+          initWebSocket();
+        }
+      } catch (err) {
+        showAuthFeedback('Login error: ' + (err.message || err), true);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Sign In to Trading Desk';
+        }
+      }
+    }
+
+    function demoTraderLogin() {
+      document.getElementById('login-email').value = 'demo_trader@gmail.com';
+      document.getElementById('login-password').value = 'DeltaTrader2026!';
+      loginWithSupabase();
+    }
+
+    async function signupWithSupabase() {
+      if (!supabaseClient) {
+        showAuthFeedback('Supabase client failed to initialize. Check network.', true);
+        return;
+      }
+      const email = document.getElementById('signup-email').value.trim();
+      const password = document.getElementById('signup-password').value.trim();
+      const deskName = document.getElementById('signup-name').value.trim();
+      const balance = parseFloat(document.getElementById('signup-balance').value) || 10000;
+      if (!email || !password) {
+        showAuthFeedback('Please provide both email and password.', true);
+        return;
+      }
+      if (password.length < 6) {
+        showAuthFeedback('Password must be at least 6 characters.', true);
+        return;
+      }
+      const btn = document.getElementById('btn-submit-signup');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Provisioning trading desk...';
+      }
+      try {
+        const { data, error } = await supabaseClient.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              desk_name: deskName || (email.split('@')[0] + "'s Trading Desk"),
+              initial_balance: balance
+            }
+          }
+        });
+        if (error) {
+          showAuthFeedback(error.message, true);
+          return;
+        }
+        if (data.session) {
+          setSupabaseUserSession(data.session);
+          await fetchAuthMe();
+          closeAuthModal();
+          if (ws) {
+            try { ws.close(); } catch (_) {}
+          }
+          initWebSocket();
+          alert(`Account created! Welcome to your trading desk, ${email}`);
+        } else {
+          const loginRes = await supabaseClient.auth.signInWithPassword({ email, password });
+          if (loginRes.data && loginRes.data.session) {
+            setSupabaseUserSession(loginRes.data.session);
+            await fetchAuthMe();
+            closeAuthModal();
+            if (ws) {
+              try { ws.close(); } catch (_) {}
+            }
+            initWebSocket();
+            alert(`Account created! Welcome, ${email}`);
+          } else {
+            showAuthFeedback('Account registered. Please proceed to Sign In.', false);
+            switchAuthTab('signin');
+          }
+        }
+      } catch (err) {
+        showAuthFeedback('Registration error: ' + (err.message || err), true);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Create Account & Provision Desk';
+        }
+      }
+    }
+
+    async function signOutSupabase() {
+      if (supabaseClient) {
+        try { await supabaseClient.auth.signOut(); } catch (_) {}
+      }
+      clearSupabaseUserSession();
+      localStorage.removeItem('delta_bot_current_tenant');
+      currentTenantId = 'default';
+      const menu = document.getElementById('user-dropdown-menu');
+      if (menu) menu.classList.add('hidden');
+      updateAuthBadge();
+      if (ws) {
+        try { ws.close(); } catch (_) {}
+      }
+      initWebSocket();
+    }
+
+    async function fetchAuthMe() {
+      try {
+        const res = await fetch(getApiUrl('/api/auth/me'), {
+          headers: getAuthHeaders()
+        });
+        if (res.ok) {
+          const authData = await res.json();
+          if (authData.authenticated && authData.tenant_id) {
+            currentTenantId = authData.tenant_id;
+            localStorage.setItem('delta_bot_current_tenant', currentTenantId);
+            if (authData.email && (!currentUser || !currentUser.email)) {
+              currentUser = { email: authData.email, id: authData.user_id };
+            }
+            updateAuthBadge();
+          }
+        }
+      } catch (e) {
+        console.debug('Failed to fetch /api/auth/me:', e);
+      }
+    }
+
+    async function checkSupabaseSession() {
+      if (!supabaseClient) return;
+      try {
+        const { data: { session } } = await supabaseClient.auth.getSession();
+        if (session && session.user) {
+          setSupabaseUserSession(session);
+          await fetchAuthMe();
+        } else {
+          clearSupabaseUserSession();
+        }
+      } catch (err) {
+        console.debug('Error checking Supabase session:', err);
+      }
     }
 
     function saveAuthTokenFromModal() {
@@ -653,8 +1027,10 @@
 
     async function handleAuthError(res) {
       if (res.status === 401) {
-        alert('Authentication Required or Token Invalid. Please set your DASHBOARD_AUTH_TOKEN.');
-        openAuthModal();
+        alert('Authentication Required or Session Expired. Please sign in to Delta-Bot.');
+        openAuthModal('signin');
+      } else if (res.status === 403) {
+        alert('Access Denied: You do not have permission to access or modify this tenant account.');
       }
     }
 
@@ -1861,10 +2237,11 @@
     }
 
     // Initialize on page load
-    window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', async () => {
       if ((window.location.hostname.endsWith('.vercel.app') || window.location.hostname.endsWith('.now.sh')) && !localStorage.getItem('delta_bot_backend_url')) {
         localStorage.setItem('delta_bot_backend_url', DEFAULT_RENDER_BACKEND);
       }
+      await checkSupabaseSession();
       updateAuthBadge();
       updateBackendBadge();
       initWebSocket();

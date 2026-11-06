@@ -169,6 +169,47 @@ class TenantUpdateRequest(BaseModel):
     is_active: bool | None = None
 
 
+class AuthIdentity(BaseModel):
+    """Authenticated identity context for request authorization."""
+
+    is_authenticated: bool = False
+    auth_type: str = "anonymous"  # "admin", "user", "anonymous"
+    user_id: str | None = None
+    email: str | None = None
+    tenant_id: str | None = None
+
+
+_SUPABASE_TOKEN_CACHE: dict[str, tuple[dict[str, Any], float]] = {}
+
+
+async def verify_supabase_token(token: str, orchestrator: TradingBotOrchestrator) -> dict[str, Any] | None:
+    """Validates Supabase JWT against Supabase Auth API with in-memory TTL caching."""
+    if not token or not orchestrator.config.supabase_url:
+        return None
+
+    now = time.time()
+    cached = _SUPABASE_TOKEN_CACHE.get(token)
+    if cached and (now - cached[1]) < 120.0:
+        return cached[0]
+
+    try:
+        import httpx
+        url = f"{orchestrator.config.supabase_url.rstrip('/')}/auth/v1/user"
+        headers = {
+            "apikey": orchestrator.config.supabase_key,
+            "Authorization": f"Bearer {token}",
+        }
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            res = await client.get(url, headers=headers)
+        if res.status_code == 200:
+            user_data = res.json()
+            _SUPABASE_TOKEN_CACHE[token] = (user_data, now)
+            return user_data
+    except Exception as err:
+        logger.debug("Supabase token verification error: %s", err)
+    return None
+
+
 # -----------------------------------------------------------------------------
 # 2. In-Memory RingBuffer Log Handler
 # -----------------------------------------------------------------------------
@@ -232,21 +273,31 @@ class WebSocketManager:
     def __init__(self) -> None:
         self.active_connections: set[WebSocket] = set()
         self.connection_tenants: dict[WebSocket, str] = {}
+        self.connection_users: dict[WebSocket, str | None] = {}
         self._lock: asyncio.Lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket, tenant_id: str = "default") -> None:
-        """Accepts and registers incoming client WebSocket connection with tenant scope."""
+    async def connect(
+        self, websocket: WebSocket, tenant_id: str = "default", user_id: str | None = None
+    ) -> None:
+        """Accepts and registers incoming client WebSocket connection with tenant and user scope."""
         await websocket.accept()
         async with self._lock:
             self.active_connections.add(websocket)
             self.connection_tenants[websocket] = tenant_id
-        logger.debug("WebSocket client connected (Tenant: %s). Active: %d", tenant_id, len(self.active_connections))
+            self.connection_users[websocket] = user_id
+        logger.debug(
+            "WebSocket client connected (Tenant: %s, User: %s). Active: %d",
+            tenant_id,
+            user_id,
+            len(self.active_connections),
+        )
 
     async def disconnect(self, websocket: WebSocket) -> None:
         """Unregisters disconnected WebSocket client."""
         async with self._lock:
             self.active_connections.discard(websocket)
             self.connection_tenants.pop(websocket, None)
+            self.connection_users.pop(websocket, None)
         logger.debug("WebSocket client disconnected. Active: %d", len(self.active_connections))
 
     async def broadcast(self, payload: dict[str, Any]) -> None:
@@ -569,7 +620,9 @@ def resolve_tenant(orchestrator: TradingBotOrchestrator, tenant_id: str | None =
 
 
 def get_full_state_packet(
-    orchestrator: TradingBotOrchestrator, tenant_id: str | None = None
+    orchestrator: TradingBotOrchestrator,
+    tenant_id: str | None = None,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """Generates the unified 500ms broadcast state packet for clients."""
     tenant = resolve_tenant(orchestrator, tenant_id)
@@ -653,10 +706,12 @@ def get_full_state_packet(
         if ind:
             indicators[sym] = ind
 
-    tenants_list = (
-        orchestrator.tenant_manager.list_tenants()
-        if hasattr(orchestrator, "tenant_manager")
-        else [
+    if user_id and hasattr(orchestrator, "tenant_manager"):
+        tenants_list = orchestrator.tenant_manager.list_tenants_for_user(user_id)
+    elif hasattr(orchestrator, "tenant_manager"):
+        tenants_list = orchestrator.tenant_manager.list_tenants()
+    else:
+        tenants_list = [
             {
                 "tenant_id": "default",
                 "name": "Default Account",
@@ -678,7 +733,6 @@ def get_full_state_packet(
                 "has_api_key": bool(orchestrator.config.delta_api_key),
             }
         ]
-    )
 
     return {
         "type": "state_update",
@@ -773,22 +827,15 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
     )
 
     # -------------------------------------------------------------------------
-    # Authentication Dependency (Phase 8 Guard)
+    # Authentication Dependency (Phase 8 Guard & Supabase Multi-Tenant)
     # -------------------------------------------------------------------------
 
-    async def verify_dashboard_auth(
+    async def get_current_auth(
         x_dashboard_token: str | None = Header(default=None, alias="X-Dashboard-Token"),
         authorization: str | None = Header(default=None, alias="Authorization"),
-    ) -> bool:
-        """
-        Enforces token authentication using constant-time comparison.
-        If DASHBOARD_AUTH_TOKEN is configured in BotConfig, rejects unauthorized requests with 401.
-        If DASHBOARD_AUTH_TOKEN is not configured, allows unrestricted access (e.g. dev / testing).
-        """
-        expected_token = orchestrator.config.dashboard_auth_token_str
-        if not expected_token:
-            return True
-
+        token: str | None = Query(default=None),
+    ) -> AuthIdentity:
+        """Resolves identity from master DASHBOARD_AUTH_TOKEN or Supabase Auth JWT."""
         provided_token: str | None = None
         if x_dashboard_token:
             provided_token = x_dashboard_token.strip()
@@ -798,11 +845,55 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 provided_token = parts[1].strip()
             elif len(parts) == 1:
                 provided_token = parts[0].strip()
+        elif token:
+            provided_token = token.strip()
 
-        if not provided_token or not secrets.compare_digest(provided_token, expected_token):
+        expected_token = orchestrator.config.dashboard_auth_token_str
+
+        # 1. Check if token matches master DASHBOARD_AUTH_TOKEN
+        if provided_token and expected_token and secrets.compare_digest(provided_token, expected_token):
+            return AuthIdentity(is_authenticated=True, auth_type="admin", email="admin@master")
+
+        # 2. Check if token is a valid Supabase Auth JWT
+        if provided_token:
+            sb_user = await verify_supabase_token(provided_token, orchestrator)
+            if sb_user and "id" in sb_user:
+                uid = str(sb_user["id"])
+                u_email = sb_user.get("email") or ""
+                t_instance = None
+                if hasattr(orchestrator, "tenant_manager"):
+                    t_instance = orchestrator.tenant_manager.get_or_create_user_tenant(
+                        uid, u_email, orchestrator.contract_specs
+                    )
+                t_id = t_instance.config.tenant_id if t_instance else f"user-{uid[:8]}"
+                return AuthIdentity(
+                    is_authenticated=True,
+                    auth_type="user",
+                    user_id=uid,
+                    email=u_email,
+                    tenant_id=t_id,
+                )
+
+        # 3. If a token was provided but did not match either:
+        if provided_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unauthorized: Invalid or missing dashboard authentication token.",
+                detail="Unauthorized: Invalid or expired authentication token.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # 4. If no token was provided, return unauthenticated anonymous session
+        return AuthIdentity(is_authenticated=False, auth_type="anonymous", tenant_id="default")
+
+    async def verify_dashboard_auth(
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> bool:
+        """Enforces authentication guard for control endpoints."""
+        expected_token = orchestrator.config.dashboard_auth_token_str
+        if expected_token and not auth.is_authenticated:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Unauthorized: Valid authentication token required.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         return True
@@ -820,20 +911,51 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             return FileResponse(index_file, media_type="text/html")
         return HTMLResponse(content=get_embedded_dashboard_html(), status_code=status.HTTP_200_OK)
 
+    @app.get("/api/auth/me")
+    async def get_auth_me(auth: AuthIdentity = Depends(get_current_auth)) -> JSONResponse:
+        """Returns authenticated user profile, session identity, and tenant association."""
+        tenant_summary = None
+        if auth.tenant_id and hasattr(orchestrator, "tenant_manager"):
+            t = orchestrator.tenant_manager.get_tenant(auth.tenant_id)
+            if t:
+                tenant_summary = t.get_summary()
+        return JSONResponse(
+            content={
+                "authenticated": auth.is_authenticated,
+                "auth_type": auth.auth_type,
+                "user_id": auth.user_id,
+                "email": auth.email,
+                "tenant_id": auth.tenant_id,
+                "tenant": tenant_summary,
+            }
+        )
+
     @app.get("/api/status")
     async def get_bot_status(
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
     ) -> JSONResponse:
         """Returns high-level daemon telemetry, operational mode, and collateral."""
-        target_t = tenant_id or x_tenant_id
-        packet = get_full_state_packet(orchestrator, tenant_id=target_t)
+        if auth.auth_type == "user" and auth.tenant_id:
+            target_t = auth.tenant_id
+            packet = get_full_state_packet(orchestrator, tenant_id=target_t, user_id=auth.user_id)
+        else:
+            target_t = tenant_id or x_tenant_id
+            packet = get_full_state_packet(orchestrator, tenant_id=target_t)
         return JSONResponse(
             content={
                 "status": packet["status"],
                 "collateral": packet["collateral"],
                 "tenants": packet.get("tenants", []),
                 "current_tenant": packet.get("current_tenant", {}),
+                "auth_user": {
+                    "user_id": auth.user_id,
+                    "email": auth.email,
+                    "auth_type": auth.auth_type,
+                }
+                if auth.is_authenticated
+                else None,
             }
         )
 
@@ -841,10 +963,14 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
     async def get_positions(
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
     ) -> JSONResponse:
         """Returns live active positions with entry, mark, and liquidation levels."""
-        target_t = tenant_id or x_tenant_id
-        tenant = resolve_tenant(orchestrator, target_t)
+        if auth.auth_type == "user" and auth.tenant_id:
+            tenant = orchestrator.tenant_manager.get_tenant(auth.tenant_id)
+        else:
+            target_t = tenant_id or x_tenant_id
+            tenant = resolve_tenant(orchestrator, target_t)
         positions = get_all_positions_summary(orchestrator, tenant=tenant)
         return JSONResponse(content={"count": len(positions), "positions": positions})
 
@@ -852,22 +978,31 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
     async def get_orders(
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
     ) -> JSONResponse:
         """Returns resting pending stop breakout orders waiting for price trigger."""
-        target_t = tenant_id or x_tenant_id
-        tenant = resolve_tenant(orchestrator, target_t)
+        if auth.auth_type == "user" and auth.tenant_id:
+            tenant = orchestrator.tenant_manager.get_tenant(auth.tenant_id)
+        else:
+            target_t = tenant_id or x_tenant_id
+            tenant = resolve_tenant(orchestrator, target_t)
         orders = get_all_orders_summary(orchestrator, tenant=tenant)
         return JSONResponse(content={"count": len(orders), "orders": orders})
 
     # -------------------------------------------------------------------------
-    # Multi-Tenant REST API (Phase 9)
+    # Multi-Tenant REST API (Phase 9 & Supabase Multi-Tenant)
     # -------------------------------------------------------------------------
 
     @app.get("/api/tenants")
-    async def get_tenants() -> JSONResponse:
-        """Returns status summaries for all registered tenant accounts."""
+    async def get_tenants(
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> JSONResponse:
+        """Returns status summaries for tenant accounts accessible to this session."""
         if hasattr(orchestrator, "tenant_manager"):
-            tenants = orchestrator.tenant_manager.list_tenants()
+            if auth.auth_type == "user" and auth.user_id:
+                tenants = orchestrator.tenant_manager.list_tenants_for_user(auth.user_id)
+            else:
+                tenants = orchestrator.tenant_manager.list_tenants()
         else:
             tenants = [{"tenant_id": "default", "name": "Default Account", "mode": orchestrator.mode.value.upper()}]
         return JSONResponse(content={"count": len(tenants), "tenants": tenants})
@@ -876,14 +1011,19 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         "/api/tenants",
         dependencies=[Depends(verify_dashboard_auth)],
     )
-    async def create_tenant_endpoint(payload: TenantCreateRequest) -> JSONResponse:
+    async def create_tenant_endpoint(
+        payload: TenantCreateRequest,
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> JSONResponse:
         """Registers a new isolated tenant account with its own virtual or live wallet."""
         if not hasattr(orchestrator, "tenant_manager"):
             raise HTTPException(status_code=500, detail="TenantManager is not initialized.")
 
         from delta_bot.tenant import TenantConfig
+        assigned_user_id = auth.user_id if auth.auth_type == "user" else None
         cfg = TenantConfig(
             tenant_id=payload.tenant_id or f"tenant_{int(time.time())}",
+            user_id=assigned_user_id,
             name=payload.name,
             mode=payload.mode,
             initial_balance=payload.initial_balance,
@@ -915,12 +1055,17 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve)) from ve
 
     @app.get("/api/tenants/{tenant_id}")
-    async def get_tenant_profile(tenant_id: str) -> JSONResponse:
+    async def get_tenant_profile(
+        tenant_id: str,
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> JSONResponse:
         """Retrieves comprehensive status and configuration packet for a specified tenant."""
         tenant = resolve_tenant(orchestrator, tenant_id)
         if not tenant:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
-        packet = get_full_state_packet(orchestrator, tenant_id=tenant_id)
+        if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
+        packet = get_full_state_packet(orchestrator, tenant_id=tenant_id, user_id=auth.user_id)
         return JSONResponse(content=packet)
 
     @app.post(
@@ -931,10 +1076,19 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         "/api/tenants/{tenant_id}",
         dependencies=[Depends(verify_dashboard_auth)],
     )
-    async def update_tenant_endpoint(tenant_id: str, payload: TenantUpdateRequest) -> JSONResponse:
+    async def update_tenant_endpoint(
+        tenant_id: str,
+        payload: TenantUpdateRequest,
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> JSONResponse:
         """Modifies parameters, risk limits, or exchange credentials for a tenant."""
         if not hasattr(orchestrator, "tenant_manager"):
             raise HTTPException(status_code=500, detail="TenantManager is not initialized.")
+        tenant = orchestrator.tenant_manager.get_tenant(tenant_id)
+        if not tenant:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+        if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         try:
             updates = payload.model_dump(exclude_unset=True)
             updated = orchestrator.tenant_manager.update_tenant(tenant_id, updates)
@@ -954,10 +1108,18 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         "/api/tenants/{tenant_id}",
         dependencies=[Depends(verify_dashboard_auth)],
     )
-    async def delete_tenant_endpoint(tenant_id: str) -> JSONResponse:
+    async def delete_tenant_endpoint(
+        tenant_id: str,
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> JSONResponse:
         """Emergency flattens positions and removes a custom tenant (Default tenant cannot be deleted)."""
         if not hasattr(orchestrator, "tenant_manager"):
             raise HTTPException(status_code=500, detail="TenantManager is not initialized.")
+        tenant = orchestrator.tenant_manager.get_tenant(tenant_id)
+        if not tenant:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+        if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         try:
             success = await orchestrator.tenant_manager.delete_tenant(tenant_id)
             if not success:
@@ -976,10 +1138,15 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
     )
-    async def tenant_start(tenant_id: str) -> ControlActionResponse:
+    async def tenant_start(
+        tenant_id: str,
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> ControlActionResponse:
         tenant = resolve_tenant(orchestrator, tenant_id)
         if not tenant:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+        if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         tenant.is_running = True
         logger.info("[TENANT %s] Signal evaluation STARTED", tenant_id)
         return ControlActionResponse(status="success", action="start", message=f"Tenant '{tenant.config.name}' trading resumed.")
@@ -989,10 +1156,15 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
     )
-    async def tenant_stop(tenant_id: str) -> ControlActionResponse:
+    async def tenant_stop(
+        tenant_id: str,
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> ControlActionResponse:
         tenant = resolve_tenant(orchestrator, tenant_id)
         if not tenant:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+        if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         tenant.is_running = False
         logger.warning("[TENANT %s] Signal evaluation PAUSED", tenant_id)
         return ControlActionResponse(status="success", action="stop", message=f"Tenant '{tenant.config.name}' trading paused.")
@@ -1002,10 +1174,15 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
     )
-    async def tenant_flatten(tenant_id: str) -> ControlActionResponse:
+    async def tenant_flatten(
+        tenant_id: str,
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> ControlActionResponse:
         tenant = resolve_tenant(orchestrator, tenant_id)
         if not tenant:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+        if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         res = await tenant.emergency_flatten()
         return ControlActionResponse(
             status="success",
@@ -1042,8 +1219,29 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
     async def control_start(
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
     ) -> ControlActionResponse:
         """Resumes trade signal evaluation and breakout order dispatching."""
+        if auth.auth_type == "user" and auth.tenant_id:
+            req_t = tenant_id or x_tenant_id
+            if req_t and req_t != auth.tenant_id:
+                t = resolve_tenant(orchestrator, req_t)
+                if not t or (t.config.user_id and t.config.user_id != auth.user_id):
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
+                target_t = req_t
+            else:
+                target_t = auth.tenant_id
+            tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if tenant:
+                tenant.is_running = True
+                logger.info("[USER %s TENANT %s] Signal evaluation STARTED", auth.user_id, target_t)
+                return ControlActionResponse(
+                    status="success",
+                    action="start",
+                    message=f"Tenant '{tenant.config.name}' trading resumed.",
+                )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{target_t}' not found.")
+
         target_t = tenant_id or x_tenant_id
         if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
@@ -1071,8 +1269,29 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
     async def control_stop(
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
     ) -> ControlActionResponse:
         """Gracefully pauses new order generation while preserving resting brackets."""
+        if auth.auth_type == "user" and auth.tenant_id:
+            req_t = tenant_id or x_tenant_id
+            if req_t and req_t != auth.tenant_id:
+                t = resolve_tenant(orchestrator, req_t)
+                if not t or (t.config.user_id and t.config.user_id != auth.user_id):
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
+                target_t = req_t
+            else:
+                target_t = auth.tenant_id
+            tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if tenant:
+                tenant.is_running = False
+                logger.warning("[USER %s TENANT %s] Signal evaluation PAUSED", auth.user_id, target_t)
+                return ControlActionResponse(
+                    status="success",
+                    action="stop",
+                    message=f"Tenant '{tenant.config.name}' trading paused.",
+                )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{target_t}' not found.")
+
         target_t = tenant_id or x_tenant_id
         if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
@@ -1101,8 +1320,28 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         symbol: str | None = Query(default=None, description="Optional single asset symbol"),
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
     ) -> ControlActionResponse:
         """Triggers emergency market-close of active positions and purges resting orders."""
+        if auth.auth_type == "user" and auth.tenant_id:
+            req_t = tenant_id or x_tenant_id
+            if req_t and req_t != auth.tenant_id:
+                t = resolve_tenant(orchestrator, req_t)
+                if not t or (t.config.user_id and t.config.user_id != auth.user_id):
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
+                target_t = req_t
+            else:
+                target_t = auth.tenant_id
+            tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if tenant:
+                res = await tenant.emergency_flatten()
+                return ControlActionResponse(
+                    status="success",
+                    action="flatten",
+                    message=f"Tenant '{tenant.config.name}' flattened: {res['closed_positions']} positions closed, {res['cancelled_orders']} orders cancelled.",
+                )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{target_t}' not found.")
+
         target_t = tenant_id or x_tenant_id
         if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
@@ -1166,9 +1405,37 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         product_id: int,
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
     ) -> ControlActionResponse:
         """Manually closes active position for a specific product ID."""
         logger.warning("[CONTROL API] Close position requested for product_id=%d", product_id)
+        if auth.auth_type == "user" and auth.tenant_id:
+            req_t = tenant_id or x_tenant_id
+            if req_t and req_t != auth.tenant_id:
+                t = resolve_tenant(orchestrator, req_t)
+                if not t or (t.config.user_id and t.config.user_id != auth.user_id):
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
+                target_t = req_t
+            else:
+                target_t = auth.tenant_id
+            tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if tenant and tenant.paper_simulator is not None:
+                closed = tenant.paper_simulator.close_position(product_id)
+                if not closed:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"No active position found for product_id={product_id} in tenant '{target_t}'",
+                    )
+                return ControlActionResponse(
+                    status="success",
+                    action="close_position",
+                    message=f"Tenant '{tenant.config.name}' position for product {product_id} closed.",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Tenant '{target_t}' position cannot be closed.",
+            )
+
         target_t = tenant_id or x_tenant_id
         if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
@@ -1292,9 +1559,40 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         order_id: str,
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
     ) -> ControlActionResponse:
         """Manually cancels a resting pending breakout order."""
         logger.warning("[CONTROL API] Order cancellation requested for #%s", order_id)
+        if auth.auth_type == "user" and auth.tenant_id:
+            req_t = tenant_id or x_tenant_id
+            if req_t and req_t != auth.tenant_id:
+                t = resolve_tenant(orchestrator, req_t)
+                if not t or (t.config.user_id and t.config.user_id != auth.user_id):
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
+                target_t = req_t
+            else:
+                target_t = auth.tenant_id
+            tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if tenant and tenant.paper_simulator is not None:
+                try:
+                    numeric_id = int(order_id)
+                    for pid, o in list(tenant.paper_simulator._pending_orders.items()):
+                        if o.order_id == numeric_id or str(o.order_id) == str(order_id):
+                            tenant.paper_simulator.cancel_order(
+                                product_id=o.product_id, order_id=numeric_id
+                            )
+                            return ControlActionResponse(
+                                status="success",
+                                action="order_cancel",
+                                message=f"Tenant '{tenant.config.name}' pending order #{order_id} cancelled.",
+                            )
+                except ValueError:
+                    pass
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Pending order #{order_id} not found in tenant '{target_t}'.",
+            )
+
         target_t = tenant_id or x_tenant_id
         if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
@@ -1377,8 +1675,35 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         payload: ConfigUpdateRequest,
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
     ) -> ControlActionResponse:
         """Hot-reloads risk and strategy parameters across all active engines."""
+        if auth.auth_type == "user" and auth.tenant_id:
+            req_t = tenant_id or x_tenant_id
+            if req_t and req_t != auth.tenant_id:
+                t = resolve_tenant(orchestrator, req_t)
+                if not t or (t.config.user_id and t.config.user_id != auth.user_id):
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
+                target_t = req_t
+            else:
+                target_t = auth.tenant_id
+            updates = {}
+            if payload.timeframe is not None:
+                updates["timeframe"] = payload.timeframe
+            if payload.risk_pct is not None:
+                updates["risk_pct"] = payload.risk_pct
+            if payload.leverage is not None:
+                updates["leverage"] = payload.leverage
+            if payload.max_drawdown_pct is not None:
+                updates["max_drawdown_pct"] = payload.max_drawdown_pct
+            if updates and hasattr(orchestrator, "tenant_manager"):
+                orchestrator.tenant_manager.update_tenant(target_t, updates)
+                return ControlActionResponse(
+                    status="success",
+                    action="config_update",
+                    message=f"Configuration hot-reloaded for tenant '{target_t}'.",
+                )
+
         target_t = tenant_id or x_tenant_id
         if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
             updates = {}
@@ -1488,31 +1813,50 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
     ) -> None:
         """Streams real-time state packets every 500ms to connected dashboard clients."""
         expected_token = orchestrator.config.dashboard_auth_token_str
-        if expected_token:
-            provided_token = token.strip() if token else None
-            if not provided_token:
-                h_token = websocket.headers.get("x-dashboard-token")
-                if h_token:
-                    provided_token = h_token.strip()
-                else:
-                    auth_header = websocket.headers.get("authorization")
-                    if auth_header:
-                        parts = auth_header.strip().split()
-                        if len(parts) == 2 and parts[0].lower() == "bearer":
-                            provided_token = parts[1].strip()
-                        elif len(parts) == 1:
-                            provided_token = parts[0].strip()
+        provided_token = token.strip() if token else None
+        if not provided_token:
+            h_token = websocket.headers.get("x-dashboard-token")
+            if h_token:
+                provided_token = h_token.strip()
+            else:
+                auth_header = websocket.headers.get("authorization")
+                if auth_header:
+                    parts = auth_header.strip().split()
+                    if len(parts) == 2 and parts[0].lower() == "bearer":
+                        provided_token = parts[1].strip()
+                    elif len(parts) == 1:
+                        provided_token = parts[0].strip()
 
-            if not provided_token or not secrets.compare_digest(provided_token, expected_token):
-                logger.warning("[WS AUTH] WebSocket connection rejected: invalid or missing authentication token")
+        user_id: str | None = None
+        target_tenant: str = tenant_id.strip() if tenant_id else "default"
+
+        if provided_token and expected_token and secrets.compare_digest(provided_token, expected_token):
+            pass
+        elif provided_token:
+            sb_user = await verify_supabase_token(provided_token, orchestrator)
+            if sb_user and "id" in sb_user:
+                user_id = str(sb_user["id"])
+                u_email = sb_user.get("email") or ""
+                if hasattr(orchestrator, "tenant_manager"):
+                    t_inst = orchestrator.tenant_manager.get_or_create_user_tenant(
+                        user_id, u_email, orchestrator.contract_specs
+                    )
+                    target_tenant = t_inst.config.tenant_id
+                else:
+                    target_tenant = f"user-{user_id[:8]}"
+            else:
+                logger.warning("[WS AUTH] WebSocket connection rejected: invalid Supabase token")
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
                 return
+        elif expected_token:
+            logger.warning("[WS AUTH] WebSocket connection rejected: invalid or missing authentication token")
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+            return
 
-        target_tenant = tenant_id.strip() if tenant_id else "default"
-        await ws_manager.connect(websocket, tenant_id=target_tenant)
+        await ws_manager.connect(websocket, tenant_id=target_tenant, user_id=user_id)
         try:
             # Send immediate initial state on connect
-            initial_packet = get_full_state_packet(orchestrator, tenant_id=target_tenant)
+            initial_packet = get_full_state_packet(orchestrator, tenant_id=target_tenant, user_id=user_id)
             await websocket.send_text(json.dumps(initial_packet, default=str))
 
             # Maintain connection and listen for client messages
@@ -1525,9 +1869,13 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                         msg = json.loads(data)
                         if msg.get("action") == "switch_tenant" and msg.get("tenant_id"):
                             new_t = msg["tenant_id"].strip()
+                            if user_id and hasattr(orchestrator, "tenant_manager"):
+                                t = orchestrator.tenant_manager.get_tenant(new_t)
+                                if not t or (t.config.user_id and t.config.user_id != user_id):
+                                    continue
                             async with ws_manager._lock:
                                 ws_manager.connection_tenants[websocket] = new_t
-                            curr_pkt = get_full_state_packet(orchestrator, tenant_id=new_t)
+                            curr_pkt = get_full_state_packet(orchestrator, tenant_id=new_t, user_id=user_id)
                             await websocket.send_text(json.dumps(curr_pkt, default=str))
                     except Exception:
                         pass
@@ -1559,18 +1907,21 @@ async def _ws_broadcaster_worker(
                 async with ws_manager._lock:
                     connections = list(ws_manager.active_connections)
                     tenant_map = dict(ws_manager.connection_tenants)
+                    user_map = dict(ws_manager.connection_users)
 
-                packet_cache: dict[str, str] = {}
+                packet_cache: dict[tuple[str, str | None], str] = {}
                 dead_connections = []
 
                 for ws in connections:
                     t_id = tenant_map.get(ws, "default")
-                    if t_id not in packet_cache:
-                        packet = get_full_state_packet(orchestrator, tenant_id=t_id)
-                        packet_cache[t_id] = json.dumps(packet, default=str)
+                    u_id = user_map.get(ws)
+                    cache_key = (t_id, u_id)
+                    if cache_key not in packet_cache:
+                        packet = get_full_state_packet(orchestrator, tenant_id=t_id, user_id=u_id)
+                        packet_cache[cache_key] = json.dumps(packet, default=str)
 
                     try:
-                        await ws.send_text(packet_cache[t_id])
+                        await ws.send_text(packet_cache[cache_key])
                     except Exception:
                         dead_connections.append(ws)
 
@@ -1579,6 +1930,7 @@ async def _ws_broadcaster_worker(
                         for dead in dead_connections:
                             ws_manager.active_connections.discard(dead)
                             ws_manager.connection_tenants.pop(dead, None)
+                            ws_manager.connection_users.pop(dead, None)
         except asyncio.CancelledError:
             break
         except Exception as b_err:
