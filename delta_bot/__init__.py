@@ -79,6 +79,11 @@ from delta_bot.server import (
 from delta_bot.state import (
     TradingStateManager,
 )
+from delta_bot.tenant import (
+    TenantConfig,
+    TenantInstance,
+    TenantManager,
+)
 from delta_bot.strategy import (
     BreakoutStrategyEngine,
     OrderIntent,

@@ -133,6 +133,42 @@ class ControlActionResponse(BaseModel):
     timestamp: float = Field(default_factory=time.time)
 
 
+class TenantCreateRequest(BaseModel):
+    """Payload schema for registering a new isolated tenant account."""
+
+    tenant_id: str | None = Field(default=None, description="Custom unique tenant slug/ID")
+    name: str = Field(description="Display name for the tenant (e.g. Alpha Desk)")
+    mode: str = Field(default="paper", description="Execution mode: 'paper' or 'live'")
+    initial_balance: float = Field(default=10000.0, ge=100.0, description="Virtual starting collateral in USD")
+    delta_api_key: str = Field(default="", description="Delta Exchange API Key")
+    delta_api_secret: str = Field(default="", description="Delta Exchange API Secret")
+    delta_base_url: str = Field(default="https://api.delta.exchange", description="Delta Exchange REST API URL")
+    delta_ws_url: str = Field(default="wss://socket.delta.exchange", description="Delta Exchange WebSocket URL")
+    risk_pct: float = Field(default=1.0, ge=0.1, le=10.0, description="Risk percentage per breakout trade")
+    leverage: int = Field(default=5, ge=1, le=100, description="Default leverage tier")
+    timeframe: str = Field(default="1m", description="Resolution timeframe (e.g. 1m, 3m, 5m, 15m)")
+    max_drawdown_pct: float = Field(default=4.0, ge=0.5, le=50.0, description="Daily max drawdown limit %")
+    symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"])
+    is_active: bool = Field(default=True, description="Whether trading signal evaluation is active")
+
+
+class TenantUpdateRequest(BaseModel):
+    """Payload schema for modifying existing tenant parameters or credentials."""
+
+    name: str | None = None
+    mode: str | None = None
+    delta_api_key: str | None = None
+    delta_api_secret: str | None = None
+    delta_base_url: str | None = None
+    delta_ws_url: str | None = None
+    risk_pct: float | None = None
+    leverage: int | None = None
+    timeframe: str | None = None
+    max_drawdown_pct: float | None = None
+    symbols: list[str] | None = None
+    is_active: bool | None = None
+
+
 # -----------------------------------------------------------------------------
 # 2. In-Memory RingBuffer Log Handler
 # -----------------------------------------------------------------------------
@@ -195,20 +231,23 @@ class WebSocketManager:
 
     def __init__(self) -> None:
         self.active_connections: set[WebSocket] = set()
+        self.connection_tenants: dict[WebSocket, str] = {}
         self._lock: asyncio.Lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket) -> None:
-        """Accepts and registers incoming client WebSocket connection."""
+    async def connect(self, websocket: WebSocket, tenant_id: str = "default") -> None:
+        """Accepts and registers incoming client WebSocket connection with tenant scope."""
         await websocket.accept()
         async with self._lock:
             self.active_connections.add(websocket)
-        logger.debug("WebSocket client connected. Active subscribers: %d", len(self.active_connections))
+            self.connection_tenants[websocket] = tenant_id
+        logger.debug("WebSocket client connected (Tenant: %s). Active: %d", tenant_id, len(self.active_connections))
 
     async def disconnect(self, websocket: WebSocket) -> None:
         """Unregisters disconnected WebSocket client."""
         async with self._lock:
             self.active_connections.discard(websocket)
-        logger.debug("WebSocket client disconnected. Active subscribers: %d", len(self.active_connections))
+            self.connection_tenants.pop(websocket, None)
+        logger.debug("WebSocket client disconnected. Active: %d", len(self.active_connections))
 
     async def broadcast(self, payload: dict[str, Any]) -> None:
         """Broadcasts JSON payload to all active subscribers, discarding dead sockets."""
@@ -228,6 +267,7 @@ class WebSocketManager:
 
             for dead in dead_connections:
                 self.active_connections.discard(dead)
+                self.connection_tenants.pop(dead, None)
 
 
 # -----------------------------------------------------------------------------
@@ -256,13 +296,25 @@ def format_uptime_human(seconds: float) -> str:
     return f"{hours:02d}h {minutes:02d}m {secs:02d}s"
 
 
-def get_all_positions_summary(orchestrator: TradingBotOrchestrator) -> list[dict[str, Any]]:
+def get_all_positions_summary(
+    orchestrator: TradingBotOrchestrator, tenant: Any = None
+) -> list[dict[str, Any]]:
     """Extracts standardized position list across Paper and Live environments with leverage, margin & liquidation metrics."""
     positions_list: list[dict[str, Any]] = []
-    lev = orchestrator.config.default_leverage
 
-    if orchestrator.mode == ExecutionMode.PAPER and orchestrator.paper_simulator is not None:
-        for pid, pos in orchestrator.paper_simulator._open_positions.items():
+    if tenant is not None:
+        target_mode = tenant.mode
+        target_sim = tenant.paper_simulator
+        target_sm = tenant.state_manager
+        lev = tenant.config.leverage
+    else:
+        target_mode = orchestrator.mode
+        target_sim = orchestrator.paper_simulator
+        target_sm = orchestrator.state_manager
+        lev = orchestrator.config.default_leverage
+
+    if target_mode == ExecutionMode.PAPER and target_sim is not None:
+        for pid, pos in target_sim._open_positions.items():
             spec = orchestrator.contract_specs.get(pos.symbol)
             cv = spec.contract_value if spec else 1.0
             native_val = round(pos.size * cv, 4)
@@ -303,9 +355,9 @@ def get_all_positions_summary(orchestrator: TradingBotOrchestrator) -> list[dict
                 "liquidation_distance_pct": dist_pct,
                 "mode": "PAPER",
             })
-    else:
-        for p in orchestrator.state_manager.get_all_positions():
-            child_sl = orchestrator.state_manager.get_child_stop_loss_order_id(p.product_id)
+    elif target_sm is not None:
+        for p in target_sm.get_all_positions():
+            child_sl = target_sm.get_child_stop_loss_order_id(p.product_id)
             spec = orchestrator.contract_specs.get(p.symbol)
             cv = spec.contract_value if spec else 1.0
             native_val = round(abs(p.size) * cv, 4)
@@ -344,20 +396,28 @@ def get_all_positions_summary(orchestrator: TradingBotOrchestrator) -> list[dict
     return positions_list
 
 
-def get_all_orders_summary(orchestrator: TradingBotOrchestrator) -> list[dict[str, Any]]:
+def get_all_orders_summary(
+    orchestrator: TradingBotOrchestrator, tenant: Any = None
+) -> list[dict[str, Any]]:
     """Extracts standardized resting pending stop breakout orders with TTL countdown."""
     orders_list: list[dict[str, Any]] = []
 
+    strategies = tenant.strategies if tenant else orchestrator.strategies
+
     def get_order_ttl(sym: str) -> tuple[int, int, int]:
-        strategy = orchestrator.strategies.get(sym)
+        strategy = strategies.get(sym)
         intent = strategy.pending_order if strategy else None
         bars_elapsed = intent.bars_elapsed if intent else 0
         ttl_bars = intent.ttl_bars if intent else (strategy.config.max_pending_bars if strategy else 3)
         ttl_rem = max(0, ttl_bars - bars_elapsed)
         return bars_elapsed, ttl_bars, ttl_rem
 
-    if orchestrator.mode == ExecutionMode.PAPER and orchestrator.paper_simulator is not None:
-        for oid, o in orchestrator.paper_simulator._pending_orders.items():
+    target_mode = tenant.mode if tenant else orchestrator.mode
+    target_sim = tenant.paper_simulator if tenant else orchestrator.paper_simulator
+    target_exec = tenant.execution_manager if tenant else orchestrator.execution_manager
+
+    if target_mode == ExecutionMode.PAPER and target_sim is not None:
+        for oid, o in target_sim._pending_orders.items():
             b_el, ttl_b, ttl_rem = get_order_ttl(o.symbol)
             orders_list.append({
                 "order_id": oid,
@@ -376,8 +436,8 @@ def get_all_orders_summary(orchestrator: TradingBotOrchestrator) -> list[dict[st
                 "created_at": o.created_at,
                 "mode": "PAPER",
             })
-    elif orchestrator.execution_manager is not None:
-        for ao in orchestrator.execution_manager.registry.active_orders():
+    elif target_exec is not None:
+        for ao in target_exec.registry.active_orders():
             b_el, ttl_b, ttl_rem = get_order_ttl(ao.symbol)
             orders_list.append({
                 "order_id": ao.id,
@@ -501,31 +561,91 @@ def get_tickers_summary(orchestrator: TradingBotOrchestrator) -> dict[str, dict[
     return tickers
 
 
-def get_full_state_packet(orchestrator: TradingBotOrchestrator) -> dict[str, Any]:
-    """Generates the unified 500ms broadcast state packet for clients."""
-    uptime = max(0.0, time.time() - orchestrator.start_time) if orchestrator.start_time > 0 else 0.0
+def resolve_tenant(orchestrator: TradingBotOrchestrator, tenant_id: str | None = None) -> Any:
+    """Finds the targeted tenant instance, or returns None if multi-tenant not initialized."""
+    if hasattr(orchestrator, "tenant_manager"):
+        return orchestrator.tenant_manager.get_tenant(tenant_id)
+    return None
 
-    if orchestrator.mode == ExecutionMode.PAPER and orchestrator.paper_simulator is not None:
-        p_stats = orchestrator.paper_simulator.get_summary()
-        balance = p_stats["balance"]
-        equity = p_stats["equity"]
-        realized_pnl = p_stats["realized_pnl"]
-        unrealized_pnl = p_stats["unrealized_pnl"]
-        win_rate = p_stats["win_rate_pct"]
-        drawdown = p_stats["max_drawdown_pct"]
-        total_trades = p_stats["total_trades"]
-        winning_trades = p_stats["winning_trades"]
-        available_margin = p_stats["available_margin"]
+
+def get_full_state_packet(
+    orchestrator: TradingBotOrchestrator, tenant_id: str | None = None
+) -> dict[str, Any]:
+    """Generates the unified 500ms broadcast state packet for clients."""
+    tenant = resolve_tenant(orchestrator, tenant_id)
+
+    if tenant is not None:
+        uptime = max(0.0, time.time() - tenant.start_time)
+        mode_str = tenant.mode.value.upper()
+        is_running = tenant.is_running
+        lev = tenant.config.leverage
+        risk_pct = tenant.config.risk_pct
+        timeframe = tenant.config.timeframe
+        enabled_symbols = list(tenant.enabled_symbols)
+
+        if tenant.mode == ExecutionMode.PAPER and tenant.paper_simulator is not None:
+            p_stats = tenant.paper_simulator.get_summary()
+            balance = p_stats["balance"]
+            equity = p_stats["equity"]
+            realized_pnl = p_stats["realized_pnl"]
+            unrealized_pnl = p_stats["unrealized_pnl"]
+            win_rate = p_stats["win_rate_pct"]
+            drawdown = p_stats["max_drawdown_pct"]
+            total_trades = p_stats["total_trades"]
+            winning_trades = p_stats["winning_trades"]
+            available_margin = p_stats["available_margin"]
+        else:
+            balance = tenant.config.initial_balance
+            equity = balance
+            realized_pnl = 0.0
+            unrealized_pnl = 0.0
+            win_rate = 0.0
+            drawdown = 0.0
+            total_trades = 0
+            winning_trades = 0
+            available_margin = balance
+
+        positions = get_all_positions_summary(orchestrator, tenant=tenant)
+        orders = get_all_orders_summary(orchestrator, tenant=tenant)
+        max_dd = tenant.risk_manager.config.daily_max_drawdown_pct
+        circuit_tripped = bool(tenant.risk_manager.is_circuit_breaker_tripped)
+        current_tenant_dict = tenant.config.safe_dict()
     else:
-        balance = 10000.0
-        equity = 10000.0
-        realized_pnl = 0.0
-        unrealized_pnl = 0.0
-        win_rate = 0.0
-        drawdown = 0.0
-        total_trades = 0
-        winning_trades = 0
-        available_margin = 10000.0
+        uptime = max(0.0, time.time() - orchestrator.start_time) if orchestrator.start_time > 0 else 0.0
+        mode_str = orchestrator.mode.value.upper()
+        is_running = orchestrator.is_running
+        lev = orchestrator.config.default_leverage
+        risk_pct = orchestrator.config.default_risk_pct
+        timeframe = orchestrator.timeframe
+        enabled_symbols = list(getattr(orchestrator, "enabled_symbols", set(orchestrator.target_symbols)))
+
+        if orchestrator.mode == ExecutionMode.PAPER and orchestrator.paper_simulator is not None:
+            p_stats = orchestrator.paper_simulator.get_summary()
+            balance = p_stats["balance"]
+            equity = p_stats["equity"]
+            realized_pnl = p_stats["realized_pnl"]
+            unrealized_pnl = p_stats["unrealized_pnl"]
+            win_rate = p_stats["win_rate_pct"]
+            drawdown = p_stats["max_drawdown_pct"]
+            total_trades = p_stats["total_trades"]
+            winning_trades = p_stats["winning_trades"]
+            available_margin = p_stats["available_margin"]
+        else:
+            balance = 10000.0
+            equity = 10000.0
+            realized_pnl = 0.0
+            unrealized_pnl = 0.0
+            win_rate = 0.0
+            drawdown = 0.0
+            total_trades = 0
+            winning_trades = 0
+            available_margin = 10000.0
+
+        positions = get_all_positions_summary(orchestrator)
+        orders = get_all_orders_summary(orchestrator)
+        max_dd = orchestrator.risk_manager.config.daily_max_drawdown_pct
+        circuit_tripped = bool(orchestrator.risk_manager.is_circuit_breaker_tripped)
+        current_tenant_dict = {"tenant_id": "default", "name": "Default Account", "mode": mode_str}
 
     indicators = {}
     for sym in orchestrator.target_symbols:
@@ -533,27 +653,54 @@ def get_full_state_packet(orchestrator: TradingBotOrchestrator) -> dict[str, Any
         if ind:
             indicators[sym] = ind
 
+    tenants_list = (
+        orchestrator.tenant_manager.list_tenants()
+        if hasattr(orchestrator, "tenant_manager")
+        else [
+            {
+                "tenant_id": "default",
+                "name": "Default Account",
+                "mode": mode_str,
+                "is_running": is_running,
+                "equity": round(equity, 2),
+                "balance": round(balance, 2),
+                "unrealized_pnl": round(unrealized_pnl, 2),
+                "realized_pnl": round(realized_pnl, 2),
+                "win_rate_pct": round(win_rate, 2),
+                "max_drawdown_pct": round(drawdown, 2),
+                "open_positions_count": len(positions),
+                "resting_orders_count": len(orders),
+                "leverage": lev,
+                "risk_pct": risk_pct,
+                "timeframe": timeframe,
+                "symbols": enabled_symbols,
+                "created_at": "",
+                "has_api_key": bool(orchestrator.config.delta_api_key),
+            }
+        ]
+    )
+
     return {
         "type": "state_update",
         "timestamp": time.time(),
         "status": {
-            "is_running": orchestrator.is_running,
-            "mode": orchestrator.mode.value.upper(),
+            "is_running": is_running,
+            "mode": mode_str,
             "uptime_seconds": round(uptime, 1),
             "uptime_human": format_uptime_human(uptime),
             "memory_mb": get_process_memory_mb(),
-            "circuit_breaker_tripped": bool(orchestrator.risk_manager.is_circuit_breaker_tripped),
+            "circuit_breaker_tripped": circuit_tripped,
             "public_ws_connected": bool(orchestrator.public_ws.is_connected),
             "private_ws_connected": bool(orchestrator.private_ws.is_connected) if orchestrator.private_ws else False,
             "target_symbols": orchestrator.target_symbols,
-            "enabled_symbols": list(getattr(orchestrator, "enabled_symbols", set(orchestrator.target_symbols))),
-            "timeframe": orchestrator.timeframe,
+            "enabled_symbols": enabled_symbols,
+            "timeframe": timeframe,
             "has_auth_token": bool(orchestrator.config.dashboard_auth_token_str),
             "config": {
-                "risk_pct": orchestrator.config.default_risk_pct,
-                "leverage": orchestrator.config.default_leverage,
-                "timeframe": orchestrator.timeframe,
-                "max_drawdown_pct": orchestrator.risk_manager.config.daily_max_drawdown_pct,
+                "risk_pct": risk_pct,
+                "leverage": lev,
+                "timeframe": timeframe,
+                "max_drawdown_pct": max_dd,
                 "max_pending_bars": next((s.config.max_pending_bars for s in orchestrator.strategies.values()), 3),
                 "trailing_sl_enabled": next((s.config.trailing_stop for s in orchestrator.strategies.values()), True),
                 "trailing_stop_atr_mult": next((s.config.trailing_stop_atr_mult for s in orchestrator.strategies.values()), 2.0),
@@ -573,10 +720,12 @@ def get_full_state_packet(orchestrator: TradingBotOrchestrator) -> dict[str, Any
             "available_margin": round(available_margin, 2),
         },
         "tickers": get_tickers_summary(orchestrator),
-        "positions": get_all_positions_summary(orchestrator),
-        "orders": get_all_orders_summary(orchestrator),
+        "positions": positions,
+        "orders": orders,
         "indicators": indicators,
         "logs": log_handler.get_logs(limit=25),
+        "tenants": tenants_list,
+        "current_tenant": current_tenant_dict,
     }
 
 
@@ -672,27 +821,197 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         return HTMLResponse(content=get_embedded_dashboard_html(), status_code=status.HTTP_200_OK)
 
     @app.get("/api/status")
-    async def get_bot_status() -> JSONResponse:
+    async def get_bot_status(
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    ) -> JSONResponse:
         """Returns high-level daemon telemetry, operational mode, and collateral."""
-        packet = get_full_state_packet(orchestrator)
+        target_t = tenant_id or x_tenant_id
+        packet = get_full_state_packet(orchestrator, tenant_id=target_t)
         return JSONResponse(
             content={
                 "status": packet["status"],
                 "collateral": packet["collateral"],
+                "tenants": packet.get("tenants", []),
+                "current_tenant": packet.get("current_tenant", {}),
             }
         )
 
     @app.get("/api/positions")
-    async def get_positions() -> JSONResponse:
+    async def get_positions(
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    ) -> JSONResponse:
         """Returns live active positions with entry, mark, and liquidation levels."""
-        positions = get_all_positions_summary(orchestrator)
+        target_t = tenant_id or x_tenant_id
+        tenant = resolve_tenant(orchestrator, target_t)
+        positions = get_all_positions_summary(orchestrator, tenant=tenant)
         return JSONResponse(content={"count": len(positions), "positions": positions})
 
     @app.get("/api/orders")
-    async def get_orders() -> JSONResponse:
+    async def get_orders(
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    ) -> JSONResponse:
         """Returns resting pending stop breakout orders waiting for price trigger."""
-        orders = get_all_orders_summary(orchestrator)
+        target_t = tenant_id or x_tenant_id
+        tenant = resolve_tenant(orchestrator, target_t)
+        orders = get_all_orders_summary(orchestrator, tenant=tenant)
         return JSONResponse(content={"count": len(orders), "orders": orders})
+
+    # -------------------------------------------------------------------------
+    # Multi-Tenant REST API (Phase 9)
+    # -------------------------------------------------------------------------
+
+    @app.get("/api/tenants")
+    async def get_tenants() -> JSONResponse:
+        """Returns status summaries for all registered tenant accounts."""
+        if hasattr(orchestrator, "tenant_manager"):
+            tenants = orchestrator.tenant_manager.list_tenants()
+        else:
+            tenants = [{"tenant_id": "default", "name": "Default Account", "mode": orchestrator.mode.value.upper()}]
+        return JSONResponse(content={"count": len(tenants), "tenants": tenants})
+
+    @app.post(
+        "/api/tenants",
+        dependencies=[Depends(verify_dashboard_auth)],
+    )
+    async def create_tenant_endpoint(payload: TenantCreateRequest) -> JSONResponse:
+        """Registers a new isolated tenant account with its own virtual or live wallet."""
+        if not hasattr(orchestrator, "tenant_manager"):
+            raise HTTPException(status_code=500, detail="TenantManager is not initialized.")
+
+        from delta_bot.tenant import TenantConfig
+        cfg = TenantConfig(
+            tenant_id=payload.tenant_id or f"tenant_{int(time.time())}",
+            name=payload.name,
+            mode=payload.mode,
+            initial_balance=payload.initial_balance,
+            delta_api_key=payload.delta_api_key,
+            delta_api_secret=payload.delta_api_secret,
+            delta_base_url=payload.delta_base_url,
+            delta_ws_url=payload.delta_ws_url,
+            risk_pct=payload.risk_pct,
+            leverage=payload.leverage,
+            timeframe=payload.timeframe,
+            max_drawdown_pct=payload.max_drawdown_pct,
+            symbols=payload.symbols,
+            is_active=payload.is_active,
+        )
+        try:
+            instance = orchestrator.tenant_manager.create_tenant(
+                config=cfg,
+                contract_specs=orchestrator.contract_specs,
+            )
+            return JSONResponse(
+                status_code=status.HTTP_201_CREATED,
+                content={
+                    "status": "success",
+                    "message": f"Tenant '{cfg.name}' successfully registered.",
+                    "tenant": instance.get_summary(),
+                },
+            )
+        except ValueError as ve:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve)) from ve
+
+    @app.get("/api/tenants/{tenant_id}")
+    async def get_tenant_profile(tenant_id: str) -> JSONResponse:
+        """Retrieves comprehensive status and configuration packet for a specified tenant."""
+        tenant = resolve_tenant(orchestrator, tenant_id)
+        if not tenant:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+        packet = get_full_state_packet(orchestrator, tenant_id=tenant_id)
+        return JSONResponse(content=packet)
+
+    @app.post(
+        "/api/tenants/{tenant_id}/update",
+        dependencies=[Depends(verify_dashboard_auth)],
+    )
+    @app.put(
+        "/api/tenants/{tenant_id}",
+        dependencies=[Depends(verify_dashboard_auth)],
+    )
+    async def update_tenant_endpoint(tenant_id: str, payload: TenantUpdateRequest) -> JSONResponse:
+        """Modifies parameters, risk limits, or exchange credentials for a tenant."""
+        if not hasattr(orchestrator, "tenant_manager"):
+            raise HTTPException(status_code=500, detail="TenantManager is not initialized.")
+        try:
+            updates = payload.model_dump(exclude_unset=True)
+            updated = orchestrator.tenant_manager.update_tenant(tenant_id, updates)
+            return JSONResponse(
+                content={
+                    "status": "success",
+                    "message": f"Tenant '{tenant_id}' updated successfully.",
+                    "tenant": updated.get_summary(),
+                }
+            )
+        except KeyError:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+        except Exception as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+    @app.delete(
+        "/api/tenants/{tenant_id}",
+        dependencies=[Depends(verify_dashboard_auth)],
+    )
+    async def delete_tenant_endpoint(tenant_id: str) -> JSONResponse:
+        """Emergency flattens positions and removes a custom tenant (Default tenant cannot be deleted)."""
+        if not hasattr(orchestrator, "tenant_manager"):
+            raise HTTPException(status_code=500, detail="TenantManager is not initialized.")
+        try:
+            success = await orchestrator.tenant_manager.delete_tenant(tenant_id)
+            if not success:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+            return JSONResponse(
+                content={
+                    "status": "success",
+                    "message": f"Tenant '{tenant_id}' deleted and positions flattened.",
+                }
+            )
+        except ValueError as ve:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve)) from ve
+
+    @app.post(
+        "/api/tenants/{tenant_id}/control/start",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+    )
+    async def tenant_start(tenant_id: str) -> ControlActionResponse:
+        tenant = resolve_tenant(orchestrator, tenant_id)
+        if not tenant:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+        tenant.is_running = True
+        logger.info("[TENANT %s] Signal evaluation STARTED", tenant_id)
+        return ControlActionResponse(status="success", action="start", message=f"Tenant '{tenant.config.name}' trading resumed.")
+
+    @app.post(
+        "/api/tenants/{tenant_id}/control/stop",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+    )
+    async def tenant_stop(tenant_id: str) -> ControlActionResponse:
+        tenant = resolve_tenant(orchestrator, tenant_id)
+        if not tenant:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+        tenant.is_running = False
+        logger.warning("[TENANT %s] Signal evaluation PAUSED", tenant_id)
+        return ControlActionResponse(status="success", action="stop", message=f"Tenant '{tenant.config.name}' trading paused.")
+
+    @app.post(
+        "/api/tenants/{tenant_id}/control/flatten",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+    )
+    async def tenant_flatten(tenant_id: str) -> ControlActionResponse:
+        tenant = resolve_tenant(orchestrator, tenant_id)
+        if not tenant:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+        res = await tenant.emergency_flatten()
+        return ControlActionResponse(
+            status="success",
+            action="flatten",
+            message=f"Tenant '{tenant.config.name}' flattened: {res['closed_positions']} positions closed, {res['cancelled_orders']} orders cancelled.",
+        )
 
     @app.get("/api/indicators/{symbol}")
     async def get_symbol_indicators(symbol: str) -> JSONResponse:
@@ -720,8 +1039,22 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
     )
-    async def control_start() -> ControlActionResponse:
+    async def control_start(
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    ) -> ControlActionResponse:
         """Resumes trade signal evaluation and breakout order dispatching."""
+        target_t = tenant_id or x_tenant_id
+        if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
+            tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if tenant:
+                tenant.is_running = True
+                logger.info("[TENANT %s] Signal evaluation STARTED", target_t)
+                return ControlActionResponse(
+                    status="success",
+                    action="start",
+                    message=f"Tenant '{tenant.config.name}' trading resumed.",
+                )
         orchestrator.is_running = True
         logger.info("[CONTROL API] Trading loop STARTED via web interface")
         return ControlActionResponse(
@@ -735,8 +1068,22 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
     )
-    async def control_stop() -> ControlActionResponse:
+    async def control_stop(
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    ) -> ControlActionResponse:
         """Gracefully pauses new order generation while preserving resting brackets."""
+        target_t = tenant_id or x_tenant_id
+        if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
+            tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if tenant:
+                tenant.is_running = False
+                logger.warning("[TENANT %s] Signal evaluation PAUSED", target_t)
+                return ControlActionResponse(
+                    status="success",
+                    action="stop",
+                    message=f"Tenant '{tenant.config.name}' trading paused.",
+                )
         orchestrator.is_running = False
         logger.warning("[CONTROL API] Trading loop STOPPED/PAUSED via web interface")
         return ControlActionResponse(
@@ -751,9 +1098,22 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         dependencies=[Depends(verify_dashboard_auth)],
     )
     async def control_emergency_flatten(
-        symbol: str | None = Query(default=None, description="Optional single asset symbol")
+        symbol: str | None = Query(default=None, description="Optional single asset symbol"),
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
     ) -> ControlActionResponse:
         """Triggers emergency market-close of active positions and purges resting orders."""
+        target_t = tenant_id or x_tenant_id
+        if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
+            tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if tenant:
+                res = await tenant.emergency_flatten()
+                return ControlActionResponse(
+                    status="success",
+                    action="flatten",
+                    message=f"Tenant '{tenant.config.name}' flattened: {res['closed_positions']} positions closed, {res['cancelled_orders']} orders cancelled.",
+                )
+
         logger.warning(
             "[CONTROL API] Emergency Flatten requested via web interface (Target: %s)",
             symbol or "ALL",
@@ -802,9 +1162,29 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
     )
-    async def close_position_by_product_id(product_id: int) -> ControlActionResponse:
+    async def close_position_by_product_id(
+        product_id: int,
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    ) -> ControlActionResponse:
         """Manually closes active position for a specific product ID."""
         logger.warning("[CONTROL API] Close position requested for product_id=%d", product_id)
+        target_t = tenant_id or x_tenant_id
+        if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
+            tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if tenant and tenant.paper_simulator is not None:
+                closed = tenant.paper_simulator.close_position(product_id)
+                if not closed:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"No active position found for product_id={product_id} in tenant '{target_t}'",
+                    )
+                return ControlActionResponse(
+                    status="success",
+                    action="close_position",
+                    message=f"Tenant '{tenant.config.name}' position for product {product_id} closed.",
+                )
+
         if orchestrator.mode == ExecutionMode.LIVE and orchestrator.execution_manager is not None:
             target_sym = None
             for sym, spec in orchestrator.contract_specs.items():
@@ -908,9 +1288,32 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
     )
-    async def cancel_order_by_id(order_id: str) -> ControlActionResponse:
+    async def cancel_order_by_id(
+        order_id: str,
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    ) -> ControlActionResponse:
         """Manually cancels a resting pending breakout order."""
         logger.warning("[CONTROL API] Order cancellation requested for #%s", order_id)
+        target_t = tenant_id or x_tenant_id
+        if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
+            tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if tenant and tenant.paper_simulator is not None:
+                try:
+                    numeric_id = int(order_id)
+                    for pid, o in list(tenant.paper_simulator._pending_orders.items()):
+                        if o.order_id == numeric_id or str(o.order_id) == str(order_id):
+                            tenant.paper_simulator.cancel_order(
+                                product_id=o.product_id, order_id=numeric_id
+                            )
+                            return ControlActionResponse(
+                                status="success",
+                                action="order_cancel",
+                                message=f"Tenant '{tenant.config.name}' pending order #{order_id} cancelled.",
+                            )
+                except ValueError:
+                    pass
+
         cancelled = False
 
         # 1. Check strategy pending orders
@@ -970,8 +1373,31 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
     )
-    async def update_runtime_config(payload: ConfigUpdateRequest) -> ControlActionResponse:
+    async def update_runtime_config(
+        payload: ConfigUpdateRequest,
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+    ) -> ControlActionResponse:
         """Hot-reloads risk and strategy parameters across all active engines."""
+        target_t = tenant_id or x_tenant_id
+        if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
+            updates = {}
+            if payload.timeframe is not None:
+                updates["timeframe"] = payload.timeframe
+            if payload.risk_pct is not None:
+                updates["risk_pct"] = payload.risk_pct
+            if payload.leverage is not None:
+                updates["leverage"] = payload.leverage
+            if payload.max_drawdown_pct is not None:
+                updates["max_drawdown_pct"] = payload.max_drawdown_pct
+            if updates:
+                orchestrator.tenant_manager.update_tenant(target_t, updates)
+                return ControlActionResponse(
+                    status="success",
+                    action="config_update",
+                    message=f"Configuration hot-reloaded for tenant '{target_t}'.",
+                )
+
         updated: list[str] = []
 
         if payload.timeframe is not None:
@@ -1058,6 +1484,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
     async def websocket_live_stream(
         websocket: WebSocket,
         token: str | None = Query(default=None),
+        tenant_id: str | None = Query(default=None),
     ) -> None:
         """Streams real-time state packets every 500ms to connected dashboard clients."""
         expected_token = orchestrator.config.dashboard_auth_token_str
@@ -1081,17 +1508,29 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
                 return
 
-        await ws_manager.connect(websocket)
+        target_tenant = tenant_id.strip() if tenant_id else "default"
+        await ws_manager.connect(websocket, tenant_id=target_tenant)
         try:
             # Send immediate initial state on connect
-            initial_packet = get_full_state_packet(orchestrator)
+            initial_packet = get_full_state_packet(orchestrator, tenant_id=target_tenant)
             await websocket.send_text(json.dumps(initial_packet, default=str))
 
-            # Maintain connection and listen for optional client ping messages
+            # Maintain connection and listen for client messages
             while True:
                 data = await websocket.receive_text()
                 if data == "ping":
                     await websocket.send_text(json.dumps({"type": "pong", "timestamp": time.time()}))
+                else:
+                    try:
+                        msg = json.loads(data)
+                        if msg.get("action") == "switch_tenant" and msg.get("tenant_id"):
+                            new_t = msg["tenant_id"].strip()
+                            async with ws_manager._lock:
+                                ws_manager.connection_tenants[websocket] = new_t
+                            curr_pkt = get_full_state_packet(orchestrator, tenant_id=new_t)
+                            await websocket.send_text(json.dumps(curr_pkt, default=str))
+                    except Exception:
+                        pass
         except WebSocketDisconnect:
             await ws_manager.disconnect(websocket)
         except Exception as ws_err:
@@ -1117,8 +1556,29 @@ async def _ws_broadcaster_worker(
         try:
             await asyncio.sleep(0.5)
             if ws_manager.active_connections:
-                packet = get_full_state_packet(orchestrator)
-                await ws_manager.broadcast(packet)
+                async with ws_manager._lock:
+                    connections = list(ws_manager.active_connections)
+                    tenant_map = dict(ws_manager.connection_tenants)
+
+                packet_cache: dict[str, str] = {}
+                dead_connections = []
+
+                for ws in connections:
+                    t_id = tenant_map.get(ws, "default")
+                    if t_id not in packet_cache:
+                        packet = get_full_state_packet(orchestrator, tenant_id=t_id)
+                        packet_cache[t_id] = json.dumps(packet, default=str)
+
+                    try:
+                        await ws.send_text(packet_cache[t_id])
+                    except Exception:
+                        dead_connections.append(ws)
+
+                if dead_connections:
+                    async with ws_manager._lock:
+                        for dead in dead_connections:
+                            ws_manager.active_connections.discard(dead)
+                            ws_manager.connection_tenants.pop(dead, None)
         except asyncio.CancelledError:
             break
         except Exception as b_err:

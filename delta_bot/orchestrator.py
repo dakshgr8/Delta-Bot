@@ -154,6 +154,39 @@ class TradingBotOrchestrator:
             self._register_strategy_callbacks(strat)
             self.strategies[sym] = strat
 
+        # Multi-Tenant Subsystem Initialization
+        from delta_bot.tenant import TenantConfig, TenantInstance, TenantManager
+        init_bal = (
+            self.paper_simulator.wallet.initial_balance
+            if self.paper_simulator and hasattr(self.paper_simulator, "wallet")
+            else 10000.0
+        )
+        default_cfg = TenantConfig(
+            tenant_id="default",
+            name="Default Account",
+            mode=self.mode.value,
+            initial_balance=init_bal,
+            delta_api_key=self.config.api_key_str,
+            delta_api_secret=self.config.api_secret_str,
+            delta_base_url=self.config.delta_base_url,
+            delta_ws_url=self.config.delta_ws_url,
+            risk_pct=self.config.default_risk_pct,
+            leverage=self.config.default_leverage,
+            timeframe=self.config.timeframe,
+            symbols=self.target_symbols,
+            is_active=True,
+        )
+        default_instance = TenantInstance(
+            config=default_cfg,
+            contract_specs=self.contract_specs,
+            state_manager=self.state_manager,
+            risk_manager=self.risk_manager,
+            paper_simulator=self.paper_simulator,
+            strategies=self.strategies,
+        )
+        self.tenant_manager = TenantManager(default_instance=default_instance)
+        self.tenant_manager.load_from_disk(contract_specs=self.contract_specs)
+
     def set_symbol_trading_enabled(self, symbol: str, enabled: bool) -> bool:
         """Enables or disables signal evaluation and order placement for a symbol."""
         clean = symbol.strip().upper()
@@ -420,6 +453,106 @@ class TradingBotOrchestrator:
                     exc_info=True,
                 )
 
+        # Dispatch confirmed candle close to all registered custom tenants
+        if hasattr(self, "tenant_manager"):
+            await self._dispatch_candle_to_custom_tenants(clean_symbol, candle, spec)
+
+    async def _dispatch_candle_to_custom_tenants(
+        self, clean_symbol: str, candle: Candle, spec: ContractSpec
+    ) -> None:
+        """Evaluates breakout strategy for all active custom tenants on confirmed bar close."""
+        bar_cache = self.public_ws.get_bar_cache(clean_symbol, self.timeframe)
+        session_anchor = self.public_ws.get_session_anchor(clean_symbol)
+        latest_ticker = self.latest_tickers.get(clean_symbol)
+
+        for t_id, tenant in self.tenant_manager.tenants.items():
+            if t_id == "default":
+                continue  # Default tenant is evaluated in main orchestrator loop
+            if not tenant.is_running or clean_symbol not in tenant.enabled_symbols:
+                continue
+
+            t_strat = tenant.strategies.get(clean_symbol)
+            if not t_strat:
+                continue
+
+            tenant.register_contract_spec(spec)
+            try:
+                t_intent = await t_strat.on_candle_close(
+                    candle=candle,
+                    bar_cache=bar_cache,
+                    session_anchor=session_anchor,
+                    latest_ticker=latest_ticker,
+                )
+                if t_intent is not None:
+                    await self._execute_tenant_intent(tenant, clean_symbol, spec, t_intent)
+            except Exception as err:
+                logger.error("[TENANT %s:%s] Error during breakout signal evaluation: %s", t_id, clean_symbol, err)
+
+    async def _execute_tenant_intent(
+        self, tenant: Any, clean_symbol: str, spec: ContractSpec, order_intent: OrderIntent
+    ) -> None:
+        """Executes a validated breakout order intent for an isolated tenant."""
+        t_id = tenant.config.tenant_id
+        t_equity = await tenant.get_account_equity()
+        tenant.risk_manager.update_daily_equity(t_equity)
+
+        active_count = tenant.get_active_positions_count()
+        can_open, reject_reason = tenant.risk_manager.can_open_new_position(active_count)
+        if not can_open:
+            logger.warning("[TENANT %s:%s] Order rejected by RiskManager: %s", t_id, clean_symbol, reject_reason)
+            order_intent.cancel(reject_reason or "RiskManager rejection", OrderStatus.CANCELLED_MANUAL)
+            return
+
+        if tenant.mode == ExecutionMode.PAPER and tenant.paper_simulator is not None:
+            avail_margin = (
+                tenant.paper_simulator.wallet.available_balance
+                if tenant.paper_simulator.wallet.available_balance > 0
+                else t_equity
+            )
+            margin_res = tenant.risk_manager.size_position(
+                spec=spec,
+                trigger_price=order_intent.trigger_price,
+                stop_loss_price=order_intent.initial_stop_loss,
+                account_equity=t_equity,
+                available_margin=avail_margin,
+                risk_pct_override=tenant.config.risk_pct,
+            )
+            if not margin_res.is_margin_sufficient or margin_res.final_lots < 1:
+                logger.warning("[TENANT %s:%s] Margin check failed: %s", t_id, clean_symbol, margin_res.rejection_reason)
+                return
+
+            order_intent.contract_lots = margin_res.final_lots
+            order_intent.product_id = spec.product_id
+            order_intent.leverage = tenant.config.leverage
+
+            side = "buy" if order_intent.signal_type == SignalType.BULLISH_BREAKOUT else "sell"
+            v_order = tenant.paper_simulator.submit_stop_order(
+                product_id=spec.product_id,
+                symbol=spec.symbol,
+                side=side,
+                size=order_intent.contract_lots,
+                stop_price=order_intent.trigger_price,
+                bracket_stop_loss_price=order_intent.initial_stop_loss,
+                bracket_take_profit_price=order_intent.take_profit,
+                leverage=tenant.config.leverage,
+                intent_id=order_intent.intent_id,
+            )
+            order_intent.exchange_order_id = v_order.id
+            tenant.state_manager.register_intent(order_intent)
+            tenant.state_manager.bind_exchange_order_id(order_intent.intent_id, v_order.id)
+            tenant.risk_manager.record_trade_entry()
+            logger.info(
+                "[TENANT %s:%s] Dispatched paper breakout order #%d (%s, Lots=%d, Stop=%.4f)",
+                t_id,
+                clean_symbol,
+                v_order.id,
+                side.upper(),
+                v_order.size,
+                v_order.stop_price,
+            )
+        elif tenant.mode == ExecutionMode.LIVE and tenant.execution_manager is not None:
+            await tenant.execution_manager.execute_signal(order_intent=order_intent, account_equity=t_equity)
+
     async def _handle_candle_update(self, symbol: str, candle: Candle) -> None:
         """Receives forming candle updates for intra-bar price tracking."""
         clean_symbol = symbol.strip().upper()
@@ -441,6 +574,26 @@ class TradingBotOrchestrator:
                 low=candle.low,
             )
 
+        if hasattr(self, "tenant_manager"):
+            for t_id, tenant in self.tenant_manager.tenants.items():
+                if t_id == "default":
+                    continue
+                if tenant.mode == ExecutionMode.PAPER and tenant.paper_simulator is not None:
+                    await tenant.paper_simulator.on_tick(
+                        symbol=clean_symbol,
+                        mark_price=candle.close,
+                        high=candle.high,
+                        low=candle.low,
+                        orderbook=ob,
+                    )
+                elif tenant.mode == ExecutionMode.LIVE:
+                    await tenant.state_manager.update_market_context(
+                        symbol=clean_symbol,
+                        mark_price=candle.close,
+                        high=candle.high,
+                        low=candle.low,
+                    )
+
     async def _handle_ticker(self, symbol: str, ticker: Ticker) -> None:
         """Processes real-time market ticks, mark price updates, and paper matching."""
         clean_symbol = symbol.strip().upper()
@@ -458,6 +611,22 @@ class TradingBotOrchestrator:
                 symbol=clean_symbol,
                 mark_price=ticker.mark_price,
             )
+
+        if hasattr(self, "tenant_manager"):
+            for t_id, tenant in self.tenant_manager.tenants.items():
+                if t_id == "default":
+                    continue
+                if tenant.mode == ExecutionMode.PAPER and tenant.paper_simulator is not None:
+                    await tenant.paper_simulator.on_tick(
+                        symbol=clean_symbol,
+                        mark_price=ticker.mark_price,
+                        orderbook=ob,
+                    )
+                elif tenant.mode == ExecutionMode.LIVE:
+                    await tenant.state_manager.update_market_context(
+                        symbol=clean_symbol,
+                        mark_price=ticker.mark_price,
+                    )
 
     async def _handle_orderbook(self, symbol: str, orderbook: OrderBook) -> None:
         """Caches depth snapshots for slippage estimation and liquidity checks."""
@@ -489,6 +658,12 @@ class TradingBotOrchestrator:
 
         # Reset daily circuit breaker baseline equity
         self.risk_manager.reset_daily_session(current_equity=equity)
+        if hasattr(self, "tenant_manager"):
+            for t_id, tenant in self.tenant_manager.tenants.items():
+                if t_id == "default":
+                    continue
+                t_eq = await tenant.get_account_equity()
+                tenant.risk_manager.reset_daily_session(current_equity=t_eq)
 
     # -------------------------------------------------------------------------
     # Private WebSocket Event Handlers (Live Mode)
@@ -588,6 +763,9 @@ class TradingBotOrchestrator:
                 self.contract_specs[sym] = spec
                 if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
                     self.paper_simulator.register_contract_spec(spec)
+                if hasattr(self, "tenant_manager"):
+                    for t in self.tenant_manager.tenants.values():
+                        t.register_contract_spec(spec)
                 logger.info(
                     "Cached ContractSpec for %s: ProductID=%d, LotSize=%.4f, Tick=%.4f",
                     sym,
