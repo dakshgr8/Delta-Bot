@@ -1003,6 +1003,9 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
 
         # 3. If a token was provided but did not match either:
         if provided_token:
+            if not expected_token:
+                logger.info("[AUTH] Expired/invalid Supabase token provided in open dashboard mode; falling back to anonymous session")
+                return AuthIdentity(is_authenticated=False, auth_type="anonymous", tenant_id="default")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Unauthorized: Invalid or expired authentication token.",
@@ -2155,8 +2158,9 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
 
             user_id: str | None = None
             target_tenant: str = tenant_id.strip() if tenant_id else "default"
+            is_master_admin = bool(provided_token and expected_token and secrets.compare_digest(provided_token, expected_token))
 
-            if provided_token and expected_token and secrets.compare_digest(provided_token, expected_token):
+            if is_master_admin:
                 pass
             elif provided_token:
                 sb_user = await verify_supabase_token(provided_token, orchestrator)
@@ -2170,13 +2174,19 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                         target_tenant = t_inst.config.tenant_id
                     else:
                         target_tenant = f"user-{user_id[:8]}"
-                else:
-                    logger.warning("[WS AUTH] WebSocket connection rejected: invalid Supabase token")
+                elif expected_token:
+                    logger.warning("[WS AUTH] WebSocket connection rejected: invalid Supabase token under protected dashboard")
                     try:
                         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
                     except Exception:
                         pass
                     return
+                else:
+                    logger.info(
+                        "[WS AUTH] Client provided expired/invalid Supabase token. Connecting as guest on tenant 'default'"
+                    )
+                    user_id = None
+                    target_tenant = "default"
             elif expected_token:
                 logger.warning("[WS AUTH] WebSocket connection rejected: invalid or missing authentication token")
                 try:
@@ -2190,6 +2200,17 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             # Send immediate initial state on connect
             initial_packet = get_full_state_packet(orchestrator, tenant_id=target_tenant, user_id=user_id)
             await websocket.send_text(json.dumps(initial_packet, default=str))
+
+            # If client provided an expired token in open dashboard mode, notify frontend to clear/refresh
+            if provided_token and not is_master_admin and not user_id:
+                try:
+                    await websocket.send_text(json.dumps({
+                        "type": "auth_notice",
+                        "status": "expired",
+                        "message": "Supabase authentication token expired. Connected in guest mode.",
+                    }))
+                except Exception:
+                    pass
 
             # Maintain connection and listen for client messages
             while True:
