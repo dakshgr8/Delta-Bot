@@ -203,7 +203,7 @@ class DeltaRestClient:
     ) -> list[ContractSpec]:
         """
         Fetches product metadata from /v2/products and parses/caches contract specifications:
-        - Product ID, Symbol (e.g. BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT)
+        - Product ID, Symbol (e.g. BTCUSD, ETHUSD, SOLUSD, XRPUSD, XAUTUSD)
         - Tick size (minimum price step)
         - Lot size / contract size
         - Maker and taker fee rates

@@ -673,7 +673,7 @@ class DeltaWebSocketClient:
     500-bar CircularBarCache and Daily Session Anchor.
     """
 
-    TARGET_BASE_SYMBOLS = ("BTC", "ETH", "SOL", "XRP")
+    TARGET_BASE_SYMBOLS = ("BTC", "ETH", "SOL", "XRP", "XAUT")
 
     def __init__(self, config: BotConfig | None = None) -> None:
         self._config: BotConfig = config or BotConfig()

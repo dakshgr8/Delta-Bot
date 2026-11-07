@@ -213,12 +213,12 @@ Configuration parameters:
 DELTA_API_KEY=your_live_api_key_here
 DELTA_API_SECRET=your_live_api_secret_here
 
-DELTA_BASE_URL=https://api.delta.exchange
-DELTA_WS_URL=wss://socket.delta.exchange
+DELTA_BASE_URL=https://api.india.delta.exchange
+DELTA_WS_URL=wss://socket.india.delta.exchange
 
 EXECUTION_MODE=paper
 FLATTEN_ON_SHUTDOWN=false
-TARGET_SYMBOLS=BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT
+TARGET_SYMBOLS=BTCUSD,ETHUSD,SOLUSD,XRPUSD,XAUTUSD
 TIMEFRAME=1m
 DEFAULT_LEVERAGE=5
 DEFAULT_RISK_PCT=1.0

@@ -23,6 +23,8 @@ services:
         sync: false
       - key: DELTA_API_SECRET
         sync: false
+      - key: TARGET_SYMBOLS
+        value: BTCUSD,ETHUSD,SOLUSD,XRPUSD,XAUTUSD
       - key: DELTA_BASE_URL
         value: https://api.india.delta.exchange
       - key: DELTA_WS_URL

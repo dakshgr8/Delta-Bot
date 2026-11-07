@@ -148,7 +148,7 @@ class TenantConfig(BaseModel):
     leverage: int = Field(default=5, ge=1, le=100)
     timeframe: str = "1m"
     max_drawdown_pct: float = Field(default=4.0, ge=0.1, le=100.0)
-    symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUTUSD"])
+    symbols: list[str] = Field(default_factory=lambda: ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"])
     is_active: bool = True
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -563,12 +563,21 @@ class TenantInstance:
         try:
             balances = await self.rest_client.get_wallet_balances()
             if balances:
-                target_bal = next(
-                    (b for b in balances if b.asset_symbol.upper() == "USDT"),
-                    None,
-                )
-                if not target_bal:
-                    target_bal = max(balances, key=lambda b: b.balance)
+                # Delta India collateral assets: INR, USD, USDT, or highest positive balance
+                positive_balances = [b for b in balances if float(b.balance) > 0]
+                target_bal = None
+                if positive_balances:
+                    target_bal = next(
+                        (b for b in positive_balances if b.asset_symbol.upper() in ("INR", "USD", "USDT")),
+                        max(positive_balances, key=lambda b: float(b.balance)),
+                    )
+                else:
+                    target_bal = (
+                        next((b for b in balances if b.asset_symbol.upper() == "INR"), None)
+                        or next((b for b in balances if b.asset_symbol.upper() == "USD"), None)
+                        or next((b for b in balances if b.asset_symbol.upper() == "USDT"), None)
+                        or balances[0]
+                    )
 
                 self.live_balance = round(float(target_bal.balance), 4)
                 self.live_available_margin = round(float(target_bal.available_balance), 4)
@@ -846,7 +855,7 @@ class TenantManager:
             risk_pct=1.0,
             timeframe="1m",
             max_drawdown_pct=4.0,
-            symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUTUSD"],
+            symbols=["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"],
             is_active=True,
         )
         instance = TenantInstance(config=cfg, contract_specs=contract_specs or {})
@@ -1098,7 +1107,7 @@ class TenantManager:
                     leverage=int(row.get("leverage", 5)),
                     timeframe=row.get("timeframe", "1m"),
                     max_drawdown_pct=float(row.get("max_drawdown_pct", 4.0)),
-                    symbols=row.get("symbols") or ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUTUSD"],
+                    symbols=row.get("symbols") or ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"],
                     is_active=bool(row.get("is_active", True)),
                     created_at=row.get("created_at") or datetime.now(timezone.utc).isoformat(),
                 )

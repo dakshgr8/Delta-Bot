@@ -76,18 +76,18 @@ class ContractSpec(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     product_id: int = Field(description="Unique product identifier")
-    symbol: str = Field(description="Trading symbol, e.g. BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT")
+    symbol: str = Field(description="Trading symbol, e.g. BTCUSD, ETHUSD, SOLUSD, XRPUSD, XAUTUSD")
     contract_type: str = Field(description="Contract category (e.g., perpetual_futures, spot)")
     contract_value: float = Field(
         description="Contract/lot size multiplier in underlying asset units (e.g., 0.001 BTC)"
     )
-    tick_size: float = Field(description="Minimum price increment (e.g., 0.5 for BTCUSDT)")
+    tick_size: float = Field(description="Minimum price increment (e.g., 0.5 for BTCUSD)")
     maker_commission_rate: float = Field(description="Fee rate applied to maker orders (e.g. 0.0001)")
     taker_commission_rate: float = Field(description="Fee rate applied to taker orders (e.g. 0.0001)")
     state: str = Field(default="live", description="Product lifecycle state: live, expired, etc.")
     trading_status: str = Field(default="operational", description="Trading status: operational, halted, etc.")
     underlying_symbol: str = Field(default="", description="Base underlying symbol (e.g. BTC)")
-    quoting_symbol: str = Field(default="USDT", description="Quoting currency symbol (e.g. USDT)")
+    quoting_symbol: str = Field(default="USD", description="Quoting currency symbol (e.g. USD)")
     settling_symbol: str | None = Field(default="USDT", description="Settlement asset symbol")
     description: str = Field(default="", description="Descriptive product title")
 

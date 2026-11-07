@@ -55,18 +55,18 @@ class BotConfig(BaseSettings):
         description="Delta Exchange API Secret",
     )
 
-    # Base URL configuration (Supports India, Global, and Testnet)
+    # Base URL configuration (Defaults to Delta Exchange India)
     delta_base_url: str = Field(
-        default=DeltaEnvironment.GLOBAL.value,
+        default=DeltaEnvironment.INDIA.value,
         validation_alias=AliasChoices("DELTA_BASE_URL", "delta_base_url"),
-        description="Delta Exchange base API URL",
+        description="Delta Exchange India base API URL",
     )
 
-    # WebSocket URL configuration (Supports India and Global)
+    # WebSocket URL configuration (Defaults to Delta Exchange India)
     delta_ws_url: str = Field(
-        default=DeltaWebSocketEnvironment.GLOBAL.value,
+        default=DeltaWebSocketEnvironment.INDIA.value,
         validation_alias=AliasChoices("DELTA_WS_URL", "delta_ws_url"),
-        description="Delta Exchange WebSocket API URL",
+        description="Delta Exchange India WebSocket API URL",
     )
     ws_heartbeat_interval_sec: float = Field(
         default=20.0,
@@ -162,9 +162,9 @@ class BotConfig(BaseSettings):
         description="Whether to market-close active positions when SIGINT/SIGTERM is received",
     )
     target_symbols_str: str = Field(
-        default="BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,XAUTUSD",
+        default="BTCUSD,ETHUSD,SOLUSD,XRPUSD,XAUTUSD",
         validation_alias=AliasChoices("TARGET_SYMBOLS", "target_symbols"),
-        description="Comma-separated target assets (e.g. BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,XAUTUSD)",
+        description="Comma-separated target assets on Delta Exchange India (e.g. BTCUSD,ETHUSD,SOLUSD,XRPUSD,XAUTUSD)",
     )
     timeframe: str = Field(
         default="1m",

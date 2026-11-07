@@ -12,7 +12,9 @@ def test_config_defaults() -> None:
         delta_api_key=SecretStr("dummy_key"),
         delta_api_secret=SecretStr("dummy_secret"),
     )
-    assert config.delta_base_url == "https://api.delta.exchange"
+    assert config.delta_base_url == "https://api.india.delta.exchange"
+    assert config.delta_ws_url == "wss://socket.india.delta.exchange"
+    assert config.target_symbols == ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"]
     assert config.request_timeout_sec == 10.0
     assert config.max_retries == 3
     assert config.backoff_base_sec == 0.5

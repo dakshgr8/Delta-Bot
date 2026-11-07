@@ -69,7 +69,7 @@ class StrategyConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    symbol: str = Field(description="Target contract symbol (e.g. BTCUSDT, ETHUSDT)")
+    symbol: str = Field(description="Target contract symbol (e.g. BTCUSD, ETHUSD, XAUTUSD)")
     resolution: str = Field(default="1m", description="Candle timeframe resolution")
 
     # Indicator Parameters

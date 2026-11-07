@@ -34,18 +34,22 @@ async def test_client_public_endpoints() -> None:
         assert "SOL" in target_map
         assert "XRP" in target_map
 
-        # Verify caching without network call
-        cached_btc = client.get_cached_contract_spec("BTCUSDT")
+        # Verify caching without network call (both BTCUSD and BTCUSDT alias resolve)
+        cached_btc = client.get_cached_contract_spec("BTCUSD")
         assert cached_btc is not None
-        assert cached_btc.symbol == "BTCUSDT"
+        assert cached_btc.symbol == "BTCUSD"
+
+        cached_btc_alias = client.get_cached_contract_spec("BTCUSDT")
+        assert cached_btc_alias is not None
+        assert cached_btc_alias.product_id == cached_btc.product_id
 
         # Real-time ticker
-        ticker = await client.get_ticker("BTCUSDT")
-        assert ticker.symbol == "BTCUSDT"
+        ticker = await client.get_ticker("BTCUSD")
+        assert ticker.symbol == "BTCUSD"
         assert ticker.mark_price > 0
 
         # Historical closed candles for REST warm-up
-        hist_candles = await client.get_historical_candles("BTCUSDT", resolution="1m", limit=10)
+        hist_candles = await client.get_historical_candles("BTCUSD", resolution="1m", limit=10)
         assert len(hist_candles) > 0
         assert hist_candles[0].is_closed is True
         assert hist_candles[0].open > 0

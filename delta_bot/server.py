@@ -120,7 +120,7 @@ class ConfigUpdateRequest(BaseModel):
     )
     delta_base_url: str | None = Field(
         default=None,
-        description="Delta Exchange Base API URL (e.g. https://api.delta.exchange or https://cdn.india.delta.exchange)",
+        description="Delta Exchange India Base API URL (e.g. https://api.india.delta.exchange)",
     )
     reset_keys: bool | None = Field(
         default=False,
@@ -137,7 +137,7 @@ class ModeSwitchRequest(BaseModel):
 class SymbolToggleRequest(BaseModel):
     """Payload schema for enabling or disabling trading on a specific asset symbol."""
 
-    symbol: str = Field(description="Target contract symbol (e.g. BTCUSDT)")
+    symbol: str = Field(description="Target contract symbol (e.g. BTCUSD, XAUTUSD)")
     enabled: bool = Field(description="Whether breakout trading evaluation is enabled")
 
 
@@ -159,13 +159,13 @@ class TenantCreateRequest(BaseModel):
     initial_balance: float = Field(default=10000.0, ge=100.0, description="Virtual starting collateral in USD")
     delta_api_key: str = Field(default="", description="Delta Exchange API Key")
     delta_api_secret: str = Field(default="", description="Delta Exchange API Secret")
-    delta_base_url: str = Field(default="https://api.delta.exchange", description="Delta Exchange REST API URL")
-    delta_ws_url: str = Field(default="wss://socket.delta.exchange", description="Delta Exchange WebSocket URL")
+    delta_base_url: str = Field(default="https://api.india.delta.exchange", description="Delta Exchange India REST API URL")
+    delta_ws_url: str = Field(default="wss://socket.india.delta.exchange", description="Delta Exchange India WebSocket URL")
     risk_pct: float = Field(default=1.0, ge=0.1, le=10.0, description="Risk percentage per breakout trade")
     leverage: int = Field(default=5, ge=1, le=100, description="Default leverage tier")
     timeframe: str = Field(default="1m", description="Resolution timeframe (e.g. 1m, 3m, 5m, 15m)")
     max_drawdown_pct: float = Field(default=4.0, ge=0.5, le=50.0, description="Daily max drawdown limit %")
-    symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUTUSD"])
+    symbols: list[str] = Field(default_factory=lambda: ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"])
     is_active: bool = Field(default=True, description="Whether trading signal evaluation is active")
 
 
