@@ -408,6 +408,12 @@ class TradingBotOrchestrator:
             except Exception as fan_err:
                 logger.error("[FANOUT ERROR] Failed to fan out signal %s: %s", base_sig_id, fan_err)
 
+        # Check if default tenant execution is paused
+        if hasattr(self, "tenant_manager") and "default" in self.tenant_manager.tenants:
+            if not self.tenant_manager.tenants["default"].is_running:
+                logger.debug("[%s] Default tenant is paused. Skipping default tenant order execution.", clean_symbol)
+                return
+
         # Pre-trade Risk Limit Verification
         active_pos_count = self.get_active_positions_count()
         can_open, reject_reason = self.risk_manager.can_open_new_position(active_pos_count, symbol=clean_symbol)

@@ -1506,9 +1506,12 @@
     // -------------------------------------------------------------------------
     async function toggleEngine() {
       const action = isRunning ? 'stop' : 'start';
+      const activeTenant = (currentTenantId && currentTenantId !== 'default') 
+        ? currentTenantId 
+        : (localStorage.getItem('tenant_id') || 'default');
       try {
-        const endpoint = (currentTenantId && currentTenantId !== 'default')
-          ? `${BACKEND_URL}/api/tenants/${currentTenantId}/control/${action}`
+        const endpoint = (activeTenant && activeTenant !== 'default')
+          ? `${BACKEND_URL}/api/tenants/${activeTenant}/control/${action}`
           : `${BACKEND_URL}/api/control/${action}`;
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -1523,10 +1526,13 @@
     }
 
     async function emergencyFlatten() {
-      if (!confirm('KILL SWITCH: Close ALL open positions and cancel ALL resting orders immediately?')) return;
+      if (!confirm('KILL SWITCH: Close ALL open positions and cancel ALL resting orders immediately for this desk?')) return;
+      const activeTenant = (currentTenantId && currentTenantId !== 'default') 
+        ? currentTenantId 
+        : (localStorage.getItem('tenant_id') || 'default');
       try {
-        const endpoint = (currentTenantId && currentTenantId !== 'default')
-          ? `${BACKEND_URL}/api/tenants/${currentTenantId}/control/flatten`
+        const endpoint = (activeTenant && activeTenant !== 'default')
+          ? `${BACKEND_URL}/api/tenants/${activeTenant}/control/flatten`
           : `${BACKEND_URL}/api/control/flatten`;
         const res = await fetch(endpoint, {
           method: 'POST',

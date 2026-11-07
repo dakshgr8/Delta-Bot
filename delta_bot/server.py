@@ -1316,6 +1316,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         tenant.is_running = True
+        tenant.config.is_active = True
         logger.info("[TENANT %s] Signal evaluation STARTED", tenant_id)
         return ControlActionResponse(status="success", action="start", message=f"Tenant '{tenant.config.name}' trading resumed.")
 
@@ -1334,6 +1335,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         tenant.is_running = False
+        tenant.config.is_active = False
         logger.warning("[TENANT %s] Signal evaluation PAUSED", tenant_id)
         return ControlActionResponse(status="success", action="stop", message=f"Tenant '{tenant.config.name}' trading paused.")
 
@@ -1356,6 +1358,76 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             status="success",
             action="flatten",
             message=f"Tenant '{tenant.config.name}' flattened: {res['closed_positions']} positions closed, {res['cancelled_orders']} orders cancelled.",
+        )
+
+    @app.post(
+        "/api/tenants/control/start-all",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+    )
+    async def tenants_control_start_all(
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> ControlActionResponse:
+        """Admin-only: Resumes trading across ALL registered tenants."""
+        if auth.auth_type == "user":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin permissions required.")
+        if not hasattr(orchestrator, "tenant_manager"):
+            raise HTTPException(status_code=500, detail="TenantManager not initialized.")
+        count = orchestrator.tenant_manager.resume_all_tenants()
+        orchestrator.is_running = True
+        return ControlActionResponse(
+            status="success",
+            action="start",
+            message=f"Resumed trading across all {count} registered tenants.",
+        )
+
+    @app.post(
+        "/api/tenants/control/stop-all",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+    )
+    async def tenants_control_stop_all(
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> ControlActionResponse:
+        """Admin-only: Pauses trading across ALL registered tenants."""
+        if auth.auth_type == "user":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin permissions required.")
+        if not hasattr(orchestrator, "tenant_manager"):
+            raise HTTPException(status_code=500, detail="TenantManager not initialized.")
+        count = orchestrator.tenant_manager.pause_all_tenants()
+        orchestrator.is_running = False
+        return ControlActionResponse(
+            status="success",
+            action="stop",
+            message=f"Paused trading across all {count} registered tenants.",
+        )
+
+    @app.post(
+        "/api/tenants/control/flatten-all",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+    )
+    async def tenants_control_flatten_all(
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> ControlActionResponse:
+        """Admin-only: Emergency market-closes positions and cancels orders across ALL active tenants."""
+        if auth.auth_type == "user":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin permissions required.")
+        if not hasattr(orchestrator, "tenant_manager"):
+            raise HTTPException(status_code=500, detail="TenantManager not initialized.")
+        res = await orchestrator.tenant_manager.flatten_all_tenants()
+        if orchestrator.mode == ExecutionMode.LIVE and orchestrator.execution_manager is not None:
+            try:
+                await orchestrator.execution_manager.emergency_flatten()
+            except Exception:
+                pass
+        elif orchestrator.mode == ExecutionMode.PAPER and orchestrator.paper_simulator is not None:
+            orchestrator.paper_simulator.flatten_all()
+        orchestrator.is_running = False
+        return ControlActionResponse(
+            status="success",
+            action="flatten",
+            message=f"Global emergency flatten executed across {res['total_tenants']} tenants: {res['closed_positions']} positions closed, {res['cancelled_orders']} orders cancelled.",
         )
 
     @app.get("/api/indicators/{symbol}")
@@ -1384,7 +1456,14 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
     )
+    @app.post(
+        "/api/control/resume",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+        include_in_schema=False,
+    )
     async def control_start(
+        all_tenants: bool = Query(default=False, description="Whether to resume trading across ALL registered tenants"),
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
         auth: AuthIdentity = Depends(get_current_auth),
@@ -1402,6 +1481,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
             if tenant:
                 tenant.is_running = True
+                tenant.config.is_active = True
                 logger.info("[USER %s TENANT %s] Signal evaluation STARTED", auth.user_id, target_t)
                 return ControlActionResponse(
                     status="success",
@@ -1410,11 +1490,23 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 )
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{target_t}' not found.")
 
+        # Admin Global All-Tenants Scope
+        if all_tenants and hasattr(orchestrator, "tenant_manager"):
+            count = orchestrator.tenant_manager.resume_all_tenants()
+            orchestrator.is_running = True
+            logger.info("[CONTROL API] Resumed all %d tenants and master orchestrator", count)
+            return ControlActionResponse(
+                status="success",
+                action="start",
+                message=f"Trading resumed across all {count} registered tenants.",
+            )
+
         target_t = tenant_id or x_tenant_id
         if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
             if tenant:
                 tenant.is_running = True
+                tenant.config.is_active = True
                 logger.info("[TENANT %s] Signal evaluation STARTED", target_t)
                 return ControlActionResponse(
                     status="success",
@@ -1441,6 +1533,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         include_in_schema=False,
     )
     async def control_stop(
+        all_tenants: bool = Query(default=False, description="Whether to pause trading across ALL registered tenants"),
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
         auth: AuthIdentity = Depends(get_current_auth),
@@ -1458,6 +1551,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
             if tenant:
                 tenant.is_running = False
+                tenant.config.is_active = False
                 logger.warning("[USER %s TENANT %s] Signal evaluation PAUSED", auth.user_id, target_t)
                 return ControlActionResponse(
                     status="success",
@@ -1466,11 +1560,23 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 )
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{target_t}' not found.")
 
+        # Admin Global All-Tenants Scope
+        if all_tenants and hasattr(orchestrator, "tenant_manager"):
+            count = orchestrator.tenant_manager.pause_all_tenants()
+            orchestrator.is_running = False
+            logger.warning("[CONTROL API] Paused all %d tenants and master orchestrator", count)
+            return ControlActionResponse(
+                status="success",
+                action="stop",
+                message=f"Trading paused across all {count} registered tenants.",
+            )
+
         target_t = tenant_id or x_tenant_id
         if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
             if tenant:
                 tenant.is_running = False
+                tenant.config.is_active = False
                 logger.warning("[TENANT %s] Signal evaluation PAUSED", target_t)
                 return ControlActionResponse(
                     status="success",
@@ -1492,6 +1598,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
     )
     async def control_emergency_flatten(
         symbol: str | None = Query(default=None, description="Optional single asset symbol"),
+        all_tenants: bool = Query(default=False, description="Whether to flatten ALL registered tenants"),
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
         auth: AuthIdentity = Depends(get_current_auth),
@@ -1515,6 +1622,23 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                     message=f"Tenant '{tenant.config.name}' flattened: {res['closed_positions']} positions closed, {res['cancelled_orders']} orders cancelled.",
                 )
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{target_t}' not found.")
+
+        # Admin Global All-Tenants Scope
+        if all_tenants and hasattr(orchestrator, "tenant_manager"):
+            res = await orchestrator.tenant_manager.flatten_all_tenants()
+            if orchestrator.mode == ExecutionMode.LIVE and orchestrator.execution_manager is not None:
+                try:
+                    await orchestrator.execution_manager.emergency_flatten(symbol=symbol)
+                except Exception:
+                    pass
+            elif orchestrator.mode == ExecutionMode.PAPER and orchestrator.paper_simulator is not None:
+                orchestrator.paper_simulator.flatten_all()
+            orchestrator.is_running = False
+            return ControlActionResponse(
+                status="success",
+                action="flatten",
+                message=f"Global emergency flatten executed across {res['total_tenants']} tenants: {res['closed_positions']} positions closed, {res['cancelled_orders']} orders cancelled.",
+            )
 
         target_t = tenant_id or x_tenant_id
         if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):

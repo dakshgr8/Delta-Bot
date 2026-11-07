@@ -643,9 +643,14 @@ class TenantInstance:
         cancelled_orders = 0
         closed_positions = 0
 
+        # Halt signal evaluation to prevent re-entering trades immediately after kill switch
+        self.is_running = False
+        self.config.is_active = False
+
         if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
             cancelled_orders = len(self.paper_simulator._pending_orders)
             closed_positions = len(self.paper_simulator._open_positions)
+            self.paper_simulator.cancel_all_orders()
             self.paper_simulator.flatten_all()
         elif self.mode == ExecutionMode.LIVE and self.execution_manager is not None:
             try:
@@ -920,6 +925,54 @@ class TenantManager:
         self.delete_tenant_from_supabase(clean_id)
         logger.info("[TENANT DELETED] Permanently removed tenant ID '%s'", clean_id)
         return True
+
+    def pause_all_tenants(self) -> int:
+        """Pauses signal evaluation across all registered tenants."""
+        count = 0
+        for t in self.tenants.values():
+            t.is_running = False
+            t.config.is_active = False
+            count += 1
+        logger.warning("[TENANT MANAGER] Paused signal evaluation across all %d tenants", count)
+        return count
+
+    def resume_all_tenants(self) -> int:
+        """Resumes signal evaluation across all registered tenants."""
+        count = 0
+        for t in self.tenants.values():
+            t.is_running = True
+            t.config.is_active = True
+            count += 1
+        logger.info("[TENANT MANAGER] Resumed signal evaluation across all %d tenants", count)
+        return count
+
+    async def flatten_all_tenants(self) -> dict[str, Any]:
+        """Emergency market-closes positions and cancels orders across ALL active tenants."""
+        total_cancelled = 0
+        total_closed = 0
+        details = {}
+        for t_id, t in list(self.tenants.items()):
+            try:
+                res = await t.emergency_flatten()
+                details[t_id] = res
+                total_cancelled += res.get("cancelled_orders", 0)
+                total_closed += res.get("closed_positions", 0)
+            except Exception as e:
+                logger.error("[TENANT %s] Error in flatten_all_tenants: %s", t_id, e)
+                details[t_id] = {"status": "error", "error": str(e)}
+
+        logger.warning(
+            "[TENANT MANAGER] GLOBAL EMERGENCY FLATTEN: Cancelled %d orders, Closed %d positions across %d tenants",
+            total_cancelled,
+            total_closed,
+            len(self.tenants),
+        )
+        return {
+            "total_tenants": len(self.tenants),
+            "cancelled_orders": total_cancelled,
+            "closed_positions": total_closed,
+            "details": details,
+        }
 
     def sanitize_tenant_id(self, raw_id: str) -> str:
         """Converts raw string into a clean URL-friendly identifier."""

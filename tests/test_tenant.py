@@ -701,5 +701,111 @@ def test_xautusd_stop_loss_and_risk_sizing(tmp_path: Path) -> None:
     assert margin_res.required_margin == pytest.approx(100.0, abs=0.1)
 
 
+@pytest.mark.asyncio
+async def test_tenant_pause_and_kill_switch_isolation(multi_tenant_orchestrator: TradingBotOrchestrator) -> None:
+    """Verifies that pausing or flattening Tenant A has ZERO effect on Tenant B."""
+    app = create_app(multi_tenant_orchestrator)
+    client = TestClient(app)
+    mgr = multi_tenant_orchestrator.tenant_manager
+
+    alice = mgr.create_tenant(
+        TenantConfig(tenant_id="alice_desk", name="Alice Desk", mode="paper", initial_balance=10000.0),
+        contract_specs=multi_tenant_orchestrator.contract_specs,
+    )
+    bob = mgr.create_tenant(
+        TenantConfig(tenant_id="bob_desk", name="Bob Desk", mode="paper", initial_balance=10000.0),
+        contract_specs=multi_tenant_orchestrator.contract_specs,
+    )
+
+    btc_spec = multi_tenant_orchestrator.contract_specs["BTCUSDT"]
+
+    # Place orders for both Alice and Bob
+    alice.paper_simulator.submit_stop_order(
+        product_id=btc_spec.product_id,
+        symbol="BTCUSDT",
+        side="buy",
+        size=1,
+        stop_price=70000.0,
+        bracket_stop_loss_price=69000.0,
+        bracket_take_profit_price=72000.0,
+        leverage=5,
+        intent_id="intent_alice_1",
+    )
+    bob.paper_simulator.submit_stop_order(
+        product_id=btc_spec.product_id,
+        symbol="BTCUSDT",
+        side="buy",
+        size=1,
+        stop_price=70000.0,
+        bracket_stop_loss_price=69000.0,
+        bracket_take_profit_price=72000.0,
+        leverage=5,
+        intent_id="intent_bob_1",
+    )
+
+    assert len(alice.paper_simulator._pending_orders) == 1
+    assert len(bob.paper_simulator._pending_orders) == 1
+    assert alice.is_running is True
+    assert bob.is_running is True
+
+    # 1. Alice pauses her engine
+    res_pause = client.post("/api/tenants/alice_desk/control/stop")
+    assert res_pause.status_code == 200
+    assert alice.is_running is False
+    # Bob is still running!
+    assert bob.is_running is True
+
+    # 2. Alice hits the Kill Switch (Emergency Flatten)
+    res_flatten = client.post("/api/tenants/alice_desk/control/flatten")
+    assert res_flatten.status_code == 200
+    assert len(alice.paper_simulator._pending_orders) == 0
+    # Bob's orders and positions are completely untouched!
+    assert len(bob.paper_simulator._pending_orders) == 1
+
+
+@pytest.mark.asyncio
+async def test_admin_all_tenants_control(multi_tenant_orchestrator: TradingBotOrchestrator) -> None:
+    """Verifies that admin-scoped global controls successfully manage all tenants."""
+    app = create_app(multi_tenant_orchestrator)
+    client = TestClient(app)
+    mgr = multi_tenant_orchestrator.tenant_manager
+
+    t1 = mgr.create_tenant(
+        TenantConfig(tenant_id="desk_1", name="Desk 1", mode="paper"),
+        contract_specs=multi_tenant_orchestrator.contract_specs,
+    )
+    t2 = mgr.create_tenant(
+        TenantConfig(tenant_id="desk_2", name="Desk 2", mode="paper"),
+        contract_specs=multi_tenant_orchestrator.contract_specs,
+    )
+
+    btc_spec = multi_tenant_orchestrator.contract_specs["BTCUSDT"]
+    t1.paper_simulator.submit_stop_order(product_id=btc_spec.product_id, symbol="BTCUSDT", side="buy", size=1, stop_price=70000.0, intent_id="o1")
+    t2.paper_simulator.submit_stop_order(product_id=btc_spec.product_id, symbol="BTCUSDT", side="buy", size=1, stop_price=70000.0, intent_id="o2")
+
+    # 1. Admin Stop All
+    res_stop = client.post("/api/tenants/control/stop-all")
+    assert res_stop.status_code == 200
+    assert t1.is_running is False
+    assert t2.is_running is False
+    assert multi_tenant_orchestrator.is_running is False
+
+    # 2. Admin Resume All
+    res_start = client.post("/api/tenants/control/start-all")
+    assert res_start.status_code == 200
+    assert t1.is_running is True
+    assert t2.is_running is True
+    assert multi_tenant_orchestrator.is_running is True
+
+    # 3. Admin Flatten All
+    res_flatten = client.post("/api/tenants/control/flatten-all")
+    assert res_flatten.status_code == 200
+    assert len(t1.paper_simulator._pending_orders) == 0
+    assert len(t2.paper_simulator._pending_orders) == 0
+    assert t1.is_running is False
+    assert t2.is_running is False
+
+
+
 
 
