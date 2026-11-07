@@ -62,6 +62,8 @@ class TradingStateManager:
         # Real-time Market Context Cache for Liquidation Guard
         self._cached_mark_prices: dict[str, float] = {}  # symbol -> mark_price
         self._cached_atrs: dict[str, float] = {}  # symbol -> latest atr
+        self._cached_market_timestamps: dict[str, float] = {}  # symbol -> epoch timestamp
+        self.is_reconciling: bool = False
 
         # Background Periodic Sync Worker
         self._reconcile_task: asyncio.Task[None] | None = None
@@ -172,11 +174,20 @@ class TradingStateManager:
         """Updates real-time mark price and ATR for liquidation proximity evaluation."""
         clean_symbol = symbol.strip().upper()
         self._cached_mark_prices[clean_symbol] = mark_price
+        self._cached_market_timestamps[clean_symbol] = time.time()
         if atr is not None and atr > 0:
             self._cached_atrs[clean_symbol] = atr
 
         # Run liquidation proximity evaluation
         return await self.check_liquidation_proximity(clean_symbol)
+
+    def get_market_context_age(self, symbol: str) -> float | None:
+        """Returns age in seconds of the latest market context / ticker update for a symbol."""
+        clean_symbol = symbol.strip().upper()
+        ts = self._cached_market_timestamps.get(clean_symbol)
+        if ts is None:
+            return None
+        return time.time() - ts
 
     # -------------------------------------------------------------------------
     # WebSocket Event Dispatchers (Push Pipeline)
@@ -400,116 +411,120 @@ class TradingStateManager:
         2. Detects filled or cancelled entry orders that missed socket events.
         3. Discovers and binds resting child Stop Loss / Take Profit orders.
         """
-        report: dict[str, Any] = {
-            "timestamp": time.time(),
-            "synced_positions": 0,
-            "ghost_positions_found": 0,
-            "unfilled_orders_checked": 0,
-            "child_orders_bound": 0,
-        }
-
-        logger.debug("Starting periodic REST state reconciliation...")
-
-        # 1. Fetch live open positions from REST
+        self.is_reconciling = True
         try:
-            positions = await self.client.get_open_positions()
-            active_product_ids = set()
+            report: dict[str, Any] = {
+                "timestamp": time.time(),
+                "synced_positions": 0,
+                "ghost_positions_found": 0,
+                "unfilled_orders_checked": 0,
+                "child_orders_bound": 0,
+            }
 
-            for pos in positions:
-                self._open_positions[pos.product_id] = pos
-                active_product_ids.add(pos.product_id)
+            logger.debug("Starting periodic REST state reconciliation...")
 
-                if pos.size != 0:
-                    report["synced_positions"] += 1
-                    # Ghost Position Check: Is this position tracked by a local OrderIntent?
-                    tracked_intent = self.get_active_intent_for_product(pos.product_id)
-                    if tracked_intent is None:
-                        # Untracked exchange position discovered!
-                        ghost = GhostPosition(
-                            product_id=pos.product_id,
-                            symbol=pos.symbol,
-                            size=pos.size,
-                            entry_price=pos.entry_price,
-                            liquidation_price=pos.liquidation_price,
-                        )
-                        self._ghost_positions[pos.product_id] = ghost
-                        report["ghost_positions_found"] += 1
-                        logger.critical(
-                            "👻 GHOST POSITION DETECTED: %s (id=%d) has %d open lots at %.4f "
-                            "not tracked by local bot memory! Tagged as EXTERNAL_UNTRACKED.",
-                            pos.symbol,
-                            pos.product_id,
-                            pos.size,
-                            pos.entry_price,
-                        )
-                        for cb in self._ghost_callbacks:
-                            try:
-                                res = cb(ghost)
-                                if asyncio.iscoroutine(res):
-                                    await res
-                            except Exception as exc:
-                                logger.error("Error in ghost position callback: %s", exc)
-                    else:
-                        # If tracked intent is still marked PENDING, REST confirms it filled!
-                        if tracked_intent.is_pending:
-                            tracked_intent.record_fill(
-                                fill_price=pos.entry_price,
-                                filled_size=abs(pos.size),
+            # 1. Fetch live open positions from REST
+            try:
+                positions = await self.client.get_open_positions()
+                active_product_ids = set()
+
+                for pos in positions:
+                    self._open_positions[pos.product_id] = pos
+                    active_product_ids.add(pos.product_id)
+
+                    if pos.size != 0:
+                        report["synced_positions"] += 1
+                        # Ghost Position Check: Is this position tracked by a local OrderIntent?
+                        tracked_intent = self.get_active_intent_for_product(pos.product_id)
+                        if tracked_intent is None:
+                            # Untracked exchange position discovered!
+                            ghost = GhostPosition(
+                                product_id=pos.product_id,
+                                symbol=pos.symbol,
+                                size=pos.size,
+                                entry_price=pos.entry_price,
+                                liquidation_price=pos.liquidation_price,
                             )
-                            logger.info(
-                                "REST reconciliation confirmed fill for OrderIntent [%s]: %d lots at %.4f",
-                                tracked_intent.intent_id,
-                                abs(pos.size),
+                            self._ghost_positions[pos.product_id] = ghost
+                            report["ghost_positions_found"] += 1
+                            logger.critical(
+                                "👻 GHOST POSITION DETECTED: %s (id=%d) has %d open lots at %.4f "
+                                "not tracked by local bot memory! Tagged as EXTERNAL_UNTRACKED.",
+                                pos.symbol,
+                                pos.product_id,
+                                pos.size,
                                 pos.entry_price,
                             )
-                            await self._emit_fill(tracked_intent, pos.entry_price, abs(pos.size))
+                            for cb in self._ghost_callbacks:
+                                try:
+                                    res = cb(ghost)
+                                    if asyncio.iscoroutine(res):
+                                        await res
+                                except Exception as exc:
+                                    logger.error("Error in ghost position callback: %s", exc)
+                        else:
+                            # If tracked intent is still marked PENDING, REST confirms it filled!
+                            if tracked_intent.is_pending:
+                                tracked_intent.record_fill(
+                                    fill_price=pos.entry_price,
+                                    filled_size=abs(pos.size),
+                                )
+                                logger.info(
+                                    "REST reconciliation confirmed fill for OrderIntent [%s]: %d lots at %.4f",
+                                    tracked_intent.intent_id,
+                                    abs(pos.size),
+                                    pos.entry_price,
+                                )
+                                await self._emit_fill(tracked_intent, pos.entry_price, abs(pos.size))
 
-        except Exception as exc:
-            logger.warning("REST position reconciliation error: %s", exc)
+            except Exception as exc:
+                logger.warning("REST position reconciliation error: %s", exc)
 
-        # 2. Fetch live open orders from REST
-        try:
-            open_orders = await self.client.get_open_orders()
-            open_order_map = {o.id: o for o in open_orders}
-            report["unfilled_orders_checked"] = len(open_orders)
+            # 2. Fetch live open orders from REST
+            try:
+                open_orders = await self.client.get_open_orders()
+                open_order_map = {o.id: o for o in open_orders}
+                report["unfilled_orders_checked"] = len(open_orders)
 
-            # Reconcile pending intents: if parent order is missing from open_orders, check fill status
-            for parent_order_id, intent in list(self._intents_by_exchange_id.items()):
-                if intent.is_pending and parent_order_id not in open_order_map:
-                    # Parent order is no longer open! Check if position is open
-                    pos = self._open_positions.get(intent.product_id or 0)
-                    if pos and pos.size != 0:
-                        intent.record_fill(fill_price=pos.entry_price, filled_size=abs(pos.size))
-                        logger.info("REST sync reconciled filled parent order ID=%d for %s", parent_order_id, intent.symbol)
-                    else:
-                        intent.cancel(f"Order ID={parent_order_id} no longer present on Delta open order book")
-                        logger.info("REST sync reconciled cancelled parent order ID=%d for %s", parent_order_id, intent.symbol)
+                # Reconcile pending intents: if parent order is missing from open_orders, check fill status
+                for parent_order_id, intent in list(self._intents_by_exchange_id.items()):
+                    if intent.is_pending and parent_order_id not in open_order_map:
+                        # Parent order is no longer open! Check if position is open
+                        pos = self._open_positions.get(intent.product_id or 0)
+                        if pos and pos.size != 0:
+                            intent.record_fill(fill_price=pos.entry_price, filled_size=abs(pos.size))
+                            logger.info("REST sync reconciled filled parent order ID=%d for %s", parent_order_id, intent.symbol)
+                        else:
+                            intent.cancel(f"Order ID={parent_order_id} no longer present on Delta open order book")
+                            logger.info("REST sync reconciled cancelled parent order ID=%d for %s", parent_order_id, intent.symbol)
 
-            # Discover and bind resting child Stop Loss orders for active triggered positions
-            for intent in list(self._intents_by_id.values()):
-                if intent.is_triggered and intent.child_stop_loss_order_id is None:
-                    exit_side = "sell" if intent.signal_type == SignalType.BULLISH_BREAKOUT else "buy"
-                    for o in open_orders:
-                        if (
-                            o.product_id == intent.product_id
-                            and o.side.lower() == exit_side
-                            and o.stop_price is not None
-                        ):
-                            intent.child_stop_loss_order_id = o.id
-                            self._intents_by_child_sl_id[o.id] = intent
-                            report["child_orders_bound"] += 1
-                            logger.info(
-                                "REST sync discovered and bound child Stop Loss order ID=%d for %s",
-                                o.id,
-                                intent.symbol,
-                            )
-                            break
+                # Discover and bind resting child Stop Loss orders for active triggered positions
+                for intent in list(self._intents_by_id.values()):
+                    if intent.is_triggered and intent.child_stop_loss_order_id is None:
+                        exit_side = "sell" if intent.signal_type == SignalType.BULLISH_BREAKOUT else "buy"
+                        for o in open_orders:
+                            if (
+                                o.product_id == intent.product_id
+                                and o.side.lower() == exit_side
+                                and o.stop_price is not None
+                            ):
+                                intent.child_stop_loss_order_id = o.id
+                                self._intents_by_child_sl_id[o.id] = intent
+                                report["child_orders_bound"] += 1
+                                logger.info(
+                                    "REST sync discovered and bound child Stop Loss order ID=%d for %s",
+                                    o.id,
+                                    intent.symbol,
+                                )
+                                break
 
-        except Exception as exc:
-            logger.warning("REST open orders reconciliation error: %s", exc)
+            except Exception as exc:
+                logger.warning("REST open orders reconciliation error: %s", exc)
 
-        logger.debug("REST state reconciliation complete: %s", report)
-        return report
+            logger.debug("REST state reconciliation complete: %s", report)
+            return report
+        finally:
+            self.is_reconciling = False
 
     # -------------------------------------------------------------------------
     # Background Periodic Worker Task

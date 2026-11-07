@@ -469,6 +469,10 @@ class ExecutionManager:
         # Cached leverage state per product_id
         self._configured_leverages: dict[int, int] = {}
 
+        # Execution Safety Shields
+        self._inflight_fingerprints: dict[str, float] = {}
+        self.is_execution_locked: bool = False
+
     def set_state_manager(self, state_manager: Any) -> None:
         """Attaches TradingStateManager for real-time WebSocket state synchronization."""
         self.state_manager = state_manager
@@ -603,6 +607,45 @@ class ExecutionManager:
         6. Submits native stop order with attached brackets to Delta Exchange
         7. Registers order in LocalRegistry
         """
+        # 0. Execution Safety Shields
+        # Shield 1: Split-Brain Reconnect Guard
+        if self.is_execution_locked or (
+            self.state_manager is not None and getattr(self.state_manager, "is_reconciling", False) is True
+        ):
+            logger.warning(
+                "[SPLIT-BRAIN SHIELD] Reconnection or state reconciliation in progress for %s. Order execution locked.",
+                order_intent.symbol,
+            )
+            order_intent.cancel("Split-brain shield: reconciliation in progress", OrderStatus.CANCELLED_MANUAL)
+            return None
+
+        # Shield 2: Anti-Flood Idempotency Shield (5-second sliding window)
+        now_ts = time.time()
+        self._inflight_fingerprints = {
+            k: v for k, v in self._inflight_fingerprints.items() if now_ts - v < 5.0
+        }
+        fingerprint = f"{order_intent.symbol}_{order_intent.signal_type.value}_{round(float(order_intent.trigger_price), 4)}"
+        if fingerprint in self._inflight_fingerprints:
+            logger.warning(
+                "[ANTI-FLOOD SHIELD] Duplicate order submission blocked within 5s window: %s",
+                fingerprint,
+            )
+            order_intent.cancel("Anti-flood duplicate order blocked", OrderStatus.CANCELLED_MANUAL)
+            return None
+        self._inflight_fingerprints[fingerprint] = now_ts
+
+        # Shield 3: Stale Feed Guard (>15s without ticker update)
+        if self.state_manager is not None and hasattr(self.state_manager, "get_market_context_age"):
+            feed_age = self.state_manager.get_market_context_age(order_intent.symbol)
+            if feed_age is not None and feed_age > 15.0:
+                logger.warning(
+                    "[STALE FEED SHIELD] Price quote for %s is stale (>15s without update: %.1fs). Order execution aborted.",
+                    order_intent.symbol,
+                    feed_age,
+                )
+                order_intent.cancel(f"Stale feed quote (>15s): age={feed_age:.1f}s", OrderStatus.CANCELLED_MANUAL)
+                return None
+
         # 1. Circuit breaker & position limits
         can_open, reject_reason = self.risk_manager.can_open_new_position()
         if not can_open:

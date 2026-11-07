@@ -634,6 +634,7 @@ class TenantManager:
         self.supabase_secret_key = supabase_secret_key
         self.tenants: dict[str, TenantInstance] = {}
         self.active_tenant_id: str = "default"
+        self._inflight_signals: dict[str, float] = {}
         if default_instance:
             self.tenants[default_instance.config.tenant_id] = default_instance
             self.active_tenant_id = default_instance.config.tenant_id
@@ -1348,6 +1349,18 @@ class TenantManager:
         """
         executed_tenants: list[str] = []
         clean_symbol = spec.symbol.strip().upper()
+
+        now_ts = time.time()
+        self._inflight_signals = {
+            k: v for k, v in self._inflight_signals.items() if now_ts - v < 5.0
+        }
+        if base_signal_id in self._inflight_signals:
+            logger.warning(
+                "[FANOUT ANTI-FLOOD] Signal %s already dispatched within 5s window. Dropping duplicate fan-out.",
+                base_signal_id,
+            )
+            return []
+        self._inflight_signals[base_signal_id] = now_ts
 
         for tenant in list(self.tenants.values()):
             if not tenant.is_running or clean_symbol not in tenant.enabled_symbols:

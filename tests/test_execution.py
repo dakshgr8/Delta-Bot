@@ -630,3 +630,119 @@ async def test_emergency_flatten_kill_switch(btc_global_spec: ContractSpec) -> N
     assert report["cancelled_orders"] == 2
     assert manager.risk_manager.is_circuit_breaker_tripped is True
     assert len(manager.registry.active_orders) == 0
+
+
+@pytest.mark.asyncio
+async def test_anti_flood_idempotency_shield(
+    btc_global_spec: ContractSpec,
+    sample_bullish_intent: OrderIntent,
+) -> None:
+    """Verifies that duplicate order submissions within 5 seconds are blocked by Anti-Flood Shield."""
+    mock_client = AsyncMock(spec=DeltaRestClient)
+    mock_client.get_cached_contract_spec.return_value = btc_global_spec
+    mock_client.config = BotConfig()
+    mock_client.place_order.return_value = ExchangeOrder(
+        id=777,
+        product_id=btc_global_spec.product_id,
+        symbol=btc_global_spec.symbol,
+        side="buy",
+        order_type="market_order",
+        size=10,
+        stop_price=51000.0,
+        state="open",
+    )
+
+    manager = OrderExecutionManager(mock_client, ExecutionConfig(execution_mode=ExecutionMode.LIVE))
+
+    # First submission -> succeeds
+    order1 = await manager.execute_signal(sample_bullish_intent, account_equity=10000.0)
+    assert order1 is not None
+    assert order1.id == 777
+
+    # Immediate duplicate submission (same symbol, side, trigger_price) -> blocked!
+    duplicate_intent = sample_bullish_intent.model_copy()
+    duplicate_intent.intent_id = "dup_intent_999"
+    order2 = await manager.execute_signal(duplicate_intent, account_equity=10000.0)
+    assert order2 is None
+    assert duplicate_intent.status == OrderStatus.CANCELLED_MANUAL
+    assert "Anti-flood" in (duplicate_intent.cancellation_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_stale_feed_shield(
+    btc_global_spec: ContractSpec,
+    sample_bullish_intent: OrderIntent,
+) -> None:
+    """Verifies that live order dispatching aborts if market feed quotes are older than 15s."""
+    mock_client = AsyncMock(spec=DeltaRestClient)
+    mock_client.get_cached_contract_spec.return_value = btc_global_spec
+    mock_client.config = BotConfig()
+
+    manager = OrderExecutionManager(mock_client, ExecutionConfig(execution_mode=ExecutionMode.LIVE))
+
+    # Mock state_manager with stale feed (>15s)
+    mock_sm = MagicMock()
+    mock_sm.is_reconciling = False
+    mock_sm.get_market_context_age.return_value = 22.5  # 22.5 seconds old
+    manager.set_state_manager(mock_sm)
+
+    res = await manager.execute_signal(sample_bullish_intent, account_equity=10000.0)
+    assert res is None
+    assert sample_bullish_intent.status == OrderStatus.CANCELLED_MANUAL
+    assert "Stale feed" in (sample_bullish_intent.cancellation_reason or "")
+
+    # Now simulate fresh feed (<15s)
+    mock_sm.get_market_context_age.return_value = 1.2
+    mock_client.place_order.return_value = ExchangeOrder(
+        id=888,
+        product_id=btc_global_spec.product_id,
+        symbol=btc_global_spec.symbol,
+        side="buy",
+        order_type="market_order",
+        size=10,
+        stop_price=51000.0,
+        state="open",
+    )
+
+    fresh_intent = sample_bullish_intent.model_copy()
+    fresh_intent.intent_id = "fresh_intent_1"
+    fresh_intent.trigger_price = 51200.0  # distinct trigger to pass anti-flood
+    res2 = await manager.execute_signal(fresh_intent, account_equity=10000.0)
+    assert res2 is not None
+    assert res2.id == 888
+
+
+@pytest.mark.asyncio
+async def test_split_brain_reconnect_shield(
+    btc_global_spec: ContractSpec,
+    sample_bullish_intent: OrderIntent,
+) -> None:
+    """Verifies that orders are locked and blocked when state reconciliation is in progress."""
+    mock_client = AsyncMock(spec=DeltaRestClient)
+    mock_client.get_cached_contract_spec.return_value = btc_global_spec
+    mock_client.config = BotConfig()
+
+    manager = OrderExecutionManager(mock_client, ExecutionConfig(execution_mode=ExecutionMode.LIVE))
+
+    # Case 1: Manual execution lock active
+    manager.is_execution_locked = True
+    intent1 = sample_bullish_intent.model_copy()
+    intent1.intent_id = "lock_test_1"
+    res1 = await manager.execute_signal(intent1, account_equity=10000.0)
+    assert res1 is None
+    assert intent1.status == OrderStatus.CANCELLED_MANUAL
+
+    # Case 2: State manager reconciliation in progress
+    manager.is_execution_locked = False
+    mock_sm = MagicMock()
+    mock_sm.is_reconciling = True
+    manager.set_state_manager(mock_sm)
+
+    intent2 = sample_bullish_intent.model_copy()
+    intent2.intent_id = "lock_test_2"
+    intent2.trigger_price = 51500.0
+    res2 = await manager.execute_signal(intent2, account_equity=10000.0)
+    assert res2 is None
+    assert intent2.status == OrderStatus.CANCELLED_MANUAL
+    assert "Split-brain" in (intent2.cancellation_reason or "")
+
