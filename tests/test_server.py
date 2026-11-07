@@ -365,7 +365,7 @@ def test_server_config_hot_reload_validation_error(client: TestClient) -> None:
 # -----------------------------------------------------------------------------
 
 def test_server_websocket_live_stream(client: TestClient) -> None:
-    """Verifies that WebSocket /ws/live streams initial state, responds to pings, and disconnects cleanly."""
+    """Verifies that WebSocket /ws/live streams initial state, responds to pings, handles pause/resume, and disconnects cleanly."""
     with client.websocket_connect("/ws/live") as ws:
         # Receive immediate initial state update
         data = ws.receive_json()
@@ -381,6 +381,13 @@ def test_server_websocket_live_stream(client: TestClient) -> None:
         pong = ws.receive_json()
         assert pong["type"] == "pong"
         assert "timestamp" in pong
+
+        # Test pause and resume actions
+        import json
+        ws.send_text(json.dumps({"action": "pause"}))
+        ws.send_text(json.dumps({"action": "resume"}))
+        resume_pkt = ws.receive_json()
+        assert resume_pkt["type"] == "state_update"
 
 
 # -----------------------------------------------------------------------------

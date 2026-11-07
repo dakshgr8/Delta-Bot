@@ -14,8 +14,9 @@ Covers:
 6. Read-only vs control mutation permissions
 """
 
+import asyncio
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -126,6 +127,46 @@ async def test_verify_supabase_token_invalid_or_expired(auth_orchestrator: Tradi
 
         res = await verify_supabase_token("invalid_expired_token", auth_orchestrator)
         assert res is None
+
+
+@pytest.mark.asyncio
+async def test_verify_supabase_token_cancellation_suppression(auth_orchestrator: TradingBotOrchestrator) -> None:
+    """Verifies that asyncio.CancelledError during Supabase verification is gracefully handled."""
+    auth_orchestrator.config.supabase_url = "https://mock.supabase.co"
+
+    with patch("httpx.AsyncClient.get", AsyncMock(side_effect=asyncio.CancelledError)):
+        res = await verify_supabase_token("cancelled_jwt_token_456", auth_orchestrator)
+        assert res is None
+
+
+@pytest.mark.asyncio
+async def test_verify_supabase_token_concurrent_deduplication(auth_orchestrator: TradingBotOrchestrator) -> None:
+    """Verifies that concurrent verifications for identical token share a single HTTP flight."""
+    auth_orchestrator.config.supabase_url = "https://mock.supabase.co"
+    fake_user = {"id": "dedup-user-999", "email": "dedup@test.com"}
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = fake_user
+
+    call_count = 0
+
+    async def delayed_get(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0.05)
+        return mock_resp
+
+    with patch("httpx.AsyncClient.get", side_effect=delayed_get):
+        res1, res2, res3 = await asyncio.gather(
+            verify_supabase_token("shared_token_999", auth_orchestrator),
+            verify_supabase_token("shared_token_999", auth_orchestrator),
+            verify_supabase_token("shared_token_999", auth_orchestrator),
+        )
+        assert res1 == fake_user
+        assert res2 == fake_user
+        assert res3 == fake_user
+        assert call_count == 1
 
 
 # -----------------------------------------------------------------------------

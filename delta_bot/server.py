@@ -197,10 +197,23 @@ class AuthIdentity(BaseModel):
 
 
 _SUPABASE_TOKEN_CACHE: dict[str, tuple[dict[str, Any], float]] = {}
+_SUPABASE_INFLIGHT: dict[str, asyncio.Future[dict[str, Any] | None]] = {}
+_SUPABASE_HTTP_CLIENT: Any = None
+
+
+async def _get_supabase_client() -> Any:
+    global _SUPABASE_HTTP_CLIENT
+    if _SUPABASE_HTTP_CLIENT is None or _SUPABASE_HTTP_CLIENT.is_closed:
+        import httpx
+        _SUPABASE_HTTP_CLIENT = httpx.AsyncClient(
+            timeout=httpx.Timeout(5.0, connect=3.0),
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20),
+        )
+    return _SUPABASE_HTTP_CLIENT
 
 
 async def verify_supabase_token(token: str, orchestrator: TradingBotOrchestrator) -> dict[str, Any] | None:
-    """Validates Supabase JWT against Supabase Auth API with in-memory TTL caching."""
+    """Validates Supabase JWT against Supabase Auth API with in-memory TTL caching and request deduplication."""
     if not token or not orchestrator.config.supabase_url:
         return None
 
@@ -209,22 +222,52 @@ async def verify_supabase_token(token: str, orchestrator: TradingBotOrchestrator
     if cached and (now - cached[1]) < 120.0:
         return cached[0]
 
+    # Deduplicate concurrent verifications for the exact same token
+    if token in _SUPABASE_INFLIGHT:
+        try:
+            return await _SUPABASE_INFLIGHT[token]
+        except (Exception, asyncio.CancelledError):
+            return None
+
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[dict[str, Any] | None] = loop.create_future()
+    _SUPABASE_INFLIGHT[token] = future
+
     try:
-        import httpx
         url = f"{orchestrator.config.supabase_url.rstrip('/')}/auth/v1/user"
         headers = {
             "apikey": orchestrator.config.supabase_key,
             "Authorization": f"Bearer {token}",
         }
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            res = await client.get(url, headers=headers)
+        client = await _get_supabase_client()
+        res = await client.get(url, headers=headers)
         if res.status_code == 200:
             user_data = res.json()
+            if len(_SUPABASE_TOKEN_CACHE) > 500:
+                _SUPABASE_TOKEN_CACHE.clear()
             _SUPABASE_TOKEN_CACHE[token] = (user_data, now)
+            if not future.done():
+                future.set_result(user_data)
             return user_data
+        else:
+            if not future.done():
+                future.set_result(None)
+            return None
+    except (asyncio.CancelledError, GeneratorExit):
+        if not future.done():
+            future.set_result(None)
+        return None
     except Exception as err:
         logger.debug("Supabase token verification error: %s", err)
-    return None
+        if not future.done():
+            future.set_result(None)
+        return None
+    except BaseException:
+        if not future.done():
+            future.set_result(None)
+        return None
+    finally:
+        _SUPABASE_INFLIGHT.pop(token, None)
 
 
 # -----------------------------------------------------------------------------
@@ -315,6 +358,8 @@ class WebSocketManager:
     async def disconnect(self, websocket: WebSocket) -> None:
         """Unregisters disconnected WebSocket client."""
         async with self._lock:
+            if websocket not in self.active_connections:
+                return
             self.active_connections.discard(websocket)
             self.connection_tenants.pop(websocket, None)
             self.connection_users.pop(websocket, None)
@@ -839,13 +884,37 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             name="FastAPI-WebSocket-Broadcaster",
         )
         logger.info("FastAPI Web Gateway initialized and WebSocket broadcaster running")
-        yield
-        # Teardown
-        broadcaster_task.cancel()
         try:
-            await broadcaster_task
-        except asyncio.CancelledError:
-            logger.debug("FastAPI WebSocket broadcaster terminated cleanly")
+            yield
+        finally:
+            # Teardown broadcaster
+            broadcaster_task.cancel()
+            try:
+                await broadcaster_task
+            except (asyncio.CancelledError, Exception):
+                logger.debug("FastAPI WebSocket broadcaster terminated cleanly")
+
+            # Cleanly close all active client websockets
+            async with ws_manager._lock:
+                for ws in list(ws_manager.active_connections):
+                    try:
+                        await ws.close(code=1001, reason="Server shutting down")
+                    except Exception:
+                        pass
+                ws_manager.active_connections.clear()
+                ws_manager.connection_tenants.clear()
+                ws_manager.connection_users.clear()
+                ws_manager.connection_paused.clear()
+
+            # Close shared Supabase HTTP client pool
+            global _SUPABASE_HTTP_CLIENT
+            if _SUPABASE_HTTP_CLIENT is not None:
+                try:
+                    if not _SUPABASE_HTTP_CLIENT.is_closed:
+                        await _SUPABASE_HTTP_CLIENT.aclose()
+                except Exception:
+                    pass
+                _SUPABASE_HTTP_CLIENT = None
 
     app = FastAPI(
         title="Delta-Bot Quantitative Gateway",
@@ -1978,50 +2047,57 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         token: str | None = Query(default=None),
         tenant_id: str | None = Query(default=None),
     ) -> None:
-        """Streams real-time state packets every 500ms to connected dashboard clients."""
-        expected_token = orchestrator.config.dashboard_auth_token_str
-        provided_token = token.strip() if token else None
-        if not provided_token:
-            h_token = websocket.headers.get("x-dashboard-token")
-            if h_token:
-                provided_token = h_token.strip()
-            else:
-                auth_header = websocket.headers.get("authorization")
-                if auth_header:
-                    parts = auth_header.strip().split()
-                    if len(parts) == 2 and parts[0].lower() == "bearer":
-                        provided_token = parts[1].strip()
-                    elif len(parts) == 1:
-                        provided_token = parts[0].strip()
-
-        user_id: str | None = None
-        target_tenant: str = tenant_id.strip() if tenant_id else "default"
-
-        if provided_token and expected_token and secrets.compare_digest(provided_token, expected_token):
-            pass
-        elif provided_token:
-            sb_user = await verify_supabase_token(provided_token, orchestrator)
-            if sb_user and "id" in sb_user:
-                user_id = str(sb_user["id"])
-                u_email = sb_user.get("email") or ""
-                if hasattr(orchestrator, "tenant_manager"):
-                    t_inst = orchestrator.tenant_manager.get_or_create_user_tenant(
-                        user_id, u_email, orchestrator.contract_specs
-                    )
-                    target_tenant = t_inst.config.tenant_id
-                else:
-                    target_tenant = f"user-{user_id[:8]}"
-            else:
-                logger.warning("[WS AUTH] WebSocket connection rejected: invalid Supabase token")
-                await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
-                return
-        elif expected_token:
-            logger.warning("[WS AUTH] WebSocket connection rejected: invalid or missing authentication token")
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
-            return
-
-        await ws_manager.connect(websocket, tenant_id=target_tenant, user_id=user_id)
+        """Streams real-time state packets to connected dashboard clients."""
         try:
+            expected_token = orchestrator.config.dashboard_auth_token_str
+            provided_token = token.strip() if token else None
+            if not provided_token:
+                h_token = websocket.headers.get("x-dashboard-token")
+                if h_token:
+                    provided_token = h_token.strip()
+                else:
+                    auth_header = websocket.headers.get("authorization")
+                    if auth_header:
+                        parts = auth_header.strip().split()
+                        if len(parts) == 2 and parts[0].lower() == "bearer":
+                            provided_token = parts[1].strip()
+                        elif len(parts) == 1:
+                            provided_token = parts[0].strip()
+
+            user_id: str | None = None
+            target_tenant: str = tenant_id.strip() if tenant_id else "default"
+
+            if provided_token and expected_token and secrets.compare_digest(provided_token, expected_token):
+                pass
+            elif provided_token:
+                sb_user = await verify_supabase_token(provided_token, orchestrator)
+                if sb_user and "id" in sb_user:
+                    user_id = str(sb_user["id"])
+                    u_email = sb_user.get("email") or ""
+                    if hasattr(orchestrator, "tenant_manager"):
+                        t_inst = orchestrator.tenant_manager.get_or_create_user_tenant(
+                            user_id, u_email, orchestrator.contract_specs
+                        )
+                        target_tenant = t_inst.config.tenant_id
+                    else:
+                        target_tenant = f"user-{user_id[:8]}"
+                else:
+                    logger.warning("[WS AUTH] WebSocket connection rejected: invalid Supabase token")
+                    try:
+                        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+                    except Exception:
+                        pass
+                    return
+            elif expected_token:
+                logger.warning("[WS AUTH] WebSocket connection rejected: invalid or missing authentication token")
+                try:
+                    await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
+                except Exception:
+                    pass
+                return
+
+            await ws_manager.connect(websocket, tenant_id=target_tenant, user_id=user_id)
+
             # Send immediate initial state on connect
             initial_packet = get_full_state_packet(orchestrator, tenant_id=target_tenant, user_id=user_id)
             await websocket.send_text(json.dumps(initial_packet, default=str))
@@ -2056,11 +2132,15 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                             await websocket.send_text(json.dumps(curr_pkt, default=str))
                     except Exception:
                         pass
-        except WebSocketDisconnect:
-            await ws_manager.disconnect(websocket)
+        except (WebSocketDisconnect, asyncio.CancelledError):
+            pass
         except Exception as ws_err:
             logger.debug("WebSocket connection error: %s", ws_err)
-            await ws_manager.disconnect(websocket)
+        finally:
+            try:
+                await ws_manager.disconnect(websocket)
+            except Exception:
+                pass
 
     # Mount static assets directory
     if os.path.isdir(STATIC_DIR):

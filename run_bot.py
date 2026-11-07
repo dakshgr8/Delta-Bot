@@ -259,11 +259,16 @@ async def main() -> None:
     finally:
         if uvicorn_server is not None:
             uvicorn_server.should_exit = True
+            if web_server_task is not None and not web_server_task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(web_server_task), timeout=2.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                    pass
         if web_server_task is not None and not web_server_task.done():
             web_server_task.cancel()
             try:
                 await web_server_task
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, Exception):
                 logger.debug("Web server task stopped cleanly")
 
         if not orchestrator._shutdown_completed:
