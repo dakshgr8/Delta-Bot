@@ -323,9 +323,37 @@ class TenantInstance:
                 spec.contract_type,
             )
             return
-        self.contract_specs[spec.symbol] = spec
+        sym = spec.symbol.strip().upper()
+        self.contract_specs[sym] = spec
+        if sym.endswith("USD") and not sym.endswith("USDT"):
+            self.contract_specs[sym[:-3] + "USDT"] = spec
+        elif sym.endswith("USDT"):
+            self.contract_specs[sym[:-4] + "USD"] = spec
         if self.paper_simulator is not None:
             self.paper_simulator.register_contract_spec(spec)
+
+    def is_symbol_enabled(self, symbol: str) -> bool:
+        """Checks if a symbol or its USD/USDT alias is enabled for trading."""
+        clean = symbol.strip().upper()
+        if clean in self.enabled_symbols:
+            return True
+        if clean.endswith("USD") and not clean.endswith("USDT"):
+            if (clean[:-3] + "USDT") in self.enabled_symbols:
+                return True
+        elif clean.endswith("USDT"):
+            if (clean[:-4] + "USD") in self.enabled_symbols:
+                return True
+        return False
+
+    def get_strategy(self, symbol: str) -> Any | None:
+        """Retrieves strategy engine for a symbol or its USD/USDT alias."""
+        clean = symbol.strip().upper()
+        if clean in self.strategies:
+            return self.strategies[clean]
+        alt = (clean[:-3] + "USDT") if (clean.endswith("USD") and not clean.endswith("USDT")) else ((clean[:-4] + "USD") if clean.endswith("USDT") else None)
+        if alt and alt in self.strategies:
+            return self.strategies[alt]
+        return None
 
     async def sync_exchange_leverage(self, leverage: int) -> dict[str, Any]:
         """
@@ -1387,7 +1415,7 @@ class TenantManager:
         for tenant in list(self.tenants.values()):
             if tenant.config.tenant_id == "default":
                 continue  # Default tenant order is executed directly by the master orchestrator
-            if not tenant.is_running or clean_symbol not in tenant.enabled_symbols:
+            if not tenant.is_running or not tenant.is_symbol_enabled(clean_symbol):
                 continue
 
             strategy = tenant.strategies.get(clean_symbol)
@@ -1527,7 +1555,7 @@ class TenantManager:
         for tenant in list(self.tenants.values()):
             if tenant.config.tenant_id == "default":
                 continue  # Default tenant order is executed directly by the master orchestrator
-            if not tenant.is_running or clean_symbol not in tenant.enabled_symbols:
+            if not tenant.is_running or not tenant.is_symbol_enabled(clean_symbol):
                 continue
 
             tenant.register_contract_spec(spec)

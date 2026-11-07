@@ -77,3 +77,38 @@ def test_exception_properties() -> None:
 
     rl_err = RateLimitError("Too Many Requests", status_code=429, retry_after_ms=1250.0)
     assert rl_err.retry_after_ms == 1250.0
+
+
+@pytest.mark.asyncio
+async def test_cross_region_fallback_xautusd() -> None:
+    """Verifies that XAUTUSD (exclusive to Delta India) resolves via fallback when client is on Delta Global."""
+    config = BotConfig(delta_base_url="https://api.delta.exchange")
+    async with DeltaRestClient(config) as client:
+        spec = await client.get_contract_spec("XAUTUSD")
+        assert spec is not None
+        assert spec.symbol == "XAUTUSD"
+        assert spec.product_id == 131253
+        assert spec.contract_type == "perpetual_futures"
+
+        # Check alias lookup in cache
+        alias_spec = client.get_cached_contract_spec("XAUTUSDT")
+        assert alias_spec is not None
+        assert alias_spec.product_id == 131253
+
+
+@pytest.mark.asyncio
+async def test_symbol_aliasing_and_historical_candles() -> None:
+    """Verifies that requesting BTCUSDT against Delta India successfully resolves BTCUSD and fetches candles."""
+    config = BotConfig(delta_base_url="https://api.india.delta.exchange")
+    async with DeltaRestClient(config) as client:
+        # Preload India perpetuals
+        await client.get_products()
+        spec = client.get_cached_contract_spec("BTCUSDT")
+        assert spec is not None
+        assert spec.symbol == "BTCUSD"
+
+        # Candles query using BTCUSDT should resolve to BTCUSD on exchange
+        candles = await client.get_historical_candles("BTCUSDT", resolution="1m", limit=5)
+        assert len(candles) > 0
+        assert candles[0].symbol == "BTCUSDT"
+        assert candles[0].close > 0

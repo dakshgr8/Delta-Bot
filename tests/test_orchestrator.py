@@ -588,3 +588,41 @@ async def test_orchestrator_risk_rejection_prevents_order() -> None:
     # Intent must be marked CANCELLED
     assert intent.status == OrderStatus.CANCELLED_MANUAL
     assert "Daily drawdown limit breached" in intent.cancellation_reason
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_symbol_aliasing_candle_close() -> None:
+    """Verifies that orchestrator matches incoming BTCUSD candle to BTCUSDT strategy and places order."""
+    paper_sim = PaperExchangeSimulator(initial_balance=10000.0)
+    orch = TradingBotOrchestrator(
+        config=BotConfig(execution_mode="paper", target_symbols_str="BTCUSDT"),
+        mode=ExecutionMode.PAPER,
+        paper_simulator=paper_sim,
+    )
+    spec = make_dummy_spec("BTCUSD", product_id=27)
+    orch.contract_specs["BTCUSDT"] = spec
+    orch.contract_specs["BTCUSD"] = spec
+    paper_sim.register_contract_spec(spec)
+
+    intent = make_dummy_intent(
+        symbol="BTCUSDT",
+        signal_type=SignalType.BULLISH_BREAKOUT,
+        trigger_price=68000.0,
+        initial_stop_loss=67000.0,
+        take_profit=70000.0,
+        contract_lots=5,
+    )
+    strategy_mock = MagicMock()
+    strategy_mock.on_candle_close = AsyncMock(return_value=intent)
+    orch.strategies["BTCUSDT"] = strategy_mock
+
+    candle = make_closed_candle("BTCUSD")
+
+    # Ingest confirmed candle close with Delta India symbol BTCUSD
+    await orch._handle_candle_close("BTCUSD", candle)
+
+    # Order must be placed into paper simulator
+    assert len(paper_sim._pending_orders) == 1
+    v_order = list(paper_sim._pending_orders.values())[0]
+    assert v_order.product_id == 27
+    assert v_order.stop_price == 68000.0

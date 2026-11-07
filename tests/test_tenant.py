@@ -806,6 +806,57 @@ async def test_admin_all_tenants_control(multi_tenant_orchestrator: TradingBotOr
     assert t2.is_running is False
 
 
+@pytest.mark.asyncio
+async def test_tenant_symbol_aliasing_and_paper_tick_matching(multi_tenant_orchestrator: Any) -> None:
+    """Verifies that tenants enable and match USD <-> USDT cross symbols without failing."""
+    mgr = multi_tenant_orchestrator.tenant_manager
+    t = mgr.create_tenant(
+        TenantConfig(
+            tenant_id="desk_alias",
+            name="Alias Desk",
+            mode="paper",
+            symbols=["BTCUSDT", "XAUTUSD"],
+        ),
+        contract_specs=multi_tenant_orchestrator.contract_specs,
+    )
+
+    # 1. Verify is_symbol_enabled tolerance
+    assert t.is_symbol_enabled("BTCUSDT") is True
+    assert t.is_symbol_enabled("BTCUSD") is True
+    assert t.is_symbol_enabled("XAUTUSD") is True
+    assert t.is_symbol_enabled("XAUTUSDT") is True
+    assert t.is_symbol_enabled("DOGEUSDT") is False
+
+    # 2. Verify get_strategy tolerance
+    strat_btc = t.get_strategy("BTCUSD")
+    assert strat_btc is not None
+    assert strat_btc == t.strategies.get("BTCUSDT")
+
+    # 3. Verify paper simulator on_tick matches BTCUSD tick against BTCUSDT resting stop order
+    btc_spec = multi_tenant_orchestrator.contract_specs["BTCUSDT"]
+    t.paper_simulator.submit_stop_order(
+        product_id=btc_spec.product_id,
+        symbol="BTCUSDT",
+        side="buy",
+        size=2,
+        stop_price=70000.0,
+        bracket_stop_loss_price=69000.0,
+        bracket_take_profit_price=72000.0,
+        intent_id="intent_alias_1",
+    )
+    assert len(t.paper_simulator._pending_orders) == 1
+
+    # Emit tick for BTCUSD (Delta India symbol) at 70100.0
+    executions = await t.paper_simulator.on_tick(
+        symbol="BTCUSD",
+        mark_price=70100.0,
+    )
+    assert len(executions) == 1
+    assert executions[0]["event"] == "fill"
+    assert len(t.paper_simulator._pending_orders) == 0
+    assert len(t.paper_simulator._open_positions) == 1
+
+
 
 
 

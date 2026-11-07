@@ -242,8 +242,7 @@ class DeltaRestClient:
                 if isinstance(item, dict):
                     spec = ContractSpec.from_api_dict(item)
                     specs.append(spec)
-                    self._products_by_id[spec.product_id] = spec
-                    self._products_by_symbol[spec.symbol.upper()] = spec
+                    self._register_product_spec(spec)
 
         self._last_products_cache_epoch = time.time()
         logger.info(
@@ -253,10 +252,26 @@ class DeltaRestClient:
         )
         return specs
 
+    def _register_product_spec(self, spec: ContractSpec) -> None:
+        """Registers a contract specification in memory with automatic USD/USDT alias indexing."""
+        self._products_by_id[spec.product_id] = spec
+        sym = spec.symbol.strip().upper()
+        self._products_by_symbol[sym] = spec
+
+        # Cross-register USD <-> USDT aliases (e.g. BTCUSD <-> BTCUSDT, XAUTUSD <-> XAUTUSDT)
+        if sym.endswith("USD") and not sym.endswith("USDT"):
+            alias = sym[:-3] + "USDT"
+            if alias not in self._products_by_symbol:
+                self._products_by_symbol[alias] = spec
+        elif sym.endswith("USDT"):
+            alias = sym[:-4] + "USD"
+            if alias not in self._products_by_symbol:
+                self._products_by_symbol[alias] = spec
+
     def get_cached_contract_spec(self, symbol_or_id: str | int) -> ContractSpec | None:
         """
         Synchronously retrieves a contract specification from the in-memory cache without network latency.
-        Accepts integer product_id or string symbol (e.g., 139 or 'BTCUSDT').
+        Accepts integer product_id or string symbol (e.g., 139, 'BTCUSDT', 'BTCUSD', 'XAUTUSD').
         """
         if isinstance(symbol_or_id, int):
             return self._products_by_id.get(symbol_or_id)
@@ -264,12 +279,29 @@ class DeltaRestClient:
         clean_symbol = str(symbol_or_id).strip().upper()
         if clean_symbol.isdigit():
             return self._products_by_id.get(int(clean_symbol))
-        return self._products_by_symbol.get(clean_symbol)
+        
+        spec = self._products_by_symbol.get(clean_symbol)
+        if spec is not None:
+            return spec
+
+        # Suffix alias fallback
+        if clean_symbol.endswith("USD") and not clean_symbol.endswith("USDT"):
+            alt = clean_symbol[:-3] + "USDT"
+            if alt in self._products_by_symbol:
+                return self._products_by_symbol[alt]
+        elif clean_symbol.endswith("USDT"):
+            alt = clean_symbol[:-4] + "USD"
+            if alt in self._products_by_symbol:
+                return self._products_by_symbol[alt]
+
+        return None
 
     async def get_contract_spec(self, symbol_or_id: str | int) -> ContractSpec:
         """
         Retrieves a contract specification by symbol or product_id, fetching
         products from REST API if not already cached in memory.
+        Includes automatic cross-regional fallback (India <-> Global) if symbol
+        is exclusive to a particular regional exchange deployment (e.g. XAUTUSD on Delta India).
         """
         cached = self.get_cached_contract_spec(symbol_or_id)
         if cached is not None:
@@ -278,6 +310,44 @@ class DeltaRestClient:
         cached = self.get_cached_contract_spec(symbol_or_id)
         if cached is not None:
             return cached
+
+        # Multi-region fallback: If running on Global Delta and symbol (e.g. XAUTUSD) is not found,
+        # or running on India Delta and symbol is not found, check the alternate Delta regional endpoint.
+        current_base = getattr(self._config, "delta_base_url", "")
+        fallback_urls = []
+        if "india" in current_base.lower():
+            fallback_urls.append("https://api.delta.exchange")
+        else:
+            fallback_urls.append("https://api.india.delta.exchange")
+
+        for fb_url in fallback_urls:
+            try:
+                logger.info(
+                    "Attempting cross-regional product specification fallback for '%s' via %s...",
+                    symbol_or_id,
+                    fb_url,
+                )
+                async with httpx.AsyncClient(timeout=10.0) as fb_client:
+                    fb_resp = await fb_client.get(f"{fb_url}/v2/products?contract_types=perpetual_futures")
+                    if fb_resp.status_code == 200:
+                        data = fb_resp.json().get("result", [])
+                        for item in data:
+                            if isinstance(item, dict):
+                                fb_spec = ContractSpec.from_api_dict(item)
+                                self._register_product_spec(fb_spec)
+                        cached = self.get_cached_contract_spec(symbol_or_id)
+                        if cached is not None:
+                            logger.info(
+                                "Successfully resolved '%s' via cross-region fallback (%s): ProductID=%d, Symbol=%s",
+                                symbol_or_id,
+                                fb_url,
+                                cached.product_id,
+                                cached.symbol,
+                            )
+                            return cached
+            except Exception as fb_err:
+                logger.warning("Cross-regional fallback check on %s failed: %s", fb_url, fb_err)
+
         raise DeltaAPIError(f"Contract specification for '{symbol_or_id}' not found on Delta Exchange.")
 
     async def get_target_perpetuals(self) -> dict[str, ContractSpec]:
@@ -306,18 +376,30 @@ class DeltaRestClient:
         Endpoint: GET /v2/tickers/{symbol_or_product_id} (Public)
         """
         clean_target = str(symbol_or_product_id).strip().upper()
-        path = f"/v2/tickers/{clean_target}"
+        cached_spec = self.get_cached_contract_spec(clean_target)
+        target = cached_spec.symbol if cached_spec else clean_target
+        path = f"/v2/tickers/{target}"
 
-        logger.debug("Fetching real-time ticker quotes for %s...", clean_target)
-        raw_result = await self._http_engine.request(
-            method="GET",
-            path=path,
-            is_authenticated=False,
-        )
+        logger.debug("Fetching real-time ticker quotes for %s...", target)
+        try:
+            raw_result = await self._http_engine.request(
+                method="GET",
+                path=path,
+                is_authenticated=False,
+            )
+        except Exception as e:
+            if target != clean_target:
+                raw_result = await self._http_engine.request(
+                    method="GET",
+                    path=f"/v2/tickers/{clean_target}",
+                    is_authenticated=False,
+                )
+            else:
+                raise e
 
         if not isinstance(raw_result, dict):
             raise DeltaAPIError(
-                message=f"Unexpected ticker response format for {clean_target}: {type(raw_result).__name__}",
+                message=f"Unexpected ticker response format for {target}: {type(raw_result).__name__}",
                 endpoint=path,
             )
 
@@ -389,17 +471,21 @@ class DeltaRestClient:
         start_sec = int(start if start is not None else (end_sec - window_sec))
 
         clean_symbol = symbol.strip().upper()
+        cached_spec = self.get_cached_contract_spec(clean_symbol)
+        query_symbol = cached_spec.symbol if cached_spec else clean_symbol
+
         query_params = {
-            "symbol": clean_symbol,
+            "symbol": query_symbol,
             "resolution": resolution,
             "start": start_sec,
             "end": end_sec,
         }
 
         logger.debug(
-            "Fetching historical candles for %s (%s) from REST (limit=%d, start=%d, end=%d)...",
+            "Fetching historical candles for %s (%s) from REST (query_symbol=%s, limit=%d, start=%d, end=%d)...",
             clean_symbol,
             resolution,
+            query_symbol,
             limit,
             start_sec,
             end_sec,
@@ -411,6 +497,30 @@ class DeltaRestClient:
             query=query_params,
             is_authenticated=False,
         )
+
+        # If empty response, attempt alternate USD/USDT alias
+        if not raw_result or len(raw_result) == 0:
+            alt_symbol = None
+            if query_symbol.endswith("USDT"):
+                alt_symbol = query_symbol[:-4] + "USD"
+            elif query_symbol.endswith("USD"):
+                alt_symbol = query_symbol[:-3] + "USDT"
+
+            if alt_symbol and alt_symbol != query_symbol:
+                logger.debug("Retrying historical candles with alternative symbol %s...", alt_symbol)
+                alt_params = dict(query_params)
+                alt_params["symbol"] = alt_symbol
+                try:
+                    alt_result = await self._http_engine.request(
+                        method="GET",
+                        path="/v2/history/candles",
+                        query=alt_params,
+                        is_authenticated=False,
+                    )
+                    if alt_result and len(alt_result) > 0:
+                        raw_result = alt_result
+                except Exception:
+                    pass
 
         candles: list[Candle] = []
         if isinstance(raw_result, list):

@@ -192,13 +192,26 @@ class CandleAggregator:
 
     def get_bar_cache(self, symbol: str, resolution: str = "1m") -> CircularBarCache:
         """Retrieves or creates circular bar cache for a symbol and resolution."""
-        key = (symbol.upper(), resolution)
-        if key not in self._bar_caches:
-            self._bar_caches[key] = CircularBarCache(
-                symbol=symbol.upper(),
-                resolution=resolution,
-                capacity=self.capacity,
-            )
+        sym = symbol.strip().upper()
+        key = (sym, resolution)
+        if key in self._bar_caches:
+            return self._bar_caches[key]
+
+        # Check USD/USDT alias
+        if sym.endswith("USD") and not sym.endswith("USDT"):
+            alt_key = (sym[:-3] + "USDT", resolution)
+            if alt_key in self._bar_caches:
+                return self._bar_caches[alt_key]
+        elif sym.endswith("USDT"):
+            alt_key = (sym[:-4] + "USD", resolution)
+            if alt_key in self._bar_caches:
+                return self._bar_caches[alt_key]
+
+        self._bar_caches[key] = CircularBarCache(
+            symbol=sym,
+            resolution=resolution,
+            capacity=self.capacity,
+        )
         return self._bar_caches[key]
 
     def seed_historical_bars(self, symbol: str, resolution: str, candles: list[Candle]) -> int:
@@ -206,30 +219,57 @@ class CandleAggregator:
         Seeds the CircularBarCache and initializes Daily Session Anchor (00:00 UTC) with historical bars.
         Guarantees that 00:00 UTC rollover, PDH/PDL, and Session VWAP are populated before streaming.
         """
-        clean_symbol = symbol.upper()
+        clean_symbol = symbol.strip().upper()
         cache = self.get_bar_cache(clean_symbol, resolution)
         count = cache.seed_historical_bars(candles)
         anchor = self.get_session_anchor(clean_symbol)
         for c in candles:
             anchor = self._check_session_rollover(clean_symbol, c.candle_start_epoch_s, c.open)
             anchor.update(c)
+
+        # Cross-register alias cache and anchor to ensure synchronized access
+        alt_sym = None
+        if clean_symbol.endswith("USD") and not clean_symbol.endswith("USDT"):
+            alt_sym = clean_symbol[:-3] + "USDT"
+        elif clean_symbol.endswith("USDT"):
+            alt_sym = clean_symbol[:-4] + "USD"
+
+        if alt_sym:
+            alt_key = (alt_sym, resolution)
+            if alt_key not in self._bar_caches:
+                self._bar_caches[alt_key] = cache
+            if alt_sym not in self._session_anchors:
+                self._session_anchors[alt_sym] = anchor
+
         return count
 
     def get_session_anchor(self, symbol: str) -> SessionAnchorData:
         """Retrieves or initializes Daily Session Anchor (00:00 UTC) for a symbol."""
-        clean_symbol = symbol.upper()
-        if clean_symbol not in self._session_anchors:
-            now_utc = datetime.now(timezone.utc)
-            session_date = now_utc.strftime("%Y-%m-%d")
-            # 00:00:00 UTC epoch seconds
-            midnight = datetime(now_utc.year, now_utc.month, now_utc.day, tzinfo=timezone.utc)
-            start_epoch_s = midnight.timestamp()
+        clean_symbol = symbol.strip().upper()
+        if clean_symbol in self._session_anchors:
+            return self._session_anchors[clean_symbol]
 
-            self._session_anchors[clean_symbol] = SessionAnchorData(
-                symbol=clean_symbol,
-                session_date=session_date,
-                session_start_epoch_s=start_epoch_s,
-            )
+        # Check USD/USDT alias
+        if clean_symbol.endswith("USD") and not clean_symbol.endswith("USDT"):
+            alt = clean_symbol[:-3] + "USDT"
+            if alt in self._session_anchors:
+                return self._session_anchors[alt]
+        elif clean_symbol.endswith("USDT"):
+            alt = clean_symbol[:-4] + "USD"
+            if alt in self._session_anchors:
+                return self._session_anchors[alt]
+
+        now_utc = datetime.now(timezone.utc)
+        session_date = now_utc.strftime("%Y-%m-%d")
+        # 00:00:00 UTC epoch seconds
+        midnight = datetime(now_utc.year, now_utc.month, now_utc.day, tzinfo=timezone.utc)
+        start_epoch_s = midnight.timestamp()
+
+        self._session_anchors[clean_symbol] = SessionAnchorData(
+            symbol=clean_symbol,
+            session_date=session_date,
+            session_start_epoch_s=start_epoch_s,
+        )
         return self._session_anchors[clean_symbol]
 
     def _check_session_rollover(

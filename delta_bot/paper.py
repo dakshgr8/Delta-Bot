@@ -131,6 +131,19 @@ class VirtualPosition(BaseModel):
         return self.side.lower() == "buy"
 
 
+def _symbols_match(sym1: str, sym2: str) -> bool:
+    """Matches symbols with automatic USD <-> USDT alias tolerance."""
+    s1 = sym1.strip().upper()
+    s2 = sym2.strip().upper()
+    if s1 == s2:
+        return True
+    if s1.endswith("USDT") and s1[:-4] + "USD" == s2:
+        return True
+    if s1.endswith("USD") and s1[:-3] + "USDT" == s2:
+        return True
+    return False
+
+
 class PaperExchangeSimulator:
     """
     Virtual order matching simulator for paper trading.
@@ -168,6 +181,13 @@ class PaperExchangeSimulator:
     def register_contract_spec(self, spec: ContractSpec) -> None:
         """Caches contract specification for lot-to-asset conversions and fees."""
         self._specs_by_product_id[spec.product_id] = spec
+        if not hasattr(self, "_specs_by_symbol"):
+            self._specs_by_symbol = {}
+        self._specs_by_symbol[spec.symbol.upper()] = spec
+        if spec.symbol.upper().endswith("USD") and not spec.symbol.upper().endswith("USDT"):
+            self._specs_by_symbol[spec.symbol.upper()[:-3] + "USDT"] = spec
+        elif spec.symbol.upper().endswith("USDT"):
+            self._specs_by_symbol[spec.symbol.upper()[:-4] + "USD"] = spec
 
     def _generate_id(self) -> int:
         self._next_id += 1
@@ -324,7 +344,7 @@ class PaperExchangeSimulator:
         # 1. Evaluate Resting Stop Orders
         # ---------------------------------------------------------------------
         for oid, o in list(self._pending_orders.items()):
-            if o.symbol.upper() != clean_symbol:
+            if not _symbols_match(o.symbol, clean_symbol):
                 continue
 
             triggered = False
@@ -432,7 +452,7 @@ class PaperExchangeSimulator:
         # 2. Evaluate Active Positions (Take Profit & Stop Loss)
         # ---------------------------------------------------------------------
         for pid, pos in list(self._open_positions.items()):
-            if pos.symbol.upper() != clean_symbol:
+            if not _symbols_match(pos.symbol, clean_symbol):
                 continue
 
             pos.mark_price = mark_price

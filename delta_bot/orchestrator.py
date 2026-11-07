@@ -237,6 +237,23 @@ class TradingBotOrchestrator:
     # Strategy Callbacks & Inter-Process Wiring
     # -------------------------------------------------------------------------
 
+    def _get_symbol_alias(self, symbol: str) -> str:
+        """Resolves cross USD/USDT alias or canonical symbol."""
+        sym = symbol.strip().upper()
+        # 1. Check known contract specs
+        spec = self.contract_specs.get(sym)
+        if spec and spec.symbol.upper() != sym:
+            return spec.symbol.upper()
+        for k, v in self.contract_specs.items():
+            if v.symbol.upper() == sym and k != sym:
+                return k
+        # 2. Check suffix conversion
+        if sym.endswith("USD") and not sym.endswith("USDT"):
+            return sym[:-3] + "USDT"
+        if sym.endswith("USDT"):
+            return sym[:-4] + "USD"
+        return sym
+
     def _register_strategy_callbacks(self, strategy: BreakoutStrategyEngine) -> None:
         """Hooks asynchronous event listeners on individual strategy engines."""
         strategy.on_sl_ratchet(self._handle_sl_ratchet)
@@ -329,31 +346,39 @@ class TradingBotOrchestrator:
         Orchestrates sizing, risk limits, and stop order dispatch.
         """
         clean_symbol = symbol.strip().upper()
-        if clean_symbol not in self.enabled_symbols:
-            logger.debug("Trading disabled for symbol: %s, skipping breakout evaluation", clean_symbol)
-            return
+        target_sym = clean_symbol
+        if target_sym not in self.enabled_symbols:
+            alt = self._get_symbol_alias(clean_symbol)
+            if alt in self.enabled_symbols:
+                target_sym = alt
+            else:
+                logger.debug("Trading disabled for symbol: %s, skipping breakout evaluation", clean_symbol)
+                return
 
-        strategy = self.strategies.get(clean_symbol)
-        spec = self.contract_specs.get(clean_symbol)
+        strategy = self.strategies.get(target_sym) or self.strategies.get(clean_symbol)
+        spec = self.contract_specs.get(target_sym) or self.contract_specs.get(clean_symbol)
 
         if not strategy or not spec:
             if not spec and self.rest_client:
                 try:
-                    spec = await self.rest_client.get_contract_spec(clean_symbol)
+                    spec = await self.rest_client.get_contract_spec(target_sym)
                     if spec:
-                        self.contract_specs[clean_symbol] = spec
+                        self.contract_specs[target_sym] = spec
+                        self.contract_specs[spec.symbol.upper()] = spec
                 except Exception as e:
-                    logger.debug("Lazy load ContractSpec for %s failed: %s", clean_symbol, e)
+                    logger.debug("Lazy load ContractSpec for %s failed: %s", target_sym, e)
 
             if not strategy:
                 strat_cfg = BreakoutStrategyConfig(
-                    symbol=clean_symbol,
+                    symbol=target_sym,
                     resolution=self.timeframe,
                     risk_per_trade_pct=self.config.default_risk_pct,
                 )
                 strategy = BreakoutStrategyEngine(config=strat_cfg)
                 self._register_strategy_callbacks(strategy)
-                self.strategies[clean_symbol] = strategy
+                self.strategies[target_sym] = strategy
+                if target_sym != clean_symbol:
+                    self.strategies[clean_symbol] = strategy
 
         if not strategy or not spec:
             logger.debug("Candle close received for untracked symbol: %s", symbol)
@@ -508,10 +533,10 @@ class TradingBotOrchestrator:
         for t_id, tenant in self.tenant_manager.tenants.items():
             if t_id == "default":
                 continue  # Default tenant is evaluated in main orchestrator loop
-            if not tenant.is_running or clean_symbol not in tenant.enabled_symbols:
+            if not tenant.is_running or not tenant.is_symbol_enabled(clean_symbol):
                 continue
 
-            t_strat = tenant.strategies.get(clean_symbol)
+            t_strat = tenant.get_strategy(clean_symbol)
             if not t_strat:
                 continue
 
@@ -648,7 +673,10 @@ class TradingBotOrchestrator:
         """Processes real-time market ticks, mark price updates, and paper matching."""
         clean_symbol = symbol.strip().upper()
         self.latest_tickers[clean_symbol] = ticker
-        ob = self.latest_orderbooks.get(clean_symbol)
+        alt = self._get_symbol_alias(clean_symbol)
+        if alt != clean_symbol:
+            self.latest_tickers[alt] = ticker
+        ob = self.latest_orderbooks.get(clean_symbol) or self.latest_orderbooks.get(alt)
 
         if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
             await self.paper_simulator.on_tick(
@@ -680,7 +708,11 @@ class TradingBotOrchestrator:
 
     async def _handle_orderbook(self, symbol: str, orderbook: OrderBook) -> None:
         """Caches depth snapshots for slippage estimation and liquidity checks."""
-        self.latest_orderbooks[symbol.strip().upper()] = orderbook
+        clean_symbol = symbol.strip().upper()
+        self.latest_orderbooks[clean_symbol] = orderbook
+        alt = self._get_symbol_alias(clean_symbol)
+        if alt != clean_symbol:
+            self.latest_orderbooks[alt] = orderbook
 
     async def _handle_session_rollover(
         self, symbol: str, session: SessionAnchorData
@@ -814,14 +846,20 @@ class TradingBotOrchestrator:
                     logger.warning("Symbol %s is not a perpetual futures contract (got '%s'). Skipping.", sym, spec.contract_type)
                     continue
                 self.contract_specs[sym] = spec
+                self.contract_specs[spec.symbol.upper()] = spec
+                # Register strategy alias mapping
+                if spec.symbol.upper() != sym:
+                    if sym in self.strategies and spec.symbol.upper() not in self.strategies:
+                        self.strategies[spec.symbol.upper()] = self.strategies[sym]
                 if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
                     self.paper_simulator.register_contract_spec(spec)
                 if hasattr(self, "tenant_manager"):
                     for t in self.tenant_manager.tenants.values():
                         t.register_contract_spec(spec)
                 logger.info(
-                    "Cached ContractSpec for %s: ProductID=%d, LotSize=%.4f, Tick=%.4f",
+                    "Cached ContractSpec for %s (Exchange Symbol: %s): ProductID=%d, LotSize=%.4f, Tick=%.4f",
                     sym,
+                    spec.symbol,
                     spec.product_id,
                     spec.contract_value,
                     spec.tick_size,
@@ -845,13 +883,20 @@ class TradingBotOrchestrator:
 
         # 5. Connect Public Market Data WebSocket (Task 1)
         await self.public_ws.connect()
+        sub_symbols: set[str] = set()
+        for sym in self.target_symbols:
+            sub_symbols.add(sym)
+            spec = self.contract_specs.get(sym)
+            if spec:
+                sub_symbols.add(spec.symbol.upper())
+        sub_list = list(sub_symbols)
         await self.public_ws.subscribe_candles(
-            symbols=self.target_symbols,
+            symbols=sub_list,
             resolutions=[self.timeframe],
         )
-        await self.public_ws.subscribe_tickers(symbols=self.target_symbols)
+        await self.public_ws.subscribe_tickers(symbols=sub_list)
         if getattr(self.config, "enable_orderbook_stream", True):
-            await self.public_ws.subscribe_orderbook(symbols=self.target_symbols)
+            await self.public_ws.subscribe_orderbook(symbols=sub_list)
         else:
             logger.info("Orderbook streaming disabled via ENABLE_ORDERBOOK_STREAM=false (conserving bandwidth)")
 

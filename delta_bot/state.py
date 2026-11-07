@@ -32,6 +32,19 @@ from delta_bot.strategy import OrderIntent, OrderStatus, SignalType
 logger = logging.getLogger("delta_bot.state")
 
 
+def _symbols_match(sym1: str, sym2: str) -> bool:
+    """Matches symbols with automatic USD <-> USDT alias tolerance."""
+    s1 = sym1.strip().upper()
+    s2 = sym2.strip().upper()
+    if s1 == s2:
+        return True
+    if s1.endswith("USDT") and s1[:-4] + "USD" == s2:
+        return True
+    if s1.endswith("USD") and s1[:-3] + "USDT" == s2:
+        return True
+    return False
+
+
 class TradingStateManager:
     """
     Central in-memory trading state machine for Delta-Bot.
@@ -174,9 +187,23 @@ class TradingStateManager:
         """Updates real-time mark price and ATR for liquidation proximity evaluation."""
         clean_symbol = symbol.strip().upper()
         self._cached_mark_prices[clean_symbol] = mark_price
-        self._cached_market_timestamps[clean_symbol] = time.time()
+        now_ts = time.time()
+        self._cached_market_timestamps[clean_symbol] = now_ts
         if atr is not None and atr > 0:
             self._cached_atrs[clean_symbol] = atr
+
+        # Cross-cache USD/USDT alias
+        alt_sym = None
+        if clean_symbol.endswith("USD") and not clean_symbol.endswith("USDT"):
+            alt_sym = clean_symbol[:-3] + "USDT"
+        elif clean_symbol.endswith("USDT"):
+            alt_sym = clean_symbol[:-4] + "USD"
+
+        if alt_sym:
+            self._cached_mark_prices[alt_sym] = mark_price
+            self._cached_market_timestamps[alt_sym] = now_ts
+            if atr is not None and atr > 0:
+                self._cached_atrs[alt_sym] = atr
 
         # Run liquidation proximity evaluation
         return await self.check_liquidation_proximity(clean_symbol)
@@ -335,7 +362,7 @@ class TradingStateManager:
         # Find product position
         pos = None
         for p in self._open_positions.values():
-            if p.symbol.upper() == clean_symbol:
+            if _symbols_match(p.symbol, clean_symbol):
                 pos = p
                 break
 

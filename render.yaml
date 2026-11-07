@@ -24,6 +24,6 @@ services:
       - key: DELTA_API_SECRET
         sync: false
       - key: DELTA_BASE_URL
-        value: https://api.delta.exchange
+        value: https://api.india.delta.exchange
       - key: DELTA_WS_URL
-        value: wss://socket.delta.exchange
+        value: wss://socket.india.delta.exchange
