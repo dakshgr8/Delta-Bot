@@ -936,7 +936,7 @@ class TenantManager:
         email: str | None = None,
         contract_specs: dict[str, ContractSpec] | None = None,
     ) -> TenantInstance | None:
-        """Fetches and bootstraps a user's canonical tenant from Supabase PostgreSQL."""
+        """Fetches and bootstraps a user's canonical tenant from separated real_tenants and demo_tenants tables."""
         if not self.supabase_url or not self.supabase_secret_key:
             return None
 
@@ -949,37 +949,63 @@ class TenantManager:
                 "apikey": self.supabase_secret_key,
                 "Authorization": f"Bearer {self.supabase_secret_key}",
             }
-            url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants?user_id=eq.{clean_uid}&select=*"
+            base_url = self.supabase_url.rstrip("/")
+
             with httpx.Client(timeout=8.0) as client:
-                res = client.get(url, headers=headers)
-                data = res.json() if res.status_code == 200 else []
+                res_real = client.get(f"{base_url}/rest/v1/real_tenants?user_id=eq.{clean_uid}&select=*", headers=headers)
+                real_rows = res_real.json() if res_real.status_code == 200 and isinstance(res_real.json(), list) else []
 
-                if not data and email_handle:
-                    url_email = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants?tenant_id=eq.{email_handle}&select=*"
-                    res_email = client.get(url_email, headers=headers)
-                    if res_email.status_code == 200:
-                        data = res_email.json()
+                res_demo = client.get(f"{base_url}/rest/v1/demo_tenants?user_id=eq.{clean_uid}&select=*", headers=headers)
+                demo_rows = res_demo.json() if res_demo.status_code == 200 and isinstance(res_demo.json(), list) else []
 
-            if not data or not isinstance(data, list):
+                if not real_rows and not demo_rows and email_handle:
+                    r_h = client.get(f"{base_url}/rest/v1/real_tenants?tenant_id=eq.{email_handle}&select=*", headers=headers)
+                    real_rows = r_h.json() if r_h.status_code == 200 and isinstance(r_h.json(), list) else []
+                    d_h = client.get(f"{base_url}/rest/v1/demo_tenants?tenant_id=eq.{email_handle}&select=*", headers=headers)
+                    demo_rows = d_h.json() if d_h.status_code == 200 and isinstance(d_h.json(), list) else []
+
+                # Fallback to legacy tenants view/table
+                if not real_rows and not demo_rows:
+                    res_leg = client.get(f"{base_url}/rest/v1/tenants?user_id=eq.{clean_uid}&select=*", headers=headers)
+                    leg_rows = res_leg.json() if res_leg.status_code == 200 and isinstance(res_leg.json(), list) else []
+                    real_rows = leg_rows
+                    demo_rows = leg_rows
+
+            if not real_rows and not demo_rows:
                 return None
 
-            # Deduplicate if multiple rows found in Supabase
-            if len(data) > 1:
-                def rank(r):
-                    has_key = 1 if decrypt_secret(r.get("delta_api_key") or "") else 0
-                    is_named = 1 if not str(r.get("tenant_id", "")).startswith("user-") else 0
-                    has_bal = 1 if float(r.get("balance", 0.0) or 0.0) > 0 else 0
-                    return (has_key, is_named, has_bal)
-                data.sort(key=rank, reverse=True)
-                for dup in data[1:]:
+            def score_row(r: dict[str, Any]) -> tuple[int, int, int]:
+                has_k = 1 if decrypt_secret(r.get("api_key") or r.get("delta_api_key") or r.get("demo_api_key") or "") else 0
+                is_n = 1 if not str(r.get("tenant_id", "")).startswith("user-") else 0
+                has_b = 1 if float(r.get("balance", 0.0) or 0.0) > 0 else 0
+                return (has_k, is_n, has_b)
+
+            pruned_ids: set[str] = set()
+            if len(real_rows) > 1:
+                real_rows.sort(key=score_row, reverse=True)
+                for dup in real_rows[1:]:
                     dup_id = dup.get("tenant_id")
-                    if dup_id:
+                    if dup_id and dup_id not in pruned_ids:
+                        pruned_ids.add(dup_id)
+                        logger.info("[DEDUPLICATION] Pruning duplicate real tenant '%s' for user %s", dup_id, clean_uid)
                         self.delete_tenant_from_supabase(dup_id)
                         if dup_id in self.tenants:
                             del self.tenants[dup_id]
 
-            row = data[0]
-            t_id = row.get("tenant_id")
+            if len(demo_rows) > 1:
+                demo_rows.sort(key=score_row, reverse=True)
+                for dup in demo_rows[1:]:
+                    dup_id = dup.get("tenant_id")
+                    if dup_id and dup_id not in pruned_ids:
+                        pruned_ids.add(dup_id)
+                        logger.info("[DEDUPLICATION] Pruning duplicate demo tenant '%s' for user %s", dup_id, clean_uid)
+                        self.delete_tenant_from_supabase(dup_id)
+                        if dup_id in self.tenants:
+                            del self.tenants[dup_id]
+
+            r_row = real_rows[0] if real_rows else {}
+            d_row = demo_rows[0] if demo_rows else {}
+            t_id = r_row.get("tenant_id") or d_row.get("tenant_id")
             if not t_id or t_id == "default":
                 return None
 
@@ -988,41 +1014,55 @@ class TenantManager:
                 inst.config.user_id = clean_uid
                 return inst
 
-            raw_k = decrypt_secret(row.get("delta_api_key") or "")
-            raw_s = decrypt_secret(row.get("delta_api_secret") or "")
-            raw_demo_k = decrypt_secret(row.get("demo_api_key") or "")
-            raw_demo_s = decrypt_secret(row.get("demo_api_secret") or "")
+            raw_name = r_row.get("name") or d_row.get("name") or t_id
+            clean_name = raw_name.replace(" Real Desk", "").replace(" Demo Desk", "").replace(" Real Trading Desk", "").replace(" Demo Trading Desk", "")
+
+            raw_real_k = decrypt_secret(r_row.get("api_key") or r_row.get("delta_api_key") or "")
+            raw_real_s = decrypt_secret(r_row.get("api_secret") or r_row.get("delta_api_secret") or "")
+            raw_demo_k = decrypt_secret(d_row.get("api_key") or d_row.get("demo_api_key") or "")
+            raw_demo_s = decrypt_secret(d_row.get("api_secret") or d_row.get("demo_api_secret") or "")
+
+            real_base = r_row.get("base_url") or r_row.get("delta_base_url") or "https://api.india.delta.exchange"
+            real_ws = r_row.get("ws_url") or r_row.get("delta_ws_url") or "wss://socket.india.delta.exchange"
+            demo_base = d_row.get("base_url") or d_row.get("demo_base_url") or "https://cdn-ind.testnet.deltaex.org"
+            demo_ws = d_row.get("ws_url") or d_row.get("demo_ws_url") or "wss://socket-ind.testnet.deltaex.org"
+
+            symbols = r_row.get("symbols") or d_row.get("symbols") or ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"]
+            lev = int(r_row.get("leverage") or d_row.get("leverage") or 5)
+            risk = float(r_row.get("risk_pct") or d_row.get("risk_pct") or 1.0)
+            tf = r_row.get("timeframe") or d_row.get("timeframe") or "1m"
+            max_dd = float(r_row.get("max_drawdown_pct") or d_row.get("max_drawdown_pct") or 4.0)
+            is_active = bool(r_row.get("is_active", d_row.get("is_active", True)))
+
             cfg = TenantConfig(
                 tenant_id=t_id,
                 user_id=clean_uid,
-                name=row.get("name", t_id),
-                mode=row.get("mode", "real"),
-                initial_balance=float(row.get("initial_balance", 0.0)),
-                delta_api_key=raw_k,
-                delta_api_secret=raw_s,
+                name=clean_name,
+                mode="real" if raw_real_k else "demo",
+                initial_balance=0.0,
+                delta_api_key=raw_real_k,
+                delta_api_secret=raw_real_s,
                 demo_api_key=raw_demo_k,
                 demo_api_secret=raw_demo_s,
-                delta_base_url=row.get("delta_base_url") or "https://api.india.delta.exchange",
-                delta_ws_url=row.get("delta_ws_url") or "wss://socket.india.delta.exchange",
-                demo_base_url=row.get("demo_base_url") or "https://cdn-ind.testnet.deltaex.org",
-                demo_ws_url=row.get("demo_ws_url") or "wss://socket-ind.testnet.deltaex.org",
-                risk_pct=float(row.get("risk_pct", 1.0)),
-                leverage=int(row.get("leverage", 5)),
-                timeframe=row.get("timeframe", "1m"),
-                max_drawdown_pct=float(row.get("max_drawdown_pct", 4.0)),
-                symbols=row.get("symbols") or ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"],
-                is_active=bool(row.get("is_active", True)),
-                created_at=row.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                delta_base_url=real_base,
+                delta_ws_url=real_ws,
+                demo_base_url=demo_base,
+                demo_ws_url=demo_ws,
+                risk_pct=risk,
+                leverage=lev,
+                timeframe=tf,
+                max_drawdown_pct=max_dd,
+                symbols=symbols,
+                is_active=is_active,
+                created_at=r_row.get("created_at") or d_row.get("created_at") or datetime.now(timezone.utc).isoformat(),
             )
             inst = TenantInstance(config=cfg, contract_specs=contract_specs or {})
-            if inst.paper_simulator and "balance" in row:
-                inst.paper_simulator.wallet.balance = float(row["balance"])
             self.tenants[t_id] = inst
             self.save_to_disk()
-            logger.info("[USER TENANT LOADED FROM SUPABASE] Linked user %s to canonical tenant '%s'", clean_uid, t_id)
+            logger.info("[USER TENANT LOADED FROM SUPABASE] Linked user %s to canonical tenant '%s' from separated tables", clean_uid, t_id)
             return inst
         except Exception as e:
-            logger.error("Error fetching user tenant from Supabase: %s", e)
+            logger.error("Error fetching user tenant from separated Supabase tables: %s", e)
             return None
 
     def list_tenants(self) -> list[dict[str, Any]]:
@@ -1244,7 +1284,7 @@ class TenantManager:
             logger.error("Error reading tenants from %s: %s", self.storage_path, e)
 
     def load_from_supabase(self, contract_specs: dict[str, ContractSpec]) -> int:
-        """Loads and bootstraps saved tenant instances from Supabase PostgreSQL."""
+        """Loads and bootstraps saved tenant instances from separated real_tenants and demo_tenants tables."""
         if not self.supabase_url or not self.supabase_secret_key:
             return 0
 
@@ -1254,94 +1294,138 @@ class TenantManager:
                 "apikey": self.supabase_secret_key,
                 "Authorization": f"Bearer {self.supabase_secret_key}",
             }
-            url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants?select=*"
+            base_url = self.supabase_url.rstrip("/")
             with httpx.Client(timeout=10.0) as client:
-                res = client.get(url, headers=headers)
-            if res.status_code != 200:
-                logger.warning("Supabase load tenants HTTP status %d: %s", res.status_code, res.text)
-                return 0
+                res_real = client.get(f"{base_url}/rest/v1/real_tenants?select=*", headers=headers)
+                real_data = res_real.json() if res_real.status_code == 200 and isinstance(res_real.json(), list) else []
 
-            data = res.json()
-            if not isinstance(data, list):
-                return 0
+                res_demo = client.get(f"{base_url}/rest/v1/demo_tenants?select=*", headers=headers)
+                demo_data = res_demo.json() if res_demo.status_code == 200 and isinstance(res_demo.json(), list) else []
 
-            # Deduplicate any multiple rows for the same user_id in Supabase
-            by_user: dict[str, list[dict[str, Any]]] = {}
-            for row in data:
-                uid = row.get("user_id")
+                # Fallback to legacy tenants view/table if separated tables are not yet populated
+                if not real_data and not demo_data:
+                    res_leg = client.get(f"{base_url}/rest/v1/tenants?select=*", headers=headers)
+                    if res_leg.status_code == 200 and isinstance(res_leg.json(), list):
+                        real_data = res_leg.json()
+                        demo_data = res_leg.json()
+
+            def score_row(r: dict[str, Any]) -> tuple[int, int, int]:
+                has_k = 1 if decrypt_secret(r.get("api_key") or r.get("delta_api_key") or r.get("demo_api_key") or "") else 0
+                is_n = 1 if not str(r.get("tenant_id", "")).startswith("user-") else 0
+                has_b = 1 if float(r.get("balance", 0.0) or 0.0) > 0 else 0
+                return (has_k, is_n, has_b)
+
+            # Deduplicate real_data by user_id
+            by_user_real: dict[str, list[dict[str, Any]]] = {}
+            unbound_real: list[dict[str, Any]] = []
+            for r in real_data:
+                uid = r.get("user_id")
                 if uid:
-                    by_user.setdefault(str(uid), []).append(row)
+                    by_user_real.setdefault(str(uid), []).append(r)
+                else:
+                    unbound_real.append(r)
 
-            for uid, user_rows in by_user.items():
-                if len(user_rows) > 1:
-                    def rank(r):
-                        has_key = 1 if decrypt_secret(r.get("delta_api_key") or "") else 0
-                        is_named = 1 if not str(r.get("tenant_id", "")).startswith("user-") else 0
-                        has_bal = 1 if float(r.get("balance", 0.0) or 0.0) > 0 else 0
-                        return (has_key, is_named, has_bal)
+            pruned_ids: set[str] = set()
+            canonical_real: list[dict[str, Any]] = list(unbound_real)
+            for uid, rows in by_user_real.items():
+                if len(rows) == 1:
+                    canonical_real.append(rows[0])
+                else:
+                    rows.sort(key=score_row, reverse=True)
+                    canonical_real.append(rows[0])
+                    for stale in rows[1:]:
+                        stale_id = stale.get("tenant_id")
+                        if stale_id and stale_id not in pruned_ids:
+                            pruned_ids.add(stale_id)
+                            logger.info("[DEDUPLICATION] Purging duplicate real tenant '%s' for user %s", stale_id, uid)
+                            self.delete_tenant_from_supabase(stale_id)
 
-                    user_rows.sort(key=rank, reverse=True)
-                    canonical = user_rows[0]
-                    for dup in user_rows[1:]:
-                        dup_id = dup.get("tenant_id")
-                        if dup_id:
-                            logger.warning(
-                                "[SUPABASE DEDUPLICATION] Deleting duplicate tenant '%s' for user '%s', keeping canonical '%s'",
-                                dup_id,
-                                uid,
-                                canonical.get("tenant_id"),
-                            )
-                            self.delete_tenant_from_supabase(dup_id)
-                            if dup_id in self.tenants:
-                                del self.tenants[dup_id]
-                            data = [r for r in data if r.get("tenant_id") != dup_id]
+            # Deduplicate demo_data by user_id
+            by_user_demo: dict[str, list[dict[str, Any]]] = {}
+            unbound_demo: list[dict[str, Any]] = []
+            for d in demo_data:
+                uid = d.get("user_id")
+                if uid:
+                    by_user_demo.setdefault(str(uid), []).append(d)
+                else:
+                    unbound_demo.append(d)
+
+            canonical_demo: list[dict[str, Any]] = list(unbound_demo)
+            for uid, rows in by_user_demo.items():
+                if len(rows) == 1:
+                    canonical_demo.append(rows[0])
+                else:
+                    rows.sort(key=score_row, reverse=True)
+                    canonical_demo.append(rows[0])
+                    for stale in rows[1:]:
+                        stale_id = stale.get("tenant_id")
+                        if stale_id and stale_id not in pruned_ids:
+                            pruned_ids.add(stale_id)
+                            logger.info("[DEDUPLICATION] Purging duplicate demo tenant '%s' for user %s", stale_id, uid)
+                            self.delete_tenant_from_supabase(stale_id)
+
+            real_by_tid = {r["tenant_id"]: r for r in canonical_real if r.get("tenant_id")}
+            demo_by_tid = {r["tenant_id"]: r for r in canonical_demo if r.get("tenant_id")}
+            all_tids = set(real_by_tid.keys()).union(demo_by_tid.keys())
 
             loaded = 0
-            for row in data:
-                t_id = row.get("tenant_id")
-                if not t_id or t_id == "default":
+            for t_id in all_tids:
+                if t_id == "default":
                     continue
-                if t_id in self.tenants:
-                    if row.get("user_id"):
-                        self.tenants[t_id].config.user_id = str(row["user_id"])
-                    continue
-                raw_k = decrypt_secret(row.get("delta_api_key") or "")
-                raw_s = decrypt_secret(row.get("delta_api_secret") or "")
-                raw_demo_k = decrypt_secret(row.get("demo_api_key") or "")
-                raw_demo_s = decrypt_secret(row.get("demo_api_secret") or "")
+                r_row = real_by_tid.get(t_id, {})
+                d_row = demo_by_tid.get(t_id, {})
+
+                uid = r_row.get("user_id") or d_row.get("user_id")
+                raw_name = r_row.get("name") or d_row.get("name") or t_id
+                clean_name = raw_name.replace(" Real Desk", "").replace(" Demo Desk", "").replace(" Real Trading Desk", "").replace(" Demo Trading Desk", "")
+
+                raw_real_k = decrypt_secret(r_row.get("api_key") or r_row.get("delta_api_key") or "")
+                raw_real_s = decrypt_secret(r_row.get("api_secret") or r_row.get("delta_api_secret") or "")
+                raw_demo_k = decrypt_secret(d_row.get("api_key") or d_row.get("demo_api_key") or "")
+                raw_demo_s = decrypt_secret(d_row.get("api_secret") or d_row.get("demo_api_secret") or "")
+
+                real_base = r_row.get("base_url") or r_row.get("delta_base_url") or "https://api.india.delta.exchange"
+                real_ws = r_row.get("ws_url") or r_row.get("delta_ws_url") or "wss://socket.india.delta.exchange"
+                demo_base = d_row.get("base_url") or d_row.get("demo_base_url") or "https://cdn-ind.testnet.deltaex.org"
+                demo_ws = d_row.get("ws_url") or d_row.get("demo_ws_url") or "wss://socket-ind.testnet.deltaex.org"
+
+                symbols = r_row.get("symbols") or d_row.get("symbols") or ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"]
+                lev = int(r_row.get("leverage") or d_row.get("leverage") or 5)
+                risk = float(r_row.get("risk_pct") or d_row.get("risk_pct") or 1.0)
+                tf = r_row.get("timeframe") or d_row.get("timeframe") or "1m"
+                max_dd = float(r_row.get("max_drawdown_pct") or d_row.get("max_drawdown_pct") or 4.0)
+                is_active = bool(r_row.get("is_active", d_row.get("is_active", True)))
+
                 cfg = TenantConfig(
                     tenant_id=t_id,
-                    user_id=str(row["user_id"]) if row.get("user_id") else None,
-                    name=row.get("name", t_id),
-                    mode=row.get("mode", "real"),
-                    initial_balance=float(row.get("initial_balance", 0.0)),
-                    delta_api_key=raw_k,
-                    delta_api_secret=raw_s,
+                    user_id=str(uid) if uid else None,
+                    name=clean_name,
+                    mode="real" if raw_real_k else "demo",
+                    initial_balance=0.0,
+                    delta_api_key=raw_real_k,
+                    delta_api_secret=raw_real_s,
                     demo_api_key=raw_demo_k,
                     demo_api_secret=raw_demo_s,
-                    delta_base_url=row.get("delta_base_url") or "https://api.india.delta.exchange",
-                    delta_ws_url=row.get("delta_ws_url") or "wss://socket.india.delta.exchange",
-                    demo_base_url=row.get("demo_base_url") or "https://cdn-ind.testnet.deltaex.org",
-                    demo_ws_url=row.get("demo_ws_url") or "wss://socket-ind.testnet.deltaex.org",
-                    risk_pct=float(row.get("risk_pct", 1.0)),
-                    leverage=int(row.get("leverage", 5)),
-                    timeframe=row.get("timeframe", "1m"),
-                    max_drawdown_pct=float(row.get("max_drawdown_pct", 4.0)),
-                    symbols=row.get("symbols") or ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"],
-                    is_active=bool(row.get("is_active", True)),
-                    created_at=row.get("created_at") or datetime.now(timezone.utc).isoformat(),
+                    delta_base_url=real_base,
+                    delta_ws_url=real_ws,
+                    demo_base_url=demo_base,
+                    demo_ws_url=demo_ws,
+                    risk_pct=risk,
+                    leverage=lev,
+                    timeframe=tf,
+                    max_drawdown_pct=max_dd,
+                    symbols=symbols,
+                    is_active=is_active,
+                    created_at=r_row.get("created_at") or d_row.get("created_at") or datetime.now(timezone.utc).isoformat(),
                 )
                 inst = TenantInstance(config=cfg, contract_specs=contract_specs)
-                if inst.paper_simulator and "balance" in row:
-                    inst.paper_simulator.wallet.balance = float(row["balance"])
-                    if "initial_balance" in row and row["initial_balance"]:
-                        inst.paper_simulator.wallet.initial_balance = float(row["initial_balance"])
                 self.tenants[t_id] = inst
                 loaded += 1
-            logger.info("Loaded %d tenants from Supabase", loaded)
+
+            logger.info("Loaded %d tenants from separated Supabase tables (real_tenants & demo_tenants)", loaded)
             return loaded
         except Exception as e:
-            logger.error("Error reading tenants from Supabase: %s", e)
+            logger.error("Error reading tenants from Supabase separated tables: %s", e)
             return 0
 
     def _write_to_wal(self, action: str, payload: dict[str, Any]) -> None:
@@ -1414,27 +1498,52 @@ class TenantManager:
                 success = False
 
                 try:
-                    if action == "upsert_tenant":
+                    if action in ("upsert_real_tenant", "upsert_tenant"):
                         headers = {
                             "apikey": self.supabase_secret_key,
                             "Authorization": f"Bearer {self.supabase_secret_key}",
                             "Content-Type": "application/json",
                             "Prefer": "resolution=merge-duplicates",
                         }
-                        url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants"
+                        url = f"{self.supabase_url.rstrip('/')}/rest/v1/real_tenants?on_conflict=tenant_id"
                         with httpx.Client(timeout=10.0) as client:
                             res = client.post(url, headers=headers, json=payload)
                         if res.status_code in (200, 201):
                             success = True
                         elif "23505" in res.text or "duplicate key" in res.text.lower():
                             logger.info(
-                                "[WAL DEDUPLICATION] Tenant %s already present in cloud ledger. Discarding duplicate.",
+                                "[WAL DEDUPLICATION] Real tenant %s already present in cloud ledger. Discarding duplicate.",
                                 payload.get("tenant_id"),
                             )
                             success = True
                         else:
                             logger.warning(
-                                "[WAL REPLAY FAILED] Upsert tenant %s failed with status %d: %s",
+                                "[WAL REPLAY FAILED] Upsert real tenant %s failed with status %d: %s",
+                                payload.get("tenant_id"),
+                                res.status_code,
+                                res.text,
+                            )
+                    elif action == "upsert_demo_tenant":
+                        headers = {
+                            "apikey": self.supabase_secret_key,
+                            "Authorization": f"Bearer {self.supabase_secret_key}",
+                            "Content-Type": "application/json",
+                            "Prefer": "resolution=merge-duplicates",
+                        }
+                        url = f"{self.supabase_url.rstrip('/')}/rest/v1/demo_tenants?on_conflict=tenant_id"
+                        with httpx.Client(timeout=10.0) as client:
+                            res = client.post(url, headers=headers, json=payload)
+                        if res.status_code in (200, 201):
+                            success = True
+                        elif "23505" in res.text or "duplicate key" in res.text.lower():
+                            logger.info(
+                                "[WAL DEDUPLICATION] Demo tenant %s already present in cloud ledger. Discarding duplicate.",
+                                payload.get("tenant_id"),
+                            )
+                            success = True
+                        else:
+                            logger.warning(
+                                "[WAL REPLAY FAILED] Upsert demo tenant %s failed with status %d: %s",
                                 payload.get("tenant_id"),
                                 res.status_code,
                                 res.text,
@@ -1445,16 +1554,18 @@ class TenantManager:
                             "apikey": self.supabase_secret_key,
                             "Authorization": f"Bearer {self.supabase_secret_key}",
                         }
-                        url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants?tenant_id=eq.{tid}"
+                        base_url = self.supabase_url.rstrip("/")
                         with httpx.Client(timeout=10.0) as client:
-                            res = client.delete(url, headers=headers)
-                        if res.status_code in (200, 204, 404):
+                            res_r = client.delete(f"{base_url}/rest/v1/real_tenants?tenant_id=eq.{tid}", headers=headers)
+                            res_d = client.delete(f"{base_url}/rest/v1/demo_tenants?tenant_id=eq.{tid}", headers=headers)
+                        if (res_r.status_code in (200, 204, 404)) and (res_d.status_code in (200, 204, 404)):
                             success = True
                         else:
                             logger.warning(
-                                "[WAL REPLAY FAILED] Delete tenant %s failed with status %d",
+                                "[WAL REPLAY FAILED] Delete tenant %s failed with status %d / %d",
                                 tid,
-                                res.status_code,
+                                res_r.status_code,
+                                res_d.status_code,
                             )
                 except Exception as err:
                     err_str = str(err)
@@ -1490,7 +1601,7 @@ class TenantManager:
             return 0
 
     def sync_tenant_to_supabase(self, instance: TenantInstance) -> bool:
-        """Synchronizes tenant state and encrypted configuration to Supabase PostgreSQL."""
+        """Synchronizes tenant state and encrypted configuration to separated real_tenants and demo_tenants tables."""
         if not self.supabase_url or not self.supabase_secret_key:
             return False
 
@@ -1502,75 +1613,123 @@ class TenantManager:
                 "Content-Type": "application/json",
                 "Prefer": "resolution=merge-duplicates",
             }
-            url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants"
+            base_url = self.supabase_url.rstrip("/")
 
             if instance.mode == ExecutionMode.PAPER and instance.paper_simulator:
-                bal = instance.paper_simulator.wallet.balance
-                eq = instance.paper_simulator.wallet.equity
-                upnl = instance.paper_simulator.wallet.unrealized_pnl
-                rpnl = instance.paper_simulator.wallet.realized_pnl
+                paper_bal = instance.paper_simulator.wallet.balance
+                paper_eq = instance.paper_simulator.wallet.equity
+                paper_upnl = instance.paper_simulator.wallet.unrealized_pnl
+                paper_rpnl = instance.paper_simulator.wallet.realized_pnl
             else:
-                bal = instance.live_balance if instance.last_sync_time > 0 else instance.config.initial_balance
-                eq = instance.live_equity if instance.last_sync_time > 0 else bal
-                upnl = instance.live_unrealized_pnl
-                rpnl = instance.live_realized_pnl
+                paper_bal = 0.0
+                paper_eq = 0.0
+                paper_upnl = 0.0
+                paper_rpnl = 0.0
 
-            enc_key = encrypt_secret(instance.config.delta_api_key) if instance.config.delta_api_key else None
-            enc_secret = encrypt_secret(instance.config.delta_api_secret) if instance.config.delta_api_secret else None
+            live_bal = instance.live_balance if instance.last_sync_time > 0 else instance.config.initial_balance
+            live_eq = instance.live_equity if instance.last_sync_time > 0 else live_bal
+            live_upnl = instance.live_unrealized_pnl
+            live_rpnl = instance.live_realized_pnl
+
+            enc_real_key = encrypt_secret(instance.config.delta_api_key) if instance.config.delta_api_key else None
+            enc_real_secret = encrypt_secret(instance.config.delta_api_secret) if instance.config.delta_api_secret else None
             enc_demo_key = encrypt_secret(instance.config.demo_api_key) if instance.config.demo_api_key else None
             enc_demo_secret = encrypt_secret(instance.config.demo_api_secret) if instance.config.demo_api_secret else None
 
-            payload = {
+            # Real Tenant Payload (Strictly Real Desk parameters)
+            real_payload = {
                 "tenant_id": instance.config.tenant_id,
                 "user_id": instance.config.user_id,
-                "name": instance.config.name,
-                "mode": instance.config.mode,
-                "initial_balance": float(instance.config.initial_balance),
-                "balance": round(float(bal), 4),
-                "equity": round(float(eq), 4),
-                "realized_pnl": round(float(rpnl), 4),
-                "unrealized_pnl": round(float(upnl), 4),
+                "name": f"{instance.config.name} Real Desk" if not instance.config.name.endswith("Real Desk") else instance.config.name,
+                "api_key": enc_real_key,
+                "api_secret": enc_real_secret,
+                "base_url": instance.config.delta_base_url or "https://api.india.delta.exchange",
+                "ws_url": instance.config.delta_ws_url or "wss://socket.india.delta.exchange",
                 "leverage": int(instance.config.leverage),
                 "risk_pct": float(instance.config.risk_pct),
                 "timeframe": instance.config.timeframe,
                 "max_drawdown_pct": float(instance.config.max_drawdown_pct),
-                "delta_api_key": enc_key,
-                "delta_api_secret": enc_secret,
-                "demo_api_key": enc_demo_key,
-                "demo_api_secret": enc_demo_secret,
-                "delta_base_url": instance.config.delta_base_url,
-                "delta_ws_url": instance.config.delta_ws_url,
-                "demo_base_url": instance.config.demo_base_url,
-                "demo_ws_url": instance.config.demo_ws_url,
                 "symbols": instance.config.symbols,
-                "is_running": instance.is_running,
+                "is_running": instance.is_running and instance.mode == ExecutionMode.LIVE,
                 "is_active": instance.config.is_active,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
+            if instance.mode == ExecutionMode.LIVE:
+                real_payload["balance"] = round(float(live_bal), 4)
+                real_payload["equity"] = round(float(live_eq), 4)
+                real_payload["realized_pnl"] = round(float(live_rpnl), 4)
+                real_payload["unrealized_pnl"] = round(float(live_upnl), 4)
+
+            # Demo Tenant Payload (Strictly Demo Desk parameters)
+            demo_payload = {
+                "tenant_id": instance.config.tenant_id,
+                "user_id": instance.config.user_id,
+                "name": f"{instance.config.name} Demo Desk" if not instance.config.name.endswith("Demo Desk") else instance.config.name,
+                "api_key": enc_demo_key,
+                "api_secret": enc_demo_secret,
+                "base_url": instance.config.demo_base_url or "https://cdn-ind.testnet.deltaex.org",
+                "ws_url": instance.config.demo_ws_url or "wss://socket-ind.testnet.deltaex.org",
+                "leverage": int(instance.config.leverage),
+                "risk_pct": float(instance.config.risk_pct),
+                "timeframe": instance.config.timeframe,
+                "max_drawdown_pct": float(instance.config.max_drawdown_pct),
+                "symbols": instance.config.symbols,
+                "is_running": instance.is_running and instance.mode in (ExecutionMode.DEMO, ExecutionMode.PAPER),
+                "is_active": instance.config.is_active,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            if instance.mode == ExecutionMode.PAPER and instance.paper_simulator:
+                demo_payload["balance"] = round(float(paper_bal), 4)
+                demo_payload["equity"] = round(float(paper_eq), 4)
+                demo_payload["realized_pnl"] = round(float(paper_rpnl), 4)
+                demo_payload["unrealized_pnl"] = round(float(paper_upnl), 4)
+            elif instance.mode == ExecutionMode.DEMO:
+                demo_payload["balance"] = round(float(live_bal), 4)
+                demo_payload["equity"] = round(float(live_eq), 4)
+                demo_payload["realized_pnl"] = round(float(live_rpnl), 4)
+                demo_payload["unrealized_pnl"] = round(float(live_upnl), 4)
+
+            success_real = False
+            success_demo = False
 
             with httpx.Client(timeout=10.0) as client:
-                res = client.post(url, headers=headers, json=payload)
-            if res.status_code in (200, 201):
+                res_r = client.post(f"{base_url}/rest/v1/real_tenants?on_conflict=tenant_id", headers=headers, json=real_payload)
+                if res_r.status_code in (200, 201):
+                    success_real = True
+                else:
+                    logger.warning(
+                        "Supabase returned status %d when syncing real tenant %s. Queuing to WAL.",
+                        res_r.status_code,
+                        instance.config.tenant_id,
+                    )
+                    self._write_to_wal("upsert_real_tenant", real_payload)
+
+                res_d = client.post(f"{base_url}/rest/v1/demo_tenants?on_conflict=tenant_id", headers=headers, json=demo_payload)
+                if res_d.status_code in (200, 201):
+                    success_demo = True
+                else:
+                    logger.warning(
+                        "Supabase returned status %d when syncing demo tenant %s. Queuing to WAL.",
+                        res_d.status_code,
+                        instance.config.tenant_id,
+                    )
+                    self._write_to_wal("upsert_demo_tenant", demo_payload)
+
+            if success_real and success_demo:
                 self.flush_wal_buffer()
                 return True
-            else:
-                logger.warning(
-                    "Supabase returned status %d when syncing tenant %s. Queuing to WAL.",
-                    res.status_code,
-                    instance.config.tenant_id,
-                )
-                self._write_to_wal("upsert_tenant", payload)
-                return False
+            return success_real or success_demo
         except Exception as e:
             logger.debug("Failed to sync tenant %s to Supabase: %s. Queuing to WAL.", instance.config.tenant_id, e)
             try:
-                self._write_to_wal("upsert_tenant", payload)
+                self._write_to_wal("upsert_real_tenant", real_payload)
+                self._write_to_wal("upsert_demo_tenant", demo_payload)
             except Exception:
                 pass
             return False
 
     def delete_tenant_from_supabase(self, tenant_id: str) -> bool:
-        """Removes tenant record from Supabase PostgreSQL."""
+        """Removes tenant records from separated real_tenants and demo_tenants tables in Supabase."""
         if not self.supabase_url or not self.supabase_secret_key:
             return False
         try:
@@ -1579,10 +1738,11 @@ class TenantManager:
                 "apikey": self.supabase_secret_key,
                 "Authorization": f"Bearer {self.supabase_secret_key}",
             }
-            url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants?tenant_id=eq.{tenant_id}"
+            base_url = self.supabase_url.rstrip("/")
             with httpx.Client(timeout=10.0) as client:
-                res = client.delete(url, headers=headers)
-            if res.status_code in (200, 204):
+                res_r = client.delete(f"{base_url}/rest/v1/real_tenants?tenant_id=eq.{tenant_id}", headers=headers)
+                res_d = client.delete(f"{base_url}/rest/v1/demo_tenants?tenant_id=eq.{tenant_id}", headers=headers)
+            if (res_r.status_code in (200, 204, 404)) and (res_d.status_code in (200, 204, 404)):
                 self.flush_wal_buffer()
                 return True
             else:
