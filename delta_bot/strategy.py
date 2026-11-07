@@ -103,12 +103,18 @@ class StrategyConfig(BaseModel):
         default=1, ge=1, description="Minimum contract lots to submit if within risk limits"
     )
 
-    # Trailing Stop Configuration
+    # Trailing Stop & Break-Even Configuration
     trailing_stop: bool = Field(
         default=False, description="Enable bar-by-bar trailing stop ratchet once triggered"
     )
     trailing_stop_atr_mult: float = Field(
         default=1.0, gt=0.0, description="ATR multiplier used to ratchet trailing stop loss"
+    )
+    enable_breakeven: bool = Field(
+        default=True, description="Auto-ratchet Stop Loss to break-even (+1 tick) upon reaching target R profit"
+    )
+    breakeven_trigger_r: float = Field(
+        default=1.0, gt=0.0, description="R-multiple floating profit required to trigger break-even ratchet (e.g. 1.0R or 1.5R)"
     )
 
 
@@ -162,6 +168,7 @@ class OrderIntent(BaseModel):
     exit_price: float | None = Field(default=None, description="Price at which position exited")
     fill_price: float | None = Field(default=None, description="Actual execution fill price from private user feed")
     filled_size: int | None = Field(default=None, description="Actual executed contract lots from private user feed")
+    is_breakeven_locked: bool = Field(default=False, description="Flag indicating SL has been advanced to break-even")
 
     @property
     def is_pending(self) -> bool:
@@ -462,15 +469,38 @@ class BreakoutStrategyEngine:
                     pos.close_position(OrderStatus.CLOSED_SL, pos.current_stop_loss, candle.candle_start_epoch_s)
                     await self._emit(self._on_position_close_cb, pos, OrderStatus.CLOSED_SL, pos.current_stop_loss)
                     self.active_position = None
-                # Trailing Stop Ratchet
-                elif self.config.trailing_stop:
-                    snap = self.indicator_pipeline.latest_snapshot
-                    if snap is not None:
-                        proposed_sl = candle.low - (self.config.trailing_stop_atr_mult * snap.atr_14)
-                        quantized_sl = contract_spec.round_price(proposed_sl)
+                else:
+                    # Automated Break-Even Auto-Ratchet (1.0R / 1.5R)
+                    entry_px = pos.fill_price if (pos.fill_price and pos.fill_price > 0) else pos.trigger_price
+                    r_dist = abs(entry_px - pos.initial_stop_loss)
+                    if (
+                        self.config.enable_breakeven
+                        and not pos.is_breakeven_locked
+                        and r_dist > 0
+                        and candle.high >= entry_px + (self.config.breakeven_trigger_r * r_dist)
+                    ):
+                        be_price = contract_spec.round_price(entry_px + contract_spec.tick_size)
                         old_sl = pos.current_stop_loss
-                        if pos.ratchet_sl(quantized_sl):
+                        if pos.ratchet_sl(be_price):
+                            pos.is_breakeven_locked = True
+                            logger.info(
+                                "🎯 [BREAK-EVEN RATCHET] %s LONG reached +%.1fR! SL ratcheted to break-even (+1 tick): %.4f -> %.4f",
+                                pos.symbol,
+                                self.config.breakeven_trigger_r,
+                                old_sl,
+                                be_price,
+                            )
                             await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
+
+                    # Trailing Stop Ratchet
+                    if self.config.trailing_stop:
+                        snap = self.indicator_pipeline.latest_snapshot
+                        if snap is not None:
+                            proposed_sl = candle.low - (self.config.trailing_stop_atr_mult * snap.atr_14)
+                            quantized_sl = contract_spec.round_price(proposed_sl)
+                            old_sl = pos.current_stop_loss
+                            if pos.ratchet_sl(quantized_sl):
+                                await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
 
             elif pos.signal_type == SignalType.BEARISH_BREAKDOWN:
                 # Check Take Profit
@@ -483,15 +513,38 @@ class BreakoutStrategyEngine:
                     pos.close_position(OrderStatus.CLOSED_SL, pos.current_stop_loss, candle.candle_start_epoch_s)
                     await self._emit(self._on_position_close_cb, pos, OrderStatus.CLOSED_SL, pos.current_stop_loss)
                     self.active_position = None
-                # Trailing Stop Ratchet
-                elif self.config.trailing_stop:
-                    snap = self.indicator_pipeline.latest_snapshot
-                    if snap is not None:
-                        proposed_sl = candle.high + (self.config.trailing_stop_atr_mult * snap.atr_14)
-                        quantized_sl = contract_spec.round_price(proposed_sl)
+                else:
+                    # Automated Break-Even Auto-Ratchet (1.0R / 1.5R)
+                    entry_px = pos.fill_price if (pos.fill_price and pos.fill_price > 0) else pos.trigger_price
+                    r_dist = abs(entry_px - pos.initial_stop_loss)
+                    if (
+                        self.config.enable_breakeven
+                        and not pos.is_breakeven_locked
+                        and r_dist > 0
+                        and candle.low <= entry_px - (self.config.breakeven_trigger_r * r_dist)
+                    ):
+                        be_price = contract_spec.round_price(entry_px - contract_spec.tick_size)
                         old_sl = pos.current_stop_loss
-                        if pos.ratchet_sl(quantized_sl):
+                        if pos.ratchet_sl(be_price):
+                            pos.is_breakeven_locked = True
+                            logger.info(
+                                "🎯 [BREAK-EVEN RATCHET] %s SHORT reached +%.1fR! SL ratcheted to break-even (-1 tick): %.4f -> %.4f",
+                                pos.symbol,
+                                self.config.breakeven_trigger_r,
+                                old_sl,
+                                be_price,
+                            )
                             await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
+
+                    # Trailing Stop Ratchet
+                    if self.config.trailing_stop:
+                        snap = self.indicator_pipeline.latest_snapshot
+                        if snap is not None:
+                            proposed_sl = candle.high + (self.config.trailing_stop_atr_mult * snap.atr_14)
+                            quantized_sl = contract_spec.round_price(proposed_sl)
+                            old_sl = pos.current_stop_loss
+                            if pos.ratchet_sl(quantized_sl):
+                                await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
 
         # ---------------------------------------------------------------------
         # Step 2: Pending Order Trigger, Invalidation & TTL Evaluation

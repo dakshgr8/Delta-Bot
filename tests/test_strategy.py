@@ -689,3 +689,109 @@ async def test_rest_warmup_routine(strategy_config: StrategyConfig) -> None:
     assert engine.indicator_pipeline.latest_snapshot is not None
     assert engine.indicator_pipeline.latest_snapshot.ema_20 > 0
     assert session_anchor.session_high >= 50050.0
+
+
+# -----------------------------------------------------------------------------
+# 10. Automated Break-Even Auto-Ratchet (Feature E)
+# -----------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_automated_breakeven_autoratchet_bullish(
+    btc_spec: ContractSpec,
+    strategy_config: StrategyConfig,
+) -> None:
+    """Verifies that reaching +1.0R auto-ratchets Stop Loss to entry + 1 tick (break-even)."""
+    cfg = strategy_config.model_copy(update={"enable_breakeven": True, "breakeven_trigger_r": 1.0, "trailing_stop": False})
+    engine = BreakoutStrategyEngine(cfg)
+    bar_cache = CircularBarCache(capacity=500)
+    session_anchor = SessionAnchorData(symbol="BTCUSDT", session_date="2026-11-06", session_start_epoch_s=1000.0)
+
+    # Active Long: Entry = 50,000.0, Initial SL = 49,000.0 (1R = 1,000.0), TP = 52,000.0
+    intent = OrderIntent(
+        symbol="BTCUSDT",
+        signal_type=SignalType.BULLISH_BREAKOUT,
+        trigger_price=50000.0,
+        initial_stop_loss=49000.0,
+        current_stop_loss=49000.0,
+        take_profit=52000.0,
+        contract_lots=10,
+        target_asset_qty=0.01,
+        capital_at_risk_usd=100.0,
+        signal_candle_high=49900.0,
+        signal_candle_low=49500.0,
+        signal_candle_close=49800.0,
+        signal_bar_time=1000.0,
+        created_at_epoch_s=1000.0,
+        status=OrderStatus.TRIGGERED,
+    )
+    engine.active_position = intent
+
+    ratchets: list[tuple[float, float]] = []
+    engine.on_sl_ratchet(lambda pos, old_sl, new_sl: ratchets.append((old_sl, new_sl)))
+
+    # Bar 1 reaches 51,050.0 (+1.05R floating gain, below TP of 52,000)
+    # Expected BE SL: 50,000.0 + tick_size (0.5) = 50,000.5
+    bar1 = make_candle(open_p=50500.0, high_p=51050.0, low_p=50400.0, close_p=50900.0, epoch_s=2000.0)
+    bar_cache.append(bar1)
+    await engine.on_candle_close(bar1, session_anchor, btc_spec, bar_cache)
+
+    assert intent.is_breakeven_locked is True
+    assert intent.current_stop_loss == 50000.5
+    assert len(ratchets) == 1
+    assert ratchets[0] == (49000.0, 50000.5)
+
+    # Bar 2 pulls back to 50,000.0 (hits BE SL of 50,000.5)
+    bar2 = make_candle(open_p=50900.0, high_p=50950.0, low_p=50000.0, close_p=50000.0, epoch_s=2060.0)
+    bar_cache.append(bar2)
+    await engine.on_candle_close(bar2, session_anchor, btc_spec, bar_cache)
+
+    assert engine.active_position is None  # Closed out at break-even!
+    assert intent.status == OrderStatus.CLOSED_SL
+    assert intent.exit_price == 50000.5
+
+
+@pytest.mark.asyncio
+async def test_automated_breakeven_autoratchet_bearish(
+    btc_spec: ContractSpec,
+    strategy_config: StrategyConfig,
+) -> None:
+    """Verifies that reaching +1.0R on Short auto-ratchets Stop Loss to entry - 1 tick."""
+    cfg = strategy_config.model_copy(update={"enable_breakeven": True, "breakeven_trigger_r": 1.0, "trailing_stop": False})
+    engine = BreakoutStrategyEngine(cfg)
+    bar_cache = CircularBarCache(capacity=500)
+    session_anchor = SessionAnchorData(symbol="BTCUSDT", session_date="2026-11-06", session_start_epoch_s=1000.0)
+
+    # Active Short: Entry = 50,000.0, Initial SL = 51,000.0 (1R = 1,000.0), TP = 48,000.0
+    intent = OrderIntent(
+        symbol="BTCUSDT",
+        signal_type=SignalType.BEARISH_BREAKDOWN,
+        trigger_price=50000.0,
+        initial_stop_loss=51000.0,
+        current_stop_loss=51000.0,
+        take_profit=48000.0,
+        contract_lots=10,
+        target_asset_qty=0.01,
+        capital_at_risk_usd=100.0,
+        signal_candle_high=50500.0,
+        signal_candle_low=50100.0,
+        signal_candle_close=50200.0,
+        signal_bar_time=1000.0,
+        created_at_epoch_s=1000.0,
+        status=OrderStatus.TRIGGERED,
+    )
+    engine.active_position = intent
+
+    ratchets: list[tuple[float, float]] = []
+    engine.on_sl_ratchet(lambda pos, old_sl, new_sl: ratchets.append((old_sl, new_sl)))
+
+    # Bar 1 drops to 48,950.0 (+1.05R floating gain, above TP of 48,000)
+    # Expected BE SL: 50,000.0 - tick_size (0.5) = 49,999.5
+    bar1 = make_candle(open_p=49500.0, high_p=49600.0, low_p=48950.0, close_p=49100.0, epoch_s=2000.0)
+    bar_cache.append(bar1)
+    await engine.on_candle_close(bar1, session_anchor, btc_spec, bar_cache)
+
+    assert intent.is_breakeven_locked is True
+    assert intent.current_stop_loss == 49999.5
+    assert len(ratchets) == 1
+    assert ratchets[0] == (51000.0, 49999.5)
+
