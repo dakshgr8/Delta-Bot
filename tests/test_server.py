@@ -624,3 +624,50 @@ def test_server_static_spa_files(client: TestClient) -> None:
     assert "DELTA-BOT" in res_static.text
 
 
+def test_server_control_alias_endpoints(client: TestClient, test_orchestrator: TradingBotOrchestrator) -> None:
+    """Verifies alias routes for stop/pause, delete order, close position, and config."""
+    # 1. Test /api/control/pause alias
+    test_orchestrator.is_running = True
+    res_pause = client.post("/api/control/pause")
+    assert res_pause.status_code == 200
+    assert test_orchestrator.is_running is False
+
+    # 2. Test /api/control/config alias
+    res_cfg = client.post("/api/control/config", json={"risk_pct": 1.5})
+    assert res_cfg.status_code == 200
+    assert test_orchestrator.config.default_risk_pct == 1.5
+
+    # 3. Test DELETE /api/orders/{order_id} alias
+    assert test_orchestrator.paper_simulator is not None
+    order = test_orchestrator.paper_simulator.submit_stop_order(
+        symbol="BTCUSDT",
+        product_id=1,
+        side="buy",
+        size=2,
+        stop_price=70000.0,
+        bracket_stop_loss_price=69000.0,
+        bracket_take_profit_price=72000.0,
+        leverage=5,
+    )
+    res_del = client.delete(f"/api/orders/{order.id}")
+    assert res_del.status_code == 200
+    assert res_del.json()["status"] == "success"
+
+    # 4. Test /api/control/close_position alias
+    test_orchestrator.paper_simulator._open_positions[1] = VirtualPosition(
+        product_id=1,
+        symbol="BTCUSDT",
+        side="buy",
+        size=2,
+        entry_price=68000.0,
+        mark_price=68100.0,
+        unrealized_pnl=1.0,
+        allocated_margin=13.6,
+    )
+    res_close = client.post("/api/control/close_position", json={"product_id": 1, "symbol": "BTCUSDT"})
+    assert res_close.status_code == 200
+    assert res_close.json()["status"] == "success"
+    assert 1 not in test_orchestrator.paper_simulator._open_positions
+
+
+

@@ -1271,6 +1271,12 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
     )
+    @app.post(
+        "/api/control/pause",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+        include_in_schema=False,
+    )
     async def control_stop(
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -1501,6 +1507,29 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         )
 
     @app.post(
+        "/api/control/close_position",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+        include_in_schema=False,
+    )
+    async def close_position_alt(
+        payload: dict[str, Any],
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> ControlActionResponse:
+        """Alias for closing a position via JSON body."""
+        pid = payload.get("product_id")
+        if pid is None and "symbol" in payload:
+            sym = str(payload["symbol"]).strip().upper()
+            spec = orchestrator.contract_specs.get(sym)
+            if spec:
+                pid = spec.product_id
+        if pid is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing product_id or symbol in payload")
+        return await close_position_by_product_id(int(pid), tenant_id=tenant_id, x_tenant_id=x_tenant_id, auth=auth)
+
+    @app.post(
         "/api/control/mode",
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
@@ -1559,6 +1588,12 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         "/api/orders/{order_id}/cancel",
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
+    )
+    @app.delete(
+        "/api/orders/{order_id}",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+        include_in_schema=False,
     )
     async def cancel_order_by_id(
         order_id: str,
@@ -1675,6 +1710,12 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         "/api/config",
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
+    )
+    @app.post(
+        "/api/control/config",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+        include_in_schema=False,
     )
     async def update_runtime_config(
         payload: ConfigUpdateRequest,

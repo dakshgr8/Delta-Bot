@@ -326,7 +326,7 @@
             </p>
 
             <div class="pt-2 flex flex-wrap items-center gap-3">
-              <button type="button" onclick="navTo('login'); switchAuthTab('signup');" class="btn-primary">
+              <button type="button" onclick="launchTerminal()" class="btn-primary">
                 Launch Terminal
               </button>
               <button type="button" onclick="navTo('login'); switchAuthTab('signin');" class="btn-secondary">
@@ -803,7 +803,14 @@
   <!-- CORE CLIENT LOGIC -->
   <!-- ========================================================================= -->
   <script>
-    const BACKEND_URL = 'https://delta-bot-07e2.onrender.com';
+    const BACKEND_URL = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+      ? window.location.origin
+      : (window.location.hostname.includes('onrender.com') ? window.location.origin : 'https://delta-bot-07e2.onrender.com');
+
+    const WS_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.includes('onrender.com'))
+      ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`
+      : 'wss://delta-bot-07e2.onrender.com';
+
     const SUPABASE_URL = 'https://clkkzwgpumbnbtvsxkmw.supabase.co';
     const SUPABASE_ANON_KEY = 'sb_publishable_rvcmboPnre20bT51oz82qQ_q3SvnIZY';
 
@@ -825,6 +832,15 @@
     // -------------------------------------------------------------------------
     // View Routing
     // -------------------------------------------------------------------------
+    function launchTerminal() {
+      if (currentUser || localStorage.getItem('token')) {
+        navTo('dashboard');
+      } else {
+        navTo('login');
+        switchAuthTab('signup');
+      }
+    }
+
     function navTo(view) {
       if (view === 'dashboard' && !currentUser && !localStorage.getItem('token')) {
         view = 'login';
@@ -1022,6 +1038,9 @@
       const headers = { 'Content-Type': 'application/json' };
       const token = localStorage.getItem('token');
       if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (currentTenantId && currentTenantId !== 'default') {
+        headers['X-Tenant-ID'] = currentTenantId;
+      }
       return headers;
     }
 
@@ -1046,7 +1065,7 @@
       const token = localStorage.getItem('token') || '';
       const qs = token ? `?token=${token}&tenant_id=${currentTenantId}` : '';
       try {
-        ws = new WebSocket(`wss://delta-bot-07e2.onrender.com/ws/live${qs}`);
+        ws = new WebSocket(`${WS_BASE}/ws/live${qs}`);
         ws.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data);
@@ -1284,14 +1303,17 @@
     // Execution Controls
     // -------------------------------------------------------------------------
     async function toggleEngine() {
-      const action = isRunning ? 'pause' : 'start';
+      const action = isRunning ? 'stop' : 'start';
       try {
-        const res = await fetch(`${BACKEND_URL}/api/control/${action}`, {
+        const endpoint = (currentTenantId && currentTenantId !== 'default')
+          ? `${BACKEND_URL}/api/tenants/${currentTenantId}/control/${action}`
+          : `${BACKEND_URL}/api/control/${action}`;
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: getAuthHeaders()
         });
         const data = await res.json();
-        alert(data.message || `Bot ${action}ed`);
+        alert(data.message || `Bot ${action === 'stop' ? 'paused' : 'started'}`);
         fetchStatus();
       } catch (err) {
         alert(`Failed to ${action}: ${err}`);
@@ -1301,7 +1323,10 @@
     async function emergencyFlatten() {
       if (!confirm('KILL SWITCH: Close ALL open positions and cancel ALL resting orders immediately?')) return;
       try {
-        const res = await fetch(`${BACKEND_URL}/api/control/flatten`, {
+        const endpoint = (currentTenantId && currentTenantId !== 'default')
+          ? `${BACKEND_URL}/api/tenants/${currentTenantId}/control/flatten`
+          : `${BACKEND_URL}/api/control/flatten`;
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: getAuthHeaders()
         });
@@ -1316,10 +1341,9 @@
     async function closePosition(productId, symbol) {
       if (!confirm(`Close position on ${symbol}?`)) return;
       try {
-        const res = await fetch(`${BACKEND_URL}/api/control/close_position`, {
+        const res = await fetch(`${BACKEND_URL}/api/positions/${productId}/close`, {
           method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({ product_id: productId, symbol })
+          headers: getAuthHeaders()
         });
         const data = await res.json();
         alert(data.message || 'Position closed');
@@ -1331,8 +1355,8 @@
 
     async function cancelOrder(orderId) {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/orders/${orderId}`, {
-          method: 'DELETE',
+        const res = await fetch(`${BACKEND_URL}/api/orders/${orderId}/cancel`, {
+          method: 'POST',
           headers: getAuthHeaders()
         });
         const data = await res.json();
@@ -1374,7 +1398,7 @@
       try {
         const endpoint = (currentTenantId && currentTenantId !== 'default')
           ? `${BACKEND_URL}/api/tenants/${currentTenantId}/update`
-          : `${BACKEND_URL}/api/control/config`;
+          : `${BACKEND_URL}/api/config`;
 
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -1383,7 +1407,7 @@
         });
 
         const data = await res.json();
-        alert(apiKey || apiSecret ? 'Delta Exchange API Keys saved and activated!' : data.message);
+        alert(apiKey || apiSecret ? 'Delta Exchange API Keys saved and activated!' : (data.message || 'Settings saved'));
         document.getElementById('cfg-api-key').value = '';
         document.getElementById('cfg-api-secret').value = '';
         closeSettingsModal();
@@ -1394,6 +1418,7 @@
     }
 
     // Expose functions globally on window
+    window.launchTerminal = launchTerminal;
     window.navTo = navTo;
     window.switchAuthTab = switchAuthTab;
     window.handleSignIn = handleSignIn;
