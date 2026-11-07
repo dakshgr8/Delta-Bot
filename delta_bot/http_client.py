@@ -63,17 +63,29 @@ class AsyncHttpEngine:
                 timeout=self._config.request_timeout_sec,
                 connect=5.0,
             )
-            self._client = httpx.AsyncClient(
-                base_url=self._base_url,
-                limits=limits,
-                timeout=timeout,
-                http2=True,
-                follow_redirects=True,
-            )
-            logger.debug(
-                "Initialized persistent httpx.AsyncClient (HTTP/2 enabled, pool max=100, base_url=%s)",
-                self._base_url,
-            )
+            try:
+                self._client = httpx.AsyncClient(
+                    base_url=self._base_url,
+                    limits=limits,
+                    timeout=timeout,
+                    http2=True,
+                    follow_redirects=True,
+                )
+                logger.debug(
+                    "Initialized persistent httpx.AsyncClient (HTTP/2 enabled, pool max=100, base_url=%s)",
+                    self._base_url,
+                )
+            except Exception as ex:
+                logger.warning(
+                    "HTTP/2 initialization failed (%s); falling back to HTTP/1.1", ex
+                )
+                self._client = httpx.AsyncClient(
+                    base_url=self._base_url,
+                    limits=limits,
+                    timeout=timeout,
+                    http2=False,
+                    follow_redirects=True,
+                )
         return self._client
 
     @property

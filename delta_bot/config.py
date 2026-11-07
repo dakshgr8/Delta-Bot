@@ -88,6 +88,11 @@ class BotConfig(BaseSettings):
         le=5000,
         description="RingBuffer capacity for closed candlestick bars",
     )
+    strict_orderbook_sequence_check: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("STRICT_ORDERBOOK_SEQUENCE_CHECK", "strict_orderbook_sequence_check"),
+        description="Whether to enforce strict consecutive sequence numbers on throttled L2 orderbook feeds",
+    )
 
     # HTTP Client timeouts & reliability
     request_timeout_sec: float = Field(

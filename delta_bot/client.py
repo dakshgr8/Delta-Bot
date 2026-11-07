@@ -85,12 +85,14 @@ class DeltaRestClient:
         Essential for staying within the 5-second HMAC authentication validity window.
         """
         client = await self._http_engine._get_client()
+        t_start_mono = time.perf_counter()
         t_send = time.time()
 
         # Delta's /health endpoint returns lightweight HTTP 200 with server Request-In-Time header
         resp = await client.get("/health")
         t_recv = time.time()
-        rtt_ms = (t_recv - t_send) * 1000.0
+        t_end_mono = time.perf_counter()
+        rtt_ms = max(0.0, (t_end_mono - t_start_mono) * 1000.0)
 
         headers = resp.headers
         server_epoch_s: float | None = None

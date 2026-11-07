@@ -92,6 +92,29 @@ def test_sequence_tracker_gaps() -> None:
     assert tracker.total_packets_dropped == 3
 
 
+def test_sequence_tracker_non_strict() -> None:
+    """Verifies that non-strict tracking permits natural matching engine sequence jumps on throttled feeds."""
+    tracker = SequenceTracker(strict=False)
+    stream = "ob:ETHUSDT"
+
+    # Baseline sequence
+    has_gap, dropped = tracker.track_sequence(stream, 1942732)
+    assert has_gap is False
+    assert dropped == 0
+
+    # Jumps due to matching engine activity are valid in non-strict mode
+    has_gap, dropped = tracker.track_sequence(stream, 1942738)
+    assert has_gap is False
+    assert dropped == 0
+    assert tracker.total_gaps_detected == 0
+
+    # Sequence regression / out-of-order packet triggers gap detection
+    has_gap, dropped = tracker.track_sequence(stream, 1942730)
+    assert has_gap is True
+    assert dropped == 1
+    assert tracker.total_gaps_detected == 1
+
+
 # -----------------------------------------------------------------------------
 # 3. CandleAggregator & RingBuffer Tests
 # -----------------------------------------------------------------------------

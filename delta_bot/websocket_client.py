@@ -42,7 +42,8 @@ class SequenceTracker:
     Critical for Level 2 orderbook integrity and data reliability.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, strict: bool = True) -> None:
+        self.strict: bool = strict
         self._last_seq: dict[str, int] = {}
         self.total_gaps_detected: int = 0
         self.total_packets_dropped: int = 0
@@ -56,6 +57,21 @@ class SequenceTracker:
         self._last_seq[stream_key] = seq_no
 
         if prev_seq is None:
+            return False, 0
+
+        if not self.strict:
+            # In non-strict mode (default for live throttled L2 orderbook feeds),
+            # matching engine sequence jumps are normal between periodic snapshots.
+            # Only trigger gap/invalidation on sequence regressions (stale/out-of-order frames).
+            if seq_no < prev_seq:
+                logger.warning(
+                    "Out-of-order sequence regression on [%s]: expected >= %d, got %d",
+                    stream_key,
+                    prev_seq,
+                    seq_no,
+                )
+                self.total_gaps_detected += 1
+                return True, 1
             return False, 0
 
         expected_seq = prev_seq + 1
@@ -621,7 +637,9 @@ class DeltaWebSocketClient:
 
     def __init__(self, config: BotConfig | None = None) -> None:
         self._config: BotConfig = config or BotConfig()
-        self._sequence_tracker: SequenceTracker = SequenceTracker()
+        self._sequence_tracker: SequenceTracker = SequenceTracker(
+            strict=self._config.strict_orderbook_sequence_check
+        )
         self._dispatcher: SubscriptionDispatcher = SubscriptionDispatcher()
 
         # Callbacks
