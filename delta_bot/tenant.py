@@ -1726,7 +1726,7 @@ class TenantManager:
                 "is_active": real_is_active,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
-            if instance.mode.is_real:
+            if instance.mode.is_real and instance.last_sync_time > 0:
                 real_payload["balance"] = round(float(live_bal), 4)
                 real_payload["equity"] = round(float(live_eq), 4)
                 real_payload["realized_pnl"] = round(float(live_rpnl), 4)
@@ -1751,7 +1751,7 @@ class TenantManager:
                 "is_active": demo_is_active,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
-            if instance.mode.is_demo:
+            if instance.mode.is_demo and instance.last_sync_time > 0:
                 demo_payload["balance"] = round(float(live_bal), 4)
                 demo_payload["equity"] = round(float(live_eq), 4)
                 demo_payload["realized_pnl"] = round(float(live_rpnl), 4)
