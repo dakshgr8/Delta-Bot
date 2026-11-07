@@ -222,6 +222,11 @@ class TenantInstance:
         self.rest_client = DeltaRestClient(config=self.bot_config)
         self.state_manager = state_manager or TradingStateManager(client=self.rest_client)
 
+        # Simulator or Live Execution Manager
+        is_real_live = (self.mode == ExecutionMode.LIVE and bool(config.delta_api_key and config.delta_api_secret))
+        if self.mode == ExecutionMode.LIVE and not is_real_live:
+            self.mode = ExecutionMode.PAPER
+
         risk_cfg = RiskConfig(
             max_account_risk_pct=config.risk_pct,
             max_leverage=config.leverage,
@@ -229,10 +234,9 @@ class TenantInstance:
         )
         self.risk_manager = risk_manager or RiskManager(
             config=risk_cfg,
-            initial_equity=config.initial_balance,
+            initial_equity=config.initial_balance if self.mode != ExecutionMode.LIVE else 0.0,
         )
 
-        # Simulator or Live Execution Manager
         if self.mode == ExecutionMode.LIVE and config.delta_api_key and config.delta_api_secret:
             self.paper_simulator = None
             exec_cfg = ExecutionConfig(leverage=config.leverage)
@@ -461,6 +465,8 @@ class TenantInstance:
         """Retrieves total floating equity for this tenant."""
         if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
             return self.paper_simulator.wallet.equity
+        if self.mode == ExecutionMode.LIVE:
+            return self.live_equity
         if self.last_sync_time > 0:
             return self.live_equity
         return self.config.initial_balance
@@ -583,6 +589,16 @@ class TenantInstance:
                 self.live_available_margin = round(float(target_bal.available_balance), 4)
                 self.live_unrealized_pnl = round(float(target_bal.unrealized_pnl or 0.0), 4)
                 self.live_equity = round(float(self.live_balance + self.live_unrealized_pnl), 4)
+
+                if self.live_equity > 0:
+                    if self.risk_manager.circuit_breaker.session_start_equity <= 0:
+                        self.risk_manager.reset_daily_session(self.live_equity)
+                else:
+                    # Unfunded account: clear baseline to prevent fake 100% loss calculation
+                    self.risk_manager.circuit_breaker.session_start_equity = 0.0
+                    self.risk_manager.circuit_breaker.peak_daily_equity = 0.0
+                    self.risk_manager.circuit_breaker.is_tripped = False
+                    self.risk_manager.circuit_breaker.trip_reason = None
 
             positions = await self.rest_client.get_open_positions()
             formatted_positions: list[dict[str, Any]] = []
@@ -724,7 +740,7 @@ class TenantInstance:
             resting_orders = len(self.paper_simulator._pending_orders)
             avail_margin = stats["available_margin"]
         else:
-            if self.last_sync_time > 0:
+            if self.last_sync_time > 0 or self.mode == ExecutionMode.LIVE:
                 bal = self.live_balance
                 eq = self.live_equity
                 avail_margin = self.live_available_margin
@@ -1569,6 +1585,13 @@ class TenantManager:
 
             tenant.register_contract_spec(spec)
             account_equity = await tenant.get_account_equity()
+            if tenant.mode == ExecutionMode.LIVE and account_equity <= 0:
+                logger.warning(
+                    "[FANOUT %s:%s] Order skipped: Live account balance is $0.00 on Delta Exchange India. Please fund account to trade.",
+                    tenant.config.tenant_id,
+                    clean_symbol,
+                )
+                continue
 
             # Pre-trade Risk Limit Verification
             active_pos_count = tenant.get_active_positions_count()

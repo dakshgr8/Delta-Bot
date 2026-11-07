@@ -256,3 +256,54 @@ def test_daily_rollover_spread_spike_shield(risk_manager: RiskManager) -> None:
     assert can_open_3 is True
     assert reason_3 is None
 
+
+def test_margin_sizing_never_exceeds_max_usable_margin(risk_manager: RiskManager) -> None:
+    """Verifies that margin-based lot sizing never overshoots usable margin due to rounding."""
+    xrp_spec = ContractSpec(
+        product_id=14969,
+        symbol="XRPUSD",
+        contract_type="perpetual_futures",
+        contract_value=1.0,
+        tick_size=0.0001,
+        maker_commission_rate=0.0002,
+        taker_commission_rate=0.0005,
+        quoting_symbol="USD",
+    )
+    # Available margin = $10,000, 90% buffer -> max usable margin = $9,000.00
+    # At trigger 1.1572 and 5x lev, notional capacity = 9000 * 5 / 1.1572 = 38886.9685
+    # Sizing must floor to 38,886 lots and NEVER round up to 38,887 (which would cost $9000.01)
+    res = risk_manager.size_position(
+        spec=xrp_spec,
+        trigger_price=1.1572,
+        stop_loss_price=1.1586,
+        account_equity=10000.0,
+        available_margin=10000.0,
+    )
+    assert res.is_margin_sufficient is True
+    assert res.final_lots == 38886
+    assert res.required_margin <= 9000.00
+    assert res.rejection_reason is None
+
+
+def test_unfunded_live_account_does_not_trip_circuit_breaker() -> None:
+    """Verifies that an unfunded live account (equity=0.0) does not trip a 100% drawdown circuit breaker."""
+    config = RiskConfig(
+        max_account_risk_pct=1.0,
+        max_leverage=5,
+        margin_safety_buffer=0.90,
+        daily_max_drawdown_pct=4.0,
+        max_concurrent_positions=1,
+    )
+    rm = RiskManager(config=config, initial_equity=0.0)
+    assert rm.circuit_breaker.session_start_equity == 0.0
+
+    # Updating equity with 0.0 must not trip circuit breaker
+    is_ok = rm.update_daily_equity(0.0)
+    assert is_ok is True
+    assert rm.circuit_breaker.is_tripped is False
+
+    can_open, reason = rm.can_open_new_position()
+    # Circuit breaker is not tripped
+    assert "Circuit breaker is TRIPPED" not in str(reason)
+
+

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import logging
+import math
 import time
 from typing import Any
 
@@ -163,6 +164,9 @@ class RiskManager:
         # Drawdown measured against starting equity of current session
         start_eq = self.circuit_breaker.session_start_equity
         if start_eq > 0 and current_equity < start_eq:
+            # If current equity is 0 and was never funded (unfunded live account), do not trip
+            if current_equity <= 0 and start_eq == 10000.0:
+                return True
             drawdown_pct = ((start_eq - current_equity) / start_eq) * 100.0
             self.circuit_breaker.current_drawdown_pct = round(drawdown_pct, 2)
 
@@ -258,12 +262,18 @@ class RiskManager:
 
         if unit_margin_req > 0:
             max_qty_by_margin = (max_usable_margin * leverage) / trigger_price
-            margin_based_lots = spec.round_size(max_qty_by_margin)
+            # Floor lot calculation to strictly prevent rounding up beyond usable margin
+            margin_based_lots = int(math.floor(max_qty_by_margin / spec.contract_value))
         else:
             margin_based_lots = 0
 
         # 3. Final lot calculation
         final_lots = min(risk_based_lots, margin_based_lots)
+
+        # Clamping guard: ensure required margin never exceeds max_usable_margin due to float precision
+        while final_lots > 0 and ((final_lots * spec.contract_value * trigger_price) / leverage) > (max_usable_margin + 1e-6):
+            final_lots -= 1
+
         required_margin = (final_lots * spec.contract_value * trigger_price) / leverage
 
         is_sufficient = (

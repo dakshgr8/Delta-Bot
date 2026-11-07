@@ -857,6 +857,42 @@ async def test_tenant_symbol_aliasing_and_paper_tick_matching(multi_tenant_orche
     assert len(t.paper_simulator._open_positions) == 1
 
 
+@pytest.mark.asyncio
+async def test_unfunded_live_tenant_safely_skips_trading_without_circuit_breaker_trip(
+    multi_tenant_orchestrator: TradingBotOrchestrator,
+) -> None:
+    """Verifies that an unfunded live tenant ($0.00 balance) skips trading and does not trip circuit breaker."""
+    cfg = TenantConfig(
+        tenant_id="unfunded_user",
+        name="Unfunded User",
+        delta_api_key="mock_key",
+        delta_api_secret="mock_secret",
+        mode=ExecutionMode.LIVE,
+        initial_balance=10000.0,
+    )
+    tenant = TenantInstance(
+        config=cfg,
+        contract_specs=multi_tenant_orchestrator.contract_specs,
+    )
+    assert tenant.mode == ExecutionMode.LIVE
+    assert tenant.risk_manager.circuit_breaker.session_start_equity == 0.0
+
+    # Simulate sync_live_metrics with 0.0 balance
+    tenant.live_balance = 0.0
+    tenant.live_equity = 0.0
+    tenant.risk_manager.circuit_breaker.session_start_equity = 0.0
+    tenant.risk_manager.circuit_breaker.is_tripped = False
+
+    # Calling update_daily_equity with 0.0 should not trip
+    tenant.risk_manager.update_daily_equity(0.0)
+    assert tenant.risk_manager.circuit_breaker.is_tripped is False
+
+    # Equity query must return 0.0
+    eq = await tenant.get_account_equity()
+    assert eq == 0.0
+
+
+
 
 
 

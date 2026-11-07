@@ -543,6 +543,9 @@ class TradingBotOrchestrator:
             tenant.register_contract_spec(spec)
             try:
                 t_equity = await tenant.get_account_equity()
+                if tenant.mode == ExecutionMode.LIVE and t_equity <= 0:
+                    continue  # Unfunded live account ($0.00), skip signal evaluation
+
                 t_intent = await t_strat.on_candle_close(
                     candle=candle,
                     session_anchor=session_anchor,
@@ -561,6 +564,15 @@ class TradingBotOrchestrator:
         """Executes a validated breakout order intent for an isolated tenant."""
         t_id = tenant.config.tenant_id
         t_equity = await tenant.get_account_equity()
+        if tenant.mode == ExecutionMode.LIVE and t_equity <= 0:
+            logger.warning(
+                "[TENANT %s:%s] Order skipped: Live account balance is $0.00 on Delta Exchange India. Please deposit funds to trade.",
+                t_id,
+                clean_symbol,
+            )
+            order_intent.cancel("Zero account balance on exchange", OrderStatus.CANCELLED_MANUAL)
+            return
+
         tenant.risk_manager.update_daily_equity(t_equity)
 
         active_count = tenant.get_active_positions_count()
