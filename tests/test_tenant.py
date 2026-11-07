@@ -1120,6 +1120,10 @@ def test_tenant_control_and_mode_mutual_exclusion_in_supabase(tmp_path: Path) ->
         assert real_p["is_running"] is False
         assert demo_p["is_active"] is True
         assert demo_p["is_running"] is True
+        assert "balance" not in real_p
+        assert "equity" not in real_p
+        assert "balance" not in demo_p
+        assert "equity" not in demo_p
 
         # 2. Engine Stopped / Paused: Both desks must be inactive & not running
         inst.is_running = False

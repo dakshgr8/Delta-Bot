@@ -1008,11 +1008,10 @@ class TenantManager:
             if not real_rows and not demo_rows:
                 return None
 
-            def score_row(r: dict[str, Any]) -> tuple[int, int, int]:
+            def score_row(r: dict[str, Any]) -> tuple[int, int]:
                 has_k = 1 if decrypt_secret(r.get("api_key") or r.get("delta_api_key") or r.get("demo_api_key") or "") else 0
                 is_n = 1 if not str(r.get("tenant_id", "")).startswith("user-") else 0
-                has_b = 1 if float(r.get("balance", 0.0) or 0.0) > 0 else 0
-                return (has_k, is_n, has_b)
+                return (has_k, is_n)
 
             pruned_ids: set[str] = set()
             if len(real_rows) > 1:
@@ -1350,11 +1349,10 @@ class TenantManager:
                         real_data = res_leg.json()
                         demo_data = res_leg.json()
 
-            def score_row(r: dict[str, Any]) -> tuple[int, int, int]:
+            def score_row(r: dict[str, Any]) -> tuple[int, int]:
                 has_k = 1 if decrypt_secret(r.get("api_key") or r.get("delta_api_key") or r.get("demo_api_key") or "") else 0
                 is_n = 1 if not str(r.get("tenant_id", "")).startswith("user-") else 0
-                has_b = 1 if float(r.get("balance", 0.0) or 0.0) > 0 else 0
-                return (has_k, is_n, has_b)
+                return (has_k, is_n)
 
             # Deduplicate real_data by user_id
             by_user_real: dict[str, list[dict[str, Any]]] = {}
@@ -1688,11 +1686,6 @@ class TenantManager:
             }
             base_url = self.supabase_url.rstrip("/")
 
-            live_bal = instance.live_balance if instance.last_sync_time > 0 else 0.0
-            live_eq = instance.live_equity if instance.last_sync_time > 0 else live_bal
-            live_upnl = instance.live_unrealized_pnl
-            live_rpnl = instance.live_realized_pnl
-
             enc_real_key = encrypt_secret(instance.config.delta_api_key) if instance.config.delta_api_key else None
             enc_real_secret = encrypt_secret(instance.config.delta_api_secret) if instance.config.delta_api_secret else None
             enc_demo_key = encrypt_secret(instance.config.demo_api_key) if instance.config.demo_api_key else None
@@ -1707,7 +1700,7 @@ class TenantManager:
             demo_is_active = bool(instance.config.is_active and is_demo_selected)
             demo_is_running = bool(instance.is_running and instance.config.is_active and is_demo_selected)
 
-            # Real Tenant Payload (Strictly Real Desk parameters)
+            # Real Tenant Payload (Configuration and operational status only)
             real_payload = {
                 "tenant_id": instance.config.tenant_id,
                 "user_id": instance.config.user_id,
@@ -1716,7 +1709,6 @@ class TenantManager:
                 "api_secret": enc_real_secret,
                 "base_url": instance.config.delta_base_url or "https://api.india.delta.exchange",
                 "ws_url": instance.config.delta_ws_url or "wss://socket.india.delta.exchange",
-                "initial_balance": 0.0,
                 "leverage": int(instance.config.leverage),
                 "risk_pct": float(instance.config.risk_pct),
                 "timeframe": instance.config.timeframe,
@@ -1726,13 +1718,8 @@ class TenantManager:
                 "is_active": real_is_active,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
-            if instance.mode.is_real and instance.last_sync_time > 0:
-                real_payload["balance"] = round(float(live_bal), 4)
-                real_payload["equity"] = round(float(live_eq), 4)
-                real_payload["realized_pnl"] = round(float(live_rpnl), 4)
-                real_payload["unrealized_pnl"] = round(float(live_upnl), 4)
 
-            # Demo Tenant Payload (Strictly Demo Desk parameters)
+            # Demo Tenant Payload (Configuration and operational status only)
             demo_payload = {
                 "tenant_id": instance.config.tenant_id,
                 "user_id": instance.config.user_id,
@@ -1741,7 +1728,6 @@ class TenantManager:
                 "api_secret": enc_demo_secret,
                 "base_url": instance.config.demo_base_url or "https://cdn-ind.testnet.deltaex.org",
                 "ws_url": instance.config.demo_ws_url or "wss://socket-ind.testnet.deltaex.org",
-                "initial_balance": 0.0,
                 "leverage": int(instance.config.leverage),
                 "risk_pct": float(instance.config.risk_pct),
                 "timeframe": instance.config.timeframe,
@@ -1751,11 +1737,6 @@ class TenantManager:
                 "is_active": demo_is_active,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
-            if instance.mode.is_demo and instance.last_sync_time > 0:
-                demo_payload["balance"] = round(float(live_bal), 4)
-                demo_payload["equity"] = round(float(live_eq), 4)
-                demo_payload["realized_pnl"] = round(float(live_rpnl), 4)
-                demo_payload["unrealized_pnl"] = round(float(live_upnl), 4)
 
             success_real = False
             success_demo = False

@@ -1116,9 +1116,23 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                     target_t = req_t
             else:
                 target_t = auth.tenant_id
-            packet = get_full_state_packet(orchestrator, tenant_id=target_t, user_id=auth.user_id)
         else:
             target_t = tenant_id or x_tenant_id
+
+        # Query live wallet metrics directly from Delta Exchange API
+        t_inst = resolve_tenant(orchestrator, target_t) if hasattr(orchestrator, "tenant_manager") else None
+        if t_inst is None and auth.auth_type == "user" and auth.user_id and hasattr(orchestrator, "tenant_manager"):
+            t_inst = orchestrator.tenant_manager.get_tenant_by_user_id(auth.user_id)
+        if t_inst and t_inst.config.get_active_api_key() and t_inst.config.get_active_api_secret():
+            if time.time() - t_inst.last_sync_time >= 2.0:
+                try:
+                    await t_inst.sync_live_metrics()
+                except Exception as sync_e:
+                    logger.debug("Live metrics sync failed on /api/status for %s: %s", target_t, sync_e)
+
+        if auth.auth_type == "user" and auth.user_id:
+            packet = get_full_state_packet(orchestrator, tenant_id=target_t, user_id=auth.user_id)
+        else:
             packet = get_full_state_packet(orchestrator, tenant_id=target_t)
         return JSONResponse(
             content={
