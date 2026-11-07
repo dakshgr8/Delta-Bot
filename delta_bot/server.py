@@ -1203,8 +1203,12 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             initial_balance=payload.initial_balance,
             delta_api_key=payload.delta_api_key,
             delta_api_secret=payload.delta_api_secret,
+            demo_api_key=payload.demo_api_key,
+            demo_api_secret=payload.demo_api_secret,
             delta_base_url=payload.delta_base_url,
             delta_ws_url=payload.delta_ws_url,
+            demo_base_url=payload.demo_base_url,
+            demo_ws_url=payload.demo_ws_url,
             risk_pct=payload.risk_pct,
             leverage=payload.leverage,
             timeframe=payload.timeframe,
@@ -1274,27 +1278,35 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             updated = orchestrator.tenant_manager.update_tenant(tenant.config.tenant_id, updates)
 
             # Sync orchestrator global credentials if updating default tenant
-            if tenant.config.tenant_id == "default" and updates.get("delta_api_key") is not None:
+            if tenant.config.tenant_id == "default":
                 from pydantic import SecretStr
-                k_str = str(updates["delta_api_key"]).strip()
-                s_str = str(updates.get("delta_api_secret", "")).strip()
-                b_str = str(updates.get("delta_base_url", "https://api.india.delta.exchange")).strip()
-                orchestrator.config.delta_api_key = SecretStr(k_str)
-                orchestrator.config.delta_api_secret = SecretStr(s_str)
-                orchestrator.config.delta_base_url = b_str
-                orchestrator.rest_client.update_credentials(SecretStr(k_str), SecretStr(s_str), base_url=b_str)
+                if updates.get("delta_api_key") is not None:
+                    k_str = str(updates["delta_api_key"]).strip()
+                    s_str = str(updates.get("delta_api_secret", "")).strip()
+                    b_str = str(updates.get("delta_base_url", "https://api.india.delta.exchange")).strip()
+                    orchestrator.config.delta_api_key = SecretStr(k_str)
+                    orchestrator.config.delta_api_secret = SecretStr(s_str)
+                    orchestrator.config.delta_base_url = b_str
+                    orchestrator.rest_client.update_credentials(SecretStr(k_str), SecretStr(s_str), base_url=b_str)
+                if updates.get("demo_api_key") is not None:
+                    dk_str = str(updates["demo_api_key"]).strip()
+                    ds_str = str(updates.get("demo_api_secret", "")).strip()
+                    orchestrator.config.delta_demo_api_key = SecretStr(dk_str)
+                    orchestrator.config.delta_demo_api_secret = SecretStr(ds_str)
 
-            # Sync real live metrics immediately if keys were provided or updated
-            if updated.mode == ExecutionMode.LIVE and updated.config.delta_api_key:
+            # Sync metrics immediately if keys were provided or updated
+            active_k = updated.config.get_active_api_key()
+            if active_k:
                 try:
                     await updated.sync_live_metrics()
                 except Exception as sync_e:
                     logger.warning("[TENANT %s] Immediate live metrics sync error: %s", updated.config.tenant_id, sync_e)
 
-            if updated.mode == ExecutionMode.LIVE and updated.last_sync_error:
+            if updated.last_sync_error:
                 conn_msg = f"⚠️ Delta Notice: {updated.last_sync_error}"
-            elif updated.mode == ExecutionMode.LIVE and updated.last_sync_time > 0:
-                conn_msg = f"Connected to Delta Exchange India! Real Balance: ${updated.live_balance:,.2f} USDT"
+            elif updated.last_sync_time > 0:
+                mode_lbl = "Delta Testnet (Demo)" if updated.config.is_demo else "Delta Exchange India (Real)"
+                conn_msg = f"Connected to {mode_lbl}! Balance: ${updated.live_balance:,.2f} USDT"
             else:
                 conn_msg = f"Tenant '{tenant.config.tenant_id}' updated successfully."
 
@@ -2261,6 +2273,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                         if ws_url:
                             user_t.config.delta_ws_url = ws_url
                         user_t.reload_credentials()
+                        orchestrator.tenant_manager.sync_tenant_to_supabase(user_t)
 
                 orchestrator.tenant_manager.save_to_disk()
             updated.append("api_keys=CONFIGURED")
@@ -2284,6 +2297,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                         user_t.config.demo_api_key = d_key
                         user_t.config.demo_api_secret = d_sec
                         user_t.reload_credentials()
+                        orchestrator.tenant_manager.sync_tenant_to_supabase(user_t)
                 orchestrator.tenant_manager.save_to_disk()
             updated.append("demo_api_keys=CONFIGURED")
             logger.info("[CONFIG] Delta Demo / Testnet API keys updated successfully.")

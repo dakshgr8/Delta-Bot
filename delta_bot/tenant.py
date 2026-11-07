@@ -811,6 +811,8 @@ class TenantInstance:
             "has_api_key": bool(active_k),
             "has_real_key": bool(self.config.delta_api_key),
             "has_demo_key": bool(self.config.demo_api_key),
+            "delta_api_key_masked": self.config.safe_dict().get("delta_api_key_masked", ""),
+            "demo_api_key_masked": self.config.safe_dict().get("demo_api_key_masked", ""),
             "last_sync_error": self.last_sync_error,
         }
 
@@ -988,16 +990,22 @@ class TenantManager:
 
             raw_k = decrypt_secret(row.get("delta_api_key") or "")
             raw_s = decrypt_secret(row.get("delta_api_secret") or "")
+            raw_demo_k = decrypt_secret(row.get("demo_api_key") or "")
+            raw_demo_s = decrypt_secret(row.get("demo_api_secret") or "")
             cfg = TenantConfig(
                 tenant_id=t_id,
                 user_id=clean_uid,
                 name=row.get("name", t_id),
-                mode=row.get("mode", "live"),
+                mode=row.get("mode", "real"),
                 initial_balance=float(row.get("initial_balance", 0.0)),
                 delta_api_key=raw_k,
                 delta_api_secret=raw_s,
+                demo_api_key=raw_demo_k,
+                demo_api_secret=raw_demo_s,
                 delta_base_url=row.get("delta_base_url") or "https://api.india.delta.exchange",
                 delta_ws_url=row.get("delta_ws_url") or "wss://socket.india.delta.exchange",
+                demo_base_url=row.get("demo_base_url") or "https://cdn-ind.testnet.deltaex.org",
+                demo_ws_url=row.get("demo_ws_url") or "wss://socket-ind.testnet.deltaex.org",
                 risk_pct=float(row.get("risk_pct", 1.0)),
                 leverage=int(row.get("leverage", 5)),
                 timeframe=row.get("timeframe", "1m"),
@@ -1091,8 +1099,12 @@ class TenantManager:
         if (
             "delta_api_key" in updates
             or "delta_api_secret" in updates
+            or "demo_api_key" in updates
+            or "demo_api_secret" in updates
             or "delta_base_url" in updates
             or "delta_ws_url" in updates
+            or "demo_base_url" in updates
+            or "demo_ws_url" in updates
         ):
             tenant.reload_credentials()
 
@@ -1295,16 +1307,22 @@ class TenantManager:
                     continue
                 raw_k = decrypt_secret(row.get("delta_api_key") or "")
                 raw_s = decrypt_secret(row.get("delta_api_secret") or "")
+                raw_demo_k = decrypt_secret(row.get("demo_api_key") or "")
+                raw_demo_s = decrypt_secret(row.get("demo_api_secret") or "")
                 cfg = TenantConfig(
                     tenant_id=t_id,
                     user_id=str(row["user_id"]) if row.get("user_id") else None,
                     name=row.get("name", t_id),
-                    mode=row.get("mode", "live"),
+                    mode=row.get("mode", "real"),
                     initial_balance=float(row.get("initial_balance", 0.0)),
                     delta_api_key=raw_k,
                     delta_api_secret=raw_s,
+                    demo_api_key=raw_demo_k,
+                    demo_api_secret=raw_demo_s,
                     delta_base_url=row.get("delta_base_url") or "https://api.india.delta.exchange",
                     delta_ws_url=row.get("delta_ws_url") or "wss://socket.india.delta.exchange",
+                    demo_base_url=row.get("demo_base_url") or "https://cdn-ind.testnet.deltaex.org",
+                    demo_ws_url=row.get("demo_ws_url") or "wss://socket-ind.testnet.deltaex.org",
                     risk_pct=float(row.get("risk_pct", 1.0)),
                     leverage=int(row.get("leverage", 5)),
                     timeframe=row.get("timeframe", "1m"),
@@ -1499,6 +1517,8 @@ class TenantManager:
 
             enc_key = encrypt_secret(instance.config.delta_api_key) if instance.config.delta_api_key else None
             enc_secret = encrypt_secret(instance.config.delta_api_secret) if instance.config.delta_api_secret else None
+            enc_demo_key = encrypt_secret(instance.config.demo_api_key) if instance.config.demo_api_key else None
+            enc_demo_secret = encrypt_secret(instance.config.demo_api_secret) if instance.config.demo_api_secret else None
 
             payload = {
                 "tenant_id": instance.config.tenant_id,
@@ -1516,6 +1536,12 @@ class TenantManager:
                 "max_drawdown_pct": float(instance.config.max_drawdown_pct),
                 "delta_api_key": enc_key,
                 "delta_api_secret": enc_secret,
+                "demo_api_key": enc_demo_key,
+                "demo_api_secret": enc_demo_secret,
+                "delta_base_url": instance.config.delta_base_url,
+                "delta_ws_url": instance.config.delta_ws_url,
+                "demo_base_url": instance.config.demo_base_url,
+                "demo_ws_url": instance.config.demo_ws_url,
                 "symbols": instance.config.symbols,
                 "is_running": instance.is_running,
                 "is_active": instance.config.is_active,

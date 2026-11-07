@@ -18,10 +18,17 @@ con.run("DELETE FROM public.tenants WHERE tenant_id = 'user-0141fe76'")
 
 # 2. Update nitinyadavtss and dakshtiwari12345 with proper symbols and live Delta India URLs
 con.run("""
+ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS demo_api_key text;
+ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS demo_api_secret text;
+ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS demo_base_url text DEFAULT 'https://cdn-ind.testnet.deltaex.org';
+ALTER TABLE public.tenants ADD COLUMN IF NOT EXISTS demo_ws_url text DEFAULT 'wss://socket-ind.testnet.deltaex.org';
+
 UPDATE public.tenants
 SET symbols = $json$["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"]$json$::jsonb,
     delta_base_url = 'https://api.india.delta.exchange',
-    delta_ws_url = 'wss://socket.india.delta.exchange'
+    delta_ws_url = 'wss://socket.india.delta.exchange',
+    demo_base_url = 'https://cdn-ind.testnet.deltaex.org',
+    demo_ws_url = 'wss://socket-ind.testnet.deltaex.org'
 WHERE tenant_id IN ('nitinyadavtss', 'dakshtiwari12345')
 """)
 
@@ -71,6 +78,8 @@ BEGIN
     max_drawdown_pct,
     delta_base_url,
     delta_ws_url,
+    demo_base_url,
+    demo_ws_url,
     symbols,
     is_running,
     is_active
@@ -88,6 +97,8 @@ BEGIN
     4.00,
     'https://api.india.delta.exchange',
     'wss://socket.india.delta.exchange',
+    'https://cdn-ind.testnet.deltaex.org',
+    'wss://socket-ind.testnet.deltaex.org',
     $json$["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"]$json$::jsonb,
     true,
     true

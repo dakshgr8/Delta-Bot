@@ -1004,6 +1004,71 @@ def test_load_from_supabase_deduplicates_duplicate_user_rows(tmp_path: Any) -> N
         mock_del.assert_called_once_with("user-0141fe76")
 
 
+def test_sync_and_load_demo_api_keys_to_supabase(tmp_path: Any) -> None:
+    """Verifies that demo API key and secret are encrypted and synced to / loaded from Supabase."""
+    mgr = TenantManager(
+        storage_path=str(tmp_path / "tenants.json"),
+        supabase_url="https://fake.supabase.co",
+        supabase_secret_key="fake_key",
+    )
+
+    t_cfg = TenantConfig(
+        tenant_id="demo_sync_desk",
+        name="Demo Sync Desk",
+        mode="demo",
+        delta_api_key="real_key_xyz",
+        delta_api_secret="real_secret_xyz",
+        demo_api_key="demo_key_abc",
+        demo_api_secret="demo_secret_abc",
+    )
+    # 1. Verify sync_tenant_to_supabase payload contains encrypted demo keys
+    captured_payloads = []
+
+    def mock_post(url, headers, json):
+        captured_payloads.append(json)
+        resp = MagicMock()
+        resp.status_code = 201
+        return resp
+
+    with patch("httpx.Client.post", side_effect=mock_post):
+        instance = mgr.create_tenant(t_cfg)
+
+    assert len(captured_payloads) >= 1
+    p = captured_payloads[-1]
+    assert p["tenant_id"] == "demo_sync_desk"
+    assert p["demo_api_key"] is not None
+    assert p["demo_api_key"].startswith("enc:")
+    assert p["demo_api_secret"] is not None
+    assert p["demo_api_secret"].startswith("enc:")
+    assert decrypt_secret(p["demo_api_key"]) == "demo_key_abc"
+    assert decrypt_secret(p["demo_api_secret"]) == "demo_secret_abc"
+    assert p["demo_base_url"] == "https://cdn-ind.testnet.deltaex.org"
+    assert p["demo_ws_url"] == "wss://socket-ind.testnet.deltaex.org"
+
+    # 2. Verify load_from_supabase loads and decrypts demo keys into a fresh TenantManager
+    mgr2 = TenantManager(
+        storage_path=str(tmp_path / "tenants2.json"),
+        supabase_url="https://fake.supabase.co",
+        supabase_secret_key="fake_key",
+    )
+    mock_sb_response = [p]
+    with patch("httpx.Client.get") as mock_get:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = mock_sb_response
+        mock_get.return_value = mock_resp
+
+        loaded = mgr2.load_from_supabase(contract_specs={})
+        assert loaded == 1
+        loaded_t = mgr2.tenants["demo_sync_desk"]
+        assert loaded_t.config.delta_api_key == "real_key_xyz"
+        assert loaded_t.config.delta_api_secret == "real_secret_xyz"
+        assert loaded_t.config.demo_api_key == "demo_key_abc"
+        assert loaded_t.config.demo_api_secret == "demo_secret_abc"
+        assert loaded_t.config.safe_dict()["has_demo_key"] is True
+        assert loaded_t.config.demo_base_url == "https://cdn-ind.testnet.deltaex.org"
+
+
 
 
 
