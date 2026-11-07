@@ -20,7 +20,13 @@ from delta_bot.models import ContractSpec, ExecutionMode, Ticker
 from delta_bot.orchestrator import TradingBotOrchestrator
 from delta_bot.paper import PaperExchangeSimulator
 from delta_bot.server import create_app
-from delta_bot.tenant import TenantConfig, TenantInstance, TenantManager
+from delta_bot.tenant import (
+    TenantConfig,
+    TenantInstance,
+    TenantManager,
+    decrypt_secret,
+    encrypt_secret,
+)
 
 
 @pytest.fixture
@@ -248,3 +254,146 @@ def test_websocket_tenant_switching(mt_client: TestClient, multi_tenant_orchestr
         assert packet_charlie["type"] == "state_update"
         assert packet_charlie["current_tenant"]["tenant_id"] == "charlie"
         assert packet_charlie["collateral"]["balance"] == 12345.0
+
+
+def test_encryption_and_decryption_credentials() -> None:
+    """Verifies AES/Fernet encryption for API credentials at rest."""
+    raw_key = "delta_api_key_test_12345"
+    raw_secret = "delta_api_secret_test_67890"
+
+    # Encrypt
+    enc_k = encrypt_secret(raw_key)
+    enc_s = encrypt_secret(raw_secret)
+    assert enc_k.startswith("enc:")
+    assert enc_s.startswith("enc:")
+    assert enc_k != raw_key
+    assert enc_s != raw_secret
+
+    # Decrypt
+    dec_k = decrypt_secret(enc_k)
+    dec_s = decrypt_secret(enc_s)
+    assert dec_k == raw_key
+    assert dec_s == raw_secret
+
+    # Idempotent encrypt
+    assert encrypt_secret(enc_k) == enc_k
+
+    # Backward compatibility with unencrypted legacy tokens
+    assert decrypt_secret("legacy_plain_key") == "legacy_plain_key"
+    assert decrypt_secret("") == ""
+    assert encrypt_secret("") == ""
+
+
+def test_tenant_storage_credential_encryption(tmp_path) -> None:
+    """Verifies that API credentials written to disk are encrypted, and decrypted upon reload."""
+    import json
+    storage_file = str(tmp_path / "tenants_enc_test.json")
+    mgr = TenantManager(storage_path=storage_file)
+
+    t_cfg = TenantConfig(
+        tenant_id="secure_trader",
+        name="Secure Trader",
+        delta_api_key="my_super_secret_api_key_xyz",
+        delta_api_secret="my_super_secret_api_secret_abc",
+    )
+    mgr.create_tenant(t_cfg)
+
+    # Inspect file directly on disk to verify raw keys are NOT exposed
+    with open(storage_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    assert "secure_trader" in data
+    stored_k = data["secure_trader"]["delta_api_key"]
+    stored_s = data["secure_trader"]["delta_api_secret"]
+    assert stored_k.startswith("enc:")
+    assert stored_s.startswith("enc:")
+    assert "my_super_secret_api_key_xyz" not in stored_k
+    assert "my_super_secret_api_secret_abc" not in stored_s
+
+    # Bootstrap fresh TenantManager and load from disk
+    new_mgr = TenantManager(storage_path=storage_file)
+    new_mgr.load_from_disk(contract_specs={})
+    reloaded = new_mgr.get_tenant("secure_trader")
+    assert reloaded is not None
+    assert reloaded.config.delta_api_key == "my_super_secret_api_key_xyz"
+    assert reloaded.config.delta_api_secret == "my_super_secret_api_secret_abc"
+
+
+@pytest.mark.asyncio
+async def test_live_metrics_synchronization(multi_tenant_orchestrator: TradingBotOrchestrator) -> None:
+    """Verifies that live tenants pull real wallet balances and positions from Delta Exchange."""
+    from unittest.mock import AsyncMock
+    from delta_bot.models import PositionInfo, WalletBalance
+    from delta_bot.server import get_full_state_packet
+
+    mgr = multi_tenant_orchestrator.tenant_manager
+    live_cfg = TenantConfig(
+        tenant_id="live_desk",
+        name="Live Desk",
+        mode="live",
+        delta_api_key="key_123",
+        delta_api_secret="secret_456",
+    )
+    tenant = mgr.create_tenant(live_cfg, contract_specs=multi_tenant_orchestrator.contract_specs)
+    assert tenant.mode == ExecutionMode.LIVE
+
+    # Mock DeltaRestClient responses
+    mock_balances = [
+        WalletBalance(
+            asset_id=1,
+            asset_symbol="USDT",
+            balance=5432.10,
+            available_balance=4800.00,
+            order_margin=100.0,
+            position_margin=532.10,
+            blocked_margin=632.10,
+            unrealized_pnl=150.75,
+        )
+    ]
+    mock_positions = [
+        PositionInfo(
+            product_id=1,
+            symbol="BTCUSDT",
+            size=2,
+            entry_price=67500.0,
+            mark_price=68000.0,
+            liquidation_price=55000.0,
+            margin=532.10,
+            unrealized_pnl=150.75,
+        )
+    ]
+
+    tenant.rest_client.get_wallet_balances = AsyncMock(return_value=mock_balances)
+    tenant.rest_client.get_open_positions = AsyncMock(return_value=mock_positions)
+
+    # Sync live metrics
+    await tenant.sync_live_metrics()
+
+    # Verify tenant cached metrics
+    assert tenant.live_balance == 5432.10
+    assert tenant.live_available_margin == 4800.00
+    assert tenant.live_unrealized_pnl == 150.75
+    assert tenant.live_equity == 5582.85
+    assert len(tenant.live_positions) == 1
+    assert tenant.live_positions[0]["symbol"] == "BTCUSDT"
+    assert tenant.live_positions[0]["size"] == 2
+    assert tenant.live_positions[0]["unrealized_pnl"] == 150.75
+
+    # Verify tenant summary telemetry
+    summary = tenant.get_summary()
+    assert summary["balance"] == 5432.10
+    assert summary["equity"] == 5582.85
+    assert summary["unrealized_pnl"] == 150.75
+    assert summary["available_margin"] == 4800.00
+    assert summary["open_positions_count"] == 1
+
+    # Verify full state packet broadcast
+    packet = get_full_state_packet(multi_tenant_orchestrator, tenant_id="live_desk")
+    col = packet["collateral"]
+    assert col["balance"] == 5432.10
+    assert col["equity"] == 5582.85
+    assert col["unrealized_pnl"] == 150.75
+    assert col["available_margin"] == 4800.00
+    assert len(packet["positions"]) == 1
+    assert packet["positions"][0]["symbol"] == "BTCUSDT"
+

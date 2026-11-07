@@ -14,7 +14,9 @@ Supports concurrent isolated tenants, each with:
 from __future__ import annotations
 
 import asyncio
+import base64
 from datetime import datetime, timezone
+import hashlib
 import json
 import logging
 import os
@@ -26,7 +28,7 @@ from pydantic import BaseModel, Field
 
 from delta_bot.client import DeltaRestClient
 from delta_bot.config import BotConfig
-from delta_bot.exceptions import ConfigurationError
+from delta_bot.exceptions import AuthenticationError, ConfigurationError
 from delta_bot.execution import ExecutionConfig, ExecutionManager
 from delta_bot.models import (
     Candle,
@@ -48,6 +50,63 @@ from delta_bot.strategy import (
 )
 
 logger = logging.getLogger("delta_bot.tenant")
+
+
+# -----------------------------------------------------------------------------
+# Cryptographic Storage Security for API Credentials (AES-GCM / Fernet)
+# -----------------------------------------------------------------------------
+
+def get_encryption_fernet() -> Any:
+    """Instantiates Fernet cipher derived from server-side master key."""
+    try:
+        from cryptography.fernet import Fernet
+        secret = (
+            os.environ.get("TENANT_ENCRYPTION_KEY")
+            or os.environ.get("DASHBOARD_AUTH_TOKEN")
+            or os.environ.get("DELTA_API_SECRET")
+            or "delta-bot-master-secret-vault-2026"
+        )
+        key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
+        return Fernet(key)
+    except Exception as e:
+        logger.error("Failed to initialize cryptographic cipher: %s", e)
+        return None
+
+
+def encrypt_secret(val: str | None) -> str:
+    """Encrypts raw API credentials at rest before writing to database or disk."""
+    if not val or not str(val).strip():
+        return ""
+    v_str = str(val).strip()
+    if v_str.startswith("enc:"):
+        return v_str
+    try:
+        f = get_encryption_fernet()
+        if f is None:
+            return v_str
+        token = f.encrypt(v_str.encode("utf-8")).decode("utf-8")
+        return f"enc:{token}"
+    except Exception as e:
+        logger.error("Encryption failed: %s", e)
+        return v_str
+
+
+def decrypt_secret(val: str | None) -> str:
+    """Decrypts ciphertext from database or disk back into raw credential string."""
+    if not val or not str(val).strip():
+        return ""
+    v_str = str(val).strip()
+    if not v_str.startswith("enc:"):
+        return v_str
+    try:
+        f = get_encryption_fernet()
+        if f is None:
+            return v_str
+        raw_token = v_str[4:]
+        return f.decrypt(raw_token.encode("utf-8")).decode("utf-8")
+    except Exception as e:
+        logger.error("Decryption failed: %s", e)
+        return ""
 
 
 class TenantConfig(BaseModel):
@@ -77,6 +136,8 @@ class TenantConfig(BaseModel):
         if k:
             k_str = k.get_secret_value() if hasattr(k, "get_secret_value") else str(k)
             k_clean = k_str.strip()
+            if k_clean.startswith("enc:"):
+                k_clean = decrypt_secret(k_clean)
             if k_clean:
                 d["delta_api_key_masked"] = f"{k_clean[:4]}...{k_clean[-4:]}" if len(k_clean) >= 8 else "********"
                 d["has_api_key"] = True
@@ -109,6 +170,15 @@ class TenantInstance:
         self.start_time: float = time.time()
         self.enabled_symbols: set[str] = set([s.upper() for s in config.symbols])
         self.contract_specs: dict[str, ContractSpec] = contract_specs or {}
+
+        # Live exchange metrics cache
+        self.live_balance: float = 0.0
+        self.live_equity: float = 0.0
+        self.live_available_margin: float = 0.0
+        self.live_unrealized_pnl: float = 0.0
+        self.live_realized_pnl: float = 0.0
+        self.live_positions: list[dict[str, Any]] = []
+        self.last_sync_time: float = 0.0
 
         # BotConfig wrapper for rest client / live credentials
         self.bot_config = BotConfig(
@@ -171,6 +241,14 @@ class TenantInstance:
                 self._register_strategy_callbacks(strat)
                 self.strategies[sym] = strat
 
+        # Kick off initial live metrics synchronization if live credentials exist
+        if self.mode == ExecutionMode.LIVE and config.delta_api_key and config.delta_api_secret:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.sync_live_metrics())
+            except RuntimeError:
+                pass
+
     def _register_strategy_callbacks(self, strategy: BreakoutStrategyEngine) -> None:
         strategy.on_sl_ratchet(self._handle_sl_ratchet)
         strategy.on_order_cancel(self._handle_order_cancel)
@@ -219,11 +297,15 @@ class TenantInstance:
         """Retrieves total floating equity for this tenant."""
         if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
             return self.paper_simulator.wallet.equity
+        if self.last_sync_time > 0:
+            return self.live_equity
         return self.config.initial_balance
 
     def get_active_positions_count(self) -> int:
         if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
             return len(self.paper_simulator._open_positions)
+        if self.live_positions:
+            return len(self.live_positions)
         return len(self.state_manager.get_all_positions())
 
     def set_execution_mode(self, mode: ExecutionMode | str) -> ExecutionMode:
@@ -289,14 +371,120 @@ class TenantInstance:
             self.config.mode = "live"
             self.paper_simulator = None
             logger.info("[TENANT %s] Live execution manager activated with user API credentials", self.config.tenant_id)
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.sync_live_metrics())
+            except RuntimeError:
+                pass
         else:
             self.execution_manager = None
             self.mode = ExecutionMode.PAPER
             self.config.mode = "paper"
+            self.live_balance = 0.0
+            self.live_equity = 0.0
+            self.live_available_margin = 0.0
+            self.live_unrealized_pnl = 0.0
+            self.live_realized_pnl = 0.0
+            self.live_positions = []
+            self.last_sync_time = 0.0
             if self.paper_simulator is None:
                 self.paper_simulator = PaperExchangeSimulator(initial_balance=self.config.initial_balance)
                 for spec in self.contract_specs.values():
                     self.paper_simulator.register_contract_spec(spec)
+
+    async def sync_live_metrics(self) -> None:
+        """Pulls real wallet balances, available margin, and positions from Delta Exchange India."""
+        if not self.config.delta_api_key or not self.config.delta_api_secret:
+            return
+        try:
+            balances = await self.rest_client.get_wallet_balances()
+            if balances:
+                target_bal = next(
+                    (b for b in balances if b.asset_symbol.upper() == "USDT"),
+                    None,
+                )
+                if not target_bal:
+                    target_bal = max(balances, key=lambda b: b.balance)
+
+                self.live_balance = round(float(target_bal.balance), 4)
+                self.live_available_margin = round(float(target_bal.available_balance), 4)
+                self.live_unrealized_pnl = round(float(target_bal.unrealized_pnl or 0.0), 4)
+                self.live_equity = round(float(self.live_balance + self.live_unrealized_pnl), 4)
+
+            positions = await self.rest_client.get_open_positions()
+            formatted_positions: list[dict[str, Any]] = []
+            pos_pnl_acc = 0.0
+
+            for pos in positions:
+                self.state_manager._open_positions[pos.product_id] = pos
+                if pos.size != 0:
+                    sym = pos.symbol
+                    if not sym:
+                        for s_sym, s_spec in self.contract_specs.items():
+                            if s_spec.product_id == pos.product_id:
+                                sym = s_sym
+                                break
+                    spec = self.contract_specs.get(sym) if sym else None
+                    cv = spec.contract_value if spec else 1.0
+                    native_val = round(abs(pos.size) * cv, 4)
+                    alloc_margin = round(pos.margin, 2) if pos.margin > 0 else (
+                        round((abs(pos.size) * cv * pos.entry_price) / max(1, self.config.leverage), 2)
+                        if pos.entry_price > 0 else 0.0
+                    )
+                    liq_px = round(pos.liquidation_price, 4) if pos.liquidation_price else None
+                    dist_pct = (
+                        round(abs(pos.mark_price - liq_px) / pos.mark_price * 100.0, 2)
+                        if (liq_px and pos.mark_price > 0)
+                        else 0.0
+                    )
+                    child_sl = self.state_manager.get_child_stop_loss_order_id(pos.product_id)
+                    formatted_positions.append({
+                        "product_id": pos.product_id,
+                        "symbol": sym or f"PRODUCT_{pos.product_id}",
+                        "side": "BUY" if pos.size > 0 else "SELL",
+                        "size": abs(pos.size),
+                        "contract_value": cv,
+                        "native_value": native_val,
+                        "leverage": self.config.leverage,
+                        "entry_price": round(pos.entry_price, 4),
+                        "mark_price": round(pos.mark_price, 4),
+                        "unrealized_pnl": round(pos.unrealized_pnl, 2),
+                        "stop_loss_price": None,
+                        "take_profit_price": None,
+                        "child_stop_loss_order_id": child_sl,
+                        "child_take_profit_order_id": None,
+                        "allocated_margin": alloc_margin,
+                        "liquidation_price": liq_px,
+                        "liquidation_distance_pct": dist_pct,
+                        "mode": "LIVE",
+                    })
+                    pos_pnl_acc += pos.unrealized_pnl
+
+            self.live_positions = formatted_positions
+            if formatted_positions and self.live_unrealized_pnl == 0.0:
+                self.live_unrealized_pnl = round(pos_pnl_acc, 4)
+                self.live_equity = round(self.live_balance + self.live_unrealized_pnl, 4)
+
+            self.last_sync_time = time.time()
+            logger.info(
+                "[TENANT %s] Synced real Delta India metrics: Balance=%.2f, Equity=%.2f, Positions=%d",
+                self.config.tenant_id,
+                self.live_balance,
+                self.live_equity,
+                len(self.live_positions),
+            )
+        except AuthenticationError as auth_err:
+            logger.error(
+                "[TENANT %s] Delta Exchange authentication failed (check API key and secret): %s",
+                self.config.tenant_id,
+                auth_err,
+            )
+        except Exception as e:
+            logger.warning(
+                "[TENANT %s] Failed to sync live wallet metrics from Delta Exchange: %s",
+                self.config.tenant_id,
+                e,
+            )
 
     async def emergency_flatten(self) -> dict[str, Any]:
         """Emergency market-closes all active positions and cancels resting orders for this tenant."""
@@ -342,13 +530,19 @@ class TenantInstance:
             resting_orders = len(self.paper_simulator._pending_orders)
             avail_margin = stats["available_margin"]
         else:
-            bal = self.config.initial_balance
-            eq = bal
-            upnl = 0.0
-            rpnl = 0.0
+            if self.last_sync_time > 0:
+                bal = self.live_balance
+                eq = self.live_equity
+                avail_margin = self.live_available_margin
+            else:
+                bal = self.config.initial_balance
+                eq = bal
+                avail_margin = bal
+            upnl = self.live_unrealized_pnl
+            rpnl = self.live_realized_pnl
             win_rate = 0.0
             drawdown = 0.0
-            open_pos = len(self.state_manager.get_all_positions())
+            open_pos = len(self.live_positions) if self.live_positions else len(self.state_manager.get_all_positions())
             act_src = (
                 getattr(self.execution_manager.registry, "active_orders", [])
                 if self.execution_manager and hasattr(self.execution_manager, "registry")
@@ -356,7 +550,6 @@ class TenantInstance:
             )
             act_list = act_src() if callable(act_src) else (act_src or [])
             resting_orders = len(act_list)
-            avail_margin = bal
 
         return {
             "tenant_id": self.config.tenant_id,
@@ -582,14 +775,19 @@ class TenantManager:
         return clean or f"tenant_{int(time.time())}"
 
     def save_to_disk(self) -> None:
-        """Persists custom tenant configurations to JSON storage file."""
+        """Persists custom tenant configurations to JSON storage file with encrypted credentials."""
         try:
             os.makedirs(os.path.dirname(os.path.abspath(self.storage_path)), exist_ok=True)
             serializable = {}
             for t_id, t in self.tenants.items():
                 if t_id == "default":
                     continue  # Default tenant is synthesized from environment
-                serializable[t_id] = t.config.model_dump()
+                dump = t.config.model_dump()
+                if dump.get("delta_api_key"):
+                    dump["delta_api_key"] = encrypt_secret(dump["delta_api_key"])
+                if dump.get("delta_api_secret"):
+                    dump["delta_api_secret"] = encrypt_secret(dump["delta_api_secret"])
+                serializable[t_id] = dump
 
             with open(self.storage_path, "w", encoding="utf-8") as f:
                 json.dump(serializable, f, indent=2)
@@ -598,7 +796,7 @@ class TenantManager:
             logger.error("Failed to persist tenants to %s: %s", self.storage_path, e)
 
     def load_from_disk(self, contract_specs: dict[str, ContractSpec]) -> None:
-        """Loads and bootstraps saved tenant instances from JSON storage."""
+        """Loads and bootstraps saved tenant instances from JSON storage, decrypting credentials."""
         if not os.path.isfile(self.storage_path):
             return
 
@@ -610,7 +808,12 @@ class TenantManager:
             for t_id, c_dict in data.items():
                 if t_id in self.tenants:
                     continue
-                cfg = TenantConfig(**c_dict)
+                c_copy = dict(c_dict)
+                if c_copy.get("delta_api_key"):
+                    c_copy["delta_api_key"] = decrypt_secret(c_copy["delta_api_key"])
+                if c_copy.get("delta_api_secret"):
+                    c_copy["delta_api_secret"] = decrypt_secret(c_copy["delta_api_secret"])
+                cfg = TenantConfig(**c_copy)
                 instance = TenantInstance(config=cfg, contract_specs=contract_specs)
                 self.tenants[t_id] = instance
                 loaded += 1
@@ -646,16 +849,18 @@ class TenantManager:
                     if row.get("user_id"):
                         self.tenants[t_id].config.user_id = str(row["user_id"])
                     continue
+                raw_k = decrypt_secret(row.get("delta_api_key") or "")
+                raw_s = decrypt_secret(row.get("delta_api_secret") or "")
                 cfg = TenantConfig(
                     tenant_id=t_id,
                     user_id=str(row["user_id"]) if row.get("user_id") else None,
                     name=row.get("name", t_id),
                     mode=row.get("mode", "paper"),
                     initial_balance=float(row.get("initial_balance", 10000.0)),
-                    delta_api_key=row.get("delta_api_key") or "",
-                    delta_api_secret=row.get("delta_api_secret") or "",
-                    delta_base_url=row.get("delta_base_url") or "https://api.delta.exchange",
-                    delta_ws_url=row.get("delta_ws_url") or "wss://socket.delta.exchange",
+                    delta_api_key=raw_k,
+                    delta_api_secret=raw_s,
+                    delta_base_url=row.get("delta_base_url") or "https://api.india.delta.exchange",
+                    delta_ws_url=row.get("delta_ws_url") or "wss://socket.india.delta.exchange",
                     risk_pct=float(row.get("risk_pct", 1.0)),
                     leverage=int(row.get("leverage", 5)),
                     timeframe=row.get("timeframe", "1m"),
@@ -678,7 +883,7 @@ class TenantManager:
             return 0
 
     def sync_tenant_to_supabase(self, instance: TenantInstance) -> bool:
-        """Synchronizes tenant state and configuration to Supabase PostgreSQL."""
+        """Synchronizes tenant state and encrypted configuration to Supabase PostgreSQL."""
         if not self.supabase_url or not self.supabase_secret_key:
             return False
 
@@ -692,26 +897,19 @@ class TenantManager:
             }
             url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants"
 
-            bal = (
-                instance.paper_simulator.wallet.balance
-                if instance.paper_simulator
-                else instance.config.initial_balance
-            )
-            eq = (
-                instance.paper_simulator.wallet.equity
-                if instance.paper_simulator
-                else instance.config.initial_balance
-            )
-            upnl = (
-                instance.paper_simulator.wallet.unrealized_pnl
-                if instance.paper_simulator
-                else 0.0
-            )
-            rpnl = (
-                instance.paper_simulator.wallet.realized_pnl
-                if instance.paper_simulator
-                else 0.0
-            )
+            if instance.mode == ExecutionMode.PAPER and instance.paper_simulator:
+                bal = instance.paper_simulator.wallet.balance
+                eq = instance.paper_simulator.wallet.equity
+                upnl = instance.paper_simulator.wallet.unrealized_pnl
+                rpnl = instance.paper_simulator.wallet.realized_pnl
+            else:
+                bal = instance.live_balance if instance.last_sync_time > 0 else instance.config.initial_balance
+                eq = instance.live_equity if instance.last_sync_time > 0 else bal
+                upnl = instance.live_unrealized_pnl
+                rpnl = instance.live_realized_pnl
+
+            enc_key = encrypt_secret(instance.config.delta_api_key) if instance.config.delta_api_key else None
+            enc_secret = encrypt_secret(instance.config.delta_api_secret) if instance.config.delta_api_secret else None
 
             payload = {
                 "tenant_id": instance.config.tenant_id,
@@ -727,8 +925,8 @@ class TenantManager:
                 "risk_pct": float(instance.config.risk_pct),
                 "timeframe": instance.config.timeframe,
                 "max_drawdown_pct": float(instance.config.max_drawdown_pct),
-                "delta_api_key": instance.config.delta_api_key or None,
-                "delta_api_secret": instance.config.delta_api_secret or None,
+                "delta_api_key": enc_key,
+                "delta_api_secret": enc_secret,
                 "symbols": instance.config.symbols,
                 "is_running": instance.is_running,
                 "is_active": instance.config.is_active,
@@ -759,22 +957,6 @@ class TenantManager:
         except Exception as e:
             logger.debug("Failed to delete tenant %s from Supabase: %s", tenant_id, e)
             return False
-
-        try:
-            with open(self.storage_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-
-            loaded = 0
-            for t_id, c_dict in data.items():
-                if t_id in self.tenants:
-                    continue
-                cfg = TenantConfig(**c_dict)
-                instance = TenantInstance(config=cfg, contract_specs=contract_specs)
-                self.tenants[t_id] = instance
-                loaded += 1
-            logger.info("Loaded %d custom tenants from %s", loaded, self.storage_path)
-        except Exception as e:
-            logger.error("Error reading tenants from %s: %s", self.storage_path, e)
 
     # -------------------------------------------------------------------------
     # Shared Market Data Event Fan-Out (Multi-Tenant Dispatcher)

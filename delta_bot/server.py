@@ -472,6 +472,8 @@ def get_all_positions_summary(
                 "liquidation_distance_pct": dist_pct,
                 "mode": "PAPER",
             })
+    elif tenant is not None and getattr(tenant, "live_positions", None):
+        positions_list = list(tenant.live_positions)
     elif target_sm is not None:
         for p in target_sm.get_all_positions():
             child_sl = target_sm.get_child_stop_loss_order_id(p.product_id)
@@ -724,15 +726,20 @@ def get_full_state_packet(
             winning_trades = p_stats["winning_trades"]
             available_margin = p_stats["available_margin"]
         else:
-            balance = tenant.config.initial_balance
-            equity = balance
-            realized_pnl = 0.0
-            unrealized_pnl = 0.0
+            if tenant.last_sync_time > 0:
+                balance = tenant.live_balance
+                equity = tenant.live_equity
+                available_margin = tenant.live_available_margin
+            else:
+                balance = tenant.config.initial_balance
+                equity = balance
+                available_margin = balance
+            realized_pnl = tenant.live_realized_pnl
+            unrealized_pnl = tenant.live_unrealized_pnl
             win_rate = 0.0
             drawdown = 0.0
             total_trades = 0
             winning_trades = 0
-            available_margin = balance
 
         positions = get_all_positions_summary(orchestrator, tenant=tenant)
         orders = get_all_orders_summary(orchestrator, tenant=tenant)
@@ -1233,10 +1240,23 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 orchestrator.config.delta_base_url = b_str
                 orchestrator.rest_client.update_credentials(SecretStr(k_str), SecretStr(s_str), base_url=b_str)
 
+            # Sync real live metrics immediately if keys were provided or updated
+            if updated.mode == ExecutionMode.LIVE and updated.config.delta_api_key:
+                try:
+                    await updated.sync_live_metrics()
+                except Exception as sync_e:
+                    logger.warning("[TENANT %s] Immediate live metrics sync error: %s", updated.config.tenant_id, sync_e)
+
+            conn_msg = (
+                f"Connected to Delta Exchange India! Real Balance: ${updated.live_balance:,.2f} USDT"
+                if updated.mode == ExecutionMode.LIVE and updated.last_sync_time > 0
+                else f"Tenant '{tenant.config.tenant_id}' updated successfully."
+            )
+
             return JSONResponse(
                 content={
                     "status": "success",
-                    "message": f"Tenant '{tenant.config.tenant_id}' updated successfully.",
+                    "message": conn_msg,
                     "tenant": updated.get_summary(),
                 }
             )
@@ -2071,6 +2091,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 t.config.delta_api_secret = ""
                 t.reload_credentials()
                 orchestrator.tenant_manager.save_to_disk()
+                orchestrator.tenant_manager.sync_tenant_to_supabase(t)
                 if t.config.tenant_id != "default":
                     return ControlActionResponse(
                         status="success",
@@ -2086,6 +2107,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 default_t.config.delta_api_key = ""
                 default_t.config.delta_api_secret = ""
                 default_t.reload_credentials()
+                orchestrator.tenant_manager.sync_tenant_to_supabase(default_t)
             orchestrator.tenant_manager.save_to_disk()
         logger.info("[CONFIG] API keys successfully reset and removed.")
         return ControlActionResponse(
@@ -2235,6 +2257,21 @@ async def _ws_broadcaster_worker(
                 live_connections = [ws for ws in connections if not paused_map.get(ws, False)]
                 if not live_connections:
                     continue
+
+                # Periodically refresh live metrics from Delta Exchange India for live tenants
+                now_ts = time.time()
+                for ws in live_connections:
+                    t_id = tenant_map.get(ws, "default")
+                    u_id = user_map.get(ws)
+                    t_inst = resolve_tenant(orchestrator, t_id) if hasattr(orchestrator, "tenant_manager") else None
+                    if t_inst is None and u_id and hasattr(orchestrator, "tenant_manager"):
+                        t_inst = orchestrator.tenant_manager.get_tenant_by_user_id(u_id)
+                    if t_inst and t_inst.mode == ExecutionMode.LIVE and t_inst.config.delta_api_key and t_inst.config.delta_api_secret:
+                        if now_ts - t_inst.last_sync_time >= 5.0:
+                            try:
+                                await t_inst.sync_live_metrics()
+                            except Exception as sync_e:
+                                logger.debug("Live metrics sync failed for %s: %s", t_inst.config.tenant_id, sync_e)
 
                 curr_log_version = getattr(log_handler, "version", 0)
                 logs_changed = curr_log_version != last_log_version
