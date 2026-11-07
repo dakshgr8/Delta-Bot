@@ -168,6 +168,7 @@ class OrderIntent(BaseModel):
     exit_price: float | None = Field(default=None, description="Price at which position exited")
     fill_price: float | None = Field(default=None, description="Actual execution fill price from private user feed")
     filled_size: int | None = Field(default=None, description="Actual executed contract lots from private user feed")
+    realized_pnl: float | None = Field(default=None, description="Realized PnL of closed position in USD")
     is_breakeven_locked: bool = Field(default=False, description="Flag indicating SL has been advanced to break-even")
 
     @property
@@ -248,12 +249,21 @@ class OrderIntent(BaseModel):
         self.status = status
         self.exit_price = exit_price
         self.closed_at = timestamp
+        entry_px = self.fill_price or self.trigger_price
+        if entry_px and self.target_asset_qty:
+            if self.signal_type == SignalType.BULLISH_BREAKOUT:
+                self.realized_pnl = round((exit_price - entry_px) * self.target_asset_qty, 4)
+            else:
+                self.realized_pnl = round((entry_px - exit_price) * self.target_asset_qty, 4)
+        else:
+            self.realized_pnl = 0.0
         logger.info(
-            "OrderIntent [%s] %s position CLOSED: %s at exit_price=%.4f",
+            "OrderIntent [%s] %s position CLOSED: %s at exit_price=%.4f (PnL: $%.2f)",
             self.intent_id,
             self.symbol,
             status.value,
             exit_price,
+            self.realized_pnl or 0.0,
         )
 
     def ratchet_sl(self, new_sl: float) -> bool:

@@ -350,7 +350,7 @@ class TenantInstance:
     async def _handle_position_close(self, intent: OrderIntent, status: OrderStatus, exit_price: float) -> None:
         equity = await self.get_account_equity()
         self.risk_manager.record_trade_exit(
-            pnl=intent.realized_pnl or 0.0,
+            pnl=getattr(intent, "realized_pnl", 0.0) or 0.0,
             current_equity=equity,
             symbol=intent.symbol,
         )

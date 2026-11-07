@@ -593,6 +593,8 @@ async def test_position_take_profit_and_stop_loss(strategy_config: StrategyConfi
     assert engine.active_position is None
     assert intent.status == OrderStatus.CLOSED_TP
     assert OrderStatus.CLOSED_TP in closed_events
+    assert intent.realized_pnl is not None
+    assert intent.realized_pnl > 0.0
 
 
 # -----------------------------------------------------------------------------

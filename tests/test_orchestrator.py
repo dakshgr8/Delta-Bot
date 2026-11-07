@@ -628,3 +628,37 @@ async def test_orchestrator_symbol_aliasing_candle_close() -> None:
     v_order = list(paper_sim._pending_orders.values())[0]
     assert v_order.product_id == 27
     assert v_order.stop_price == 68000.0
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_handle_position_close_callback() -> None:
+    """Verifies that _handle_position_close cleanly handles OrderIntent with realized_pnl without AttributeError."""
+    orch = TradingBotOrchestrator(
+        config=BotConfig(execution_mode="paper", target_symbols_str="SOLUSD"),
+        mode=ExecutionMode.PAPER,
+        paper_simulator=PaperExchangeSimulator(initial_balance=10000.0),
+    )
+    intent = OrderIntent(
+        symbol="SOLUSD",
+        signal_type=SignalType.BEARISH_BREAKDOWN,
+        status=OrderStatus.TRIGGERED,
+        trigger_price=88.8839,
+        initial_stop_loss=89.0150,
+        current_stop_loss=89.0150,
+        take_profit=88.5000,
+        contract_lots=10,
+        target_asset_qty=10.0,
+        capital_at_risk_usd=1.31,
+        signal_candle_high=89.0150,
+        signal_candle_low=88.8839,
+        signal_candle_close=88.9000,
+        signal_bar_time=1700000000.0,
+        created_at_epoch_s=1700000000.0,
+    )
+    intent.close_position(OrderStatus.CLOSED_SL, exit_price=89.0150, timestamp=1700000060.0)
+    assert intent.realized_pnl is not None
+    assert intent.realized_pnl < 0.0  # SL loss on short
+
+    # Should execute cleanly without 'OrderIntent' object has no attribute 'realized_pnl'
+    await orch._handle_position_close(intent, OrderStatus.CLOSED_SL, 89.0150)
+    assert orch.risk_manager.daily_realized_pnl == intent.realized_pnl
