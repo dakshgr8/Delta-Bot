@@ -112,11 +112,23 @@ class ConfigUpdateRequest(BaseModel):
     )
     delta_api_key: str | None = Field(
         default=None,
-        description="Delta Exchange API Key",
+        description="Delta Exchange Real API Key",
     )
     delta_api_secret: str | None = Field(
         default=None,
-        description="Delta Exchange API Secret",
+        description="Delta Exchange Real API Secret",
+    )
+    demo_api_key: str | None = Field(
+        default=None,
+        description="Delta Exchange Demo / Testnet API Key",
+    )
+    demo_api_secret: str | None = Field(
+        default=None,
+        description="Delta Exchange Demo / Testnet API Secret",
+    )
+    mode: str | None = Field(
+        default=None,
+        description="Operational mode: 'real' or 'demo'",
     )
     delta_base_url: str | None = Field(
         default=None,
@@ -129,9 +141,9 @@ class ConfigUpdateRequest(BaseModel):
 
 
 class ModeSwitchRequest(BaseModel):
-    """Payload schema for switching execution mode between paper and live."""
+    """Payload schema for switching execution mode between REAL and DEMO."""
 
-    mode: str = Field(description="Target operational mode: 'paper' or 'live'")
+    mode: str = Field(description="Target operational mode: 'real' or 'demo' (also accepts 'live' or 'paper')")
 
 
 class SymbolToggleRequest(BaseModel):
@@ -155,12 +167,16 @@ class TenantCreateRequest(BaseModel):
 
     tenant_id: str | None = Field(default=None, description="Custom unique tenant slug/ID")
     name: str = Field(description="Display name for the tenant (e.g. Alpha Desk)")
-    mode: str = Field(default="live", description="Execution mode: 'live'")
+    mode: str = Field(default="demo", description="Execution mode: 'real' or 'demo'")
     initial_balance: float = Field(default=0.0, ge=0.0, description="Collateral balance in USD")
-    delta_api_key: str = Field(default="", description="Delta Exchange API Key")
-    delta_api_secret: str = Field(default="", description="Delta Exchange API Secret")
+    delta_api_key: str = Field(default="", description="Delta Exchange Real API Key")
+    delta_api_secret: str = Field(default="", description="Delta Exchange Real API Secret")
+    demo_api_key: str = Field(default="", description="Delta Exchange Demo / Testnet API Key")
+    demo_api_secret: str = Field(default="", description="Delta Exchange Demo / Testnet API Secret")
     delta_base_url: str = Field(default="https://api.india.delta.exchange", description="Delta Exchange India REST API URL")
     delta_ws_url: str = Field(default="wss://socket.india.delta.exchange", description="Delta Exchange India WebSocket URL")
+    demo_base_url: str = Field(default="https://cdn-ind.testnet.deltaex.org", description="Delta Exchange Demo REST API URL")
+    demo_ws_url: str = Field(default="wss://socket-ind.testnet.deltaex.org", description="Delta Exchange Demo WebSocket URL")
     risk_pct: float = Field(default=1.0, ge=0.1, le=10.0, description="Risk percentage per breakout trade")
     leverage: int = Field(default=5, ge=1, le=100, description="Default leverage tier")
     timeframe: str = Field(default="1m", description="Resolution timeframe (e.g. 1m, 3m, 5m, 15m)")
@@ -176,8 +192,12 @@ class TenantUpdateRequest(BaseModel):
     mode: str | None = None
     delta_api_key: str | None = None
     delta_api_secret: str | None = None
+    demo_api_key: str | None = None
+    demo_api_secret: str | None = None
     delta_base_url: str | None = None
     delta_ws_url: str | None = None
+    demo_base_url: str | None = None
+    demo_ws_url: str | None = None
     risk_pct: float | None = Field(default=None, ge=0.1, le=50.0)
     leverage: int | None = Field(default=None, ge=1, le=100)
     timeframe: str | None = None
@@ -720,7 +740,7 @@ def get_full_state_packet(
         timeframe = tenant.config.timeframe
         enabled_symbols = list(tenant.enabled_symbols)
 
-        if tenant.mode == ExecutionMode.PAPER and tenant.paper_simulator is not None:
+        if tenant.paper_simulator is not None and tenant.execution_manager is None:
             p_stats = tenant.paper_simulator.get_summary()
             balance = p_stats["balance"]
             equity = p_stats["equity"]
@@ -732,12 +752,12 @@ def get_full_state_packet(
             winning_trades = p_stats["winning_trades"]
             available_margin = p_stats["available_margin"]
         else:
-            if tenant.last_sync_time > 0:
+            if tenant.last_sync_time > 0 or tenant.execution_manager is not None:
                 balance = tenant.live_balance
                 equity = tenant.live_equity
                 available_margin = tenant.live_available_margin
             else:
-                balance = 0.0 if tenant.mode == ExecutionMode.LIVE else tenant.config.initial_balance
+                balance = 0.0 if tenant.mode.is_real else tenant.config.initial_balance
                 equity = balance
                 available_margin = balance
             realized_pnl = tenant.live_realized_pnl
@@ -761,7 +781,7 @@ def get_full_state_packet(
         timeframe = orchestrator.timeframe
         enabled_symbols = list(getattr(orchestrator, "enabled_symbols", set(orchestrator.target_symbols)))
 
-        if orchestrator.mode == ExecutionMode.PAPER and orchestrator.paper_simulator is not None:
+        if orchestrator.paper_simulator is not None and orchestrator.execution_manager is None:
             p_stats = orchestrator.paper_simulator.get_summary()
             balance = p_stats["balance"]
             equity = p_stats["equity"]
@@ -774,7 +794,7 @@ def get_full_state_packet(
             available_margin = p_stats["available_margin"]
         else:
             def_t = orchestrator.tenant_manager.get_tenant("default") if hasattr(orchestrator, "tenant_manager") else None
-            if def_t and def_t.last_sync_time > 0:
+            if def_t and (def_t.last_sync_time > 0 or def_t.execution_manager is not None):
                 balance = def_t.live_balance
                 equity = def_t.live_equity
                 available_margin = def_t.live_available_margin
@@ -847,6 +867,7 @@ def get_full_state_packet(
         "status": {
             "is_running": is_running,
             "mode": mode_str,
+            "is_demo": (mode_str in ("DEMO", "PAPER")),
             "uptime_seconds": round(uptime, 1),
             "uptime_human": format_uptime_human(uptime),
             "memory_mb": get_process_memory_mb(),
@@ -858,9 +879,14 @@ def get_full_state_packet(
             "timeframe": timeframe,
             "has_auth_token": bool(orchestrator.config.dashboard_auth_token_str),
             "has_api_key": current_tenant_dict.get("has_api_key", False),
+            "has_real_key": current_tenant_dict.get("has_real_key", False),
+            "has_demo_key": current_tenant_dict.get("has_demo_key", False),
             "delta_api_key_masked": current_tenant_dict.get("delta_api_key_masked", ""),
+            "demo_api_key_masked": current_tenant_dict.get("demo_api_key_masked", ""),
             "last_sync_error": tenant.last_sync_error if tenant else None,
             "delta_base_url": orchestrator.config.delta_base_url,
+            "delta_demo_base_url": orchestrator.config.delta_demo_base_url,
+            "active_base_url": orchestrator.config.active_base_url,
             "config": {
                 "risk_pct": risk_pct,
                 "leverage": lev,
@@ -1829,17 +1855,23 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         return await close_position_by_product_id(int(pid), tenant_id=tenant_id, x_tenant_id=x_tenant_id, auth=auth)
 
     @app.post(
+        "/api/mode",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+        include_in_schema=False,
+    )
+    @app.post(
         "/api/control/mode",
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
     )
     async def control_switch_mode(payload: ModeSwitchRequest) -> ControlActionResponse:
-        """Switches execution mode between PAPER and LIVE with safety validation."""
+        """Switches execution mode between REAL and DEMO with safety validation."""
         target_mode = payload.mode.strip().lower()
-        if target_mode not in ("paper", "live"):
+        if target_mode not in ("real", "live", "demo", "paper", "testnet"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid execution mode '{payload.mode}'. Must be 'paper' or 'live'.",
+                detail=f"Invalid execution mode '{payload.mode}'. Must be 'real' or 'demo'.",
             )
         try:
             from delta_bot.exceptions import ConfigurationError
@@ -2033,6 +2065,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             else:
                 target_t = auth.tenant_id
             updates = {}
+            if payload.mode is not None:
+                updates["mode"] = payload.mode
             if payload.timeframe is not None:
                 updates["timeframe"] = payload.timeframe
             if payload.risk_pct is not None:
@@ -2041,6 +2075,14 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 updates["leverage"] = payload.leverage
             if payload.max_drawdown_pct is not None:
                 updates["max_drawdown_pct"] = payload.max_drawdown_pct
+            if payload.delta_api_key is not None:
+                updates["delta_api_key"] = payload.delta_api_key
+            if payload.delta_api_secret is not None:
+                updates["delta_api_secret"] = payload.delta_api_secret
+            if payload.demo_api_key is not None:
+                updates["demo_api_key"] = payload.demo_api_key
+            if payload.demo_api_secret is not None:
+                updates["demo_api_secret"] = payload.demo_api_secret
             if updates and hasattr(orchestrator, "tenant_manager"):
                 orchestrator.tenant_manager.update_tenant(target_t, updates)
                 return ControlActionResponse(
@@ -2052,6 +2094,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         target_t = tenant_id or x_tenant_id
         if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
             updates = {}
+            if payload.mode is not None:
+                updates["mode"] = payload.mode
             if payload.timeframe is not None:
                 updates["timeframe"] = payload.timeframe
             if payload.risk_pct is not None:
@@ -2060,6 +2104,14 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 updates["leverage"] = payload.leverage
             if payload.max_drawdown_pct is not None:
                 updates["max_drawdown_pct"] = payload.max_drawdown_pct
+            if payload.delta_api_key is not None:
+                updates["delta_api_key"] = payload.delta_api_key
+            if payload.delta_api_secret is not None:
+                updates["delta_api_secret"] = payload.delta_api_secret
+            if payload.demo_api_key is not None:
+                updates["demo_api_key"] = payload.demo_api_key
+            if payload.demo_api_secret is not None:
+                updates["demo_api_secret"] = payload.demo_api_secret
             if updates:
                 orchestrator.tenant_manager.update_tenant(target_t, updates)
                 return ControlActionResponse(
@@ -2213,6 +2265,35 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 orchestrator.tenant_manager.save_to_disk()
             updated.append("api_keys=CONFIGURED")
             logger.info("[CONFIG] Delta API keys updated successfully.")
+
+        if payload.demo_api_key is not None or payload.demo_api_secret is not None:
+            from pydantic import SecretStr
+            d_key = payload.demo_api_key.strip() if payload.demo_api_key else orchestrator.config.delta_demo_api_key.get_secret_value()
+            d_sec = payload.demo_api_secret.strip() if payload.demo_api_secret else orchestrator.config.delta_demo_api_secret.get_secret_value()
+            orchestrator.config.delta_demo_api_key = SecretStr(d_key)
+            orchestrator.config.delta_demo_api_secret = SecretStr(d_sec)
+            if hasattr(orchestrator, "tenant_manager"):
+                default_t = orchestrator.tenant_manager.get_tenant("default")
+                if default_t:
+                    default_t.config.demo_api_key = d_key
+                    default_t.config.demo_api_secret = d_sec
+                    default_t.reload_credentials()
+                if auth.auth_type == "user" and auth.tenant_id:
+                    user_t = orchestrator.tenant_manager.get_tenant(auth.tenant_id)
+                    if user_t:
+                        user_t.config.demo_api_key = d_key
+                        user_t.config.demo_api_secret = d_sec
+                        user_t.reload_credentials()
+                orchestrator.tenant_manager.save_to_disk()
+            updated.append("demo_api_keys=CONFIGURED")
+            logger.info("[CONFIG] Delta Demo / Testnet API keys updated successfully.")
+
+        if payload.mode is not None:
+            try:
+                orchestrator.set_execution_mode(payload.mode)
+                updated.append(f"mode={payload.mode.upper()}")
+            except Exception as e:
+                logger.error("Failed to switch mode to %s: %s", payload.mode, e)
 
         logger.info("[CONTROL API] Hot-reloaded configuration: %s", ", ".join(updated))
         return ControlActionResponse(

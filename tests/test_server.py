@@ -540,6 +540,53 @@ def test_server_control_mode_switch(client: TestClient, test_orchestrator: Tradi
     assert "invalid execution mode" in res_invalid.json()["detail"].lower()
 
 
+def test_server_demo_and_real_mode_switching_with_keys(client: TestClient, test_orchestrator: TradingBotOrchestrator) -> None:
+    """Verifies configuring demo testnet keys and switching between REAL and DEMO environments."""
+    # 1. Configure Demo credentials and switch to DEMO mode
+    res_cfg_demo = client.post(
+        "/api/config",
+        json={
+            "demo_api_key": "demokey12345",
+            "demo_api_secret": "demosecret67890",
+            "mode": "demo",
+        },
+    )
+    assert res_cfg_demo.status_code == 200
+    assert test_orchestrator.mode == ExecutionMode.DEMO
+    assert test_orchestrator.config.is_demo_mode is True
+
+    # 2. Check /api/status telemetry reflects DEMO mode & testnet URL
+    res_status = client.get("/api/status")
+    assert res_status.status_code == 200
+    status = res_status.json()["status"]
+    assert status["mode"] == "DEMO"
+    assert status["is_demo"] is True
+    assert status["has_demo_key"] is True
+    assert "cdn-ind.testnet.deltaex.org" in status["active_base_url"]
+
+    # 3. Configure Real Delta India credentials and switch to REAL mode
+    res_cfg_real = client.post(
+        "/api/config",
+        json={
+            "delta_api_key": "realkey12345",
+            "delta_api_secret": "realsecret67890",
+            "mode": "real",
+        },
+    )
+    assert res_cfg_real.status_code == 200
+    assert test_orchestrator.mode == ExecutionMode.REAL
+    assert test_orchestrator.config.is_demo_mode is False
+
+    # 4. Check /api/status telemetry reflects REAL mode & Delta India production URL
+    res_status_real = client.get("/api/status")
+    assert res_status_real.status_code == 200
+    status_real = res_status_real.json()["status"]
+    assert status_real["mode"] == "REAL"
+    assert status_real["is_demo"] is False
+    assert status_real["has_real_key"] is True
+    assert "api.india.delta.exchange" in status_real["active_base_url"]
+
+
 def test_server_control_symbol_toggle(client: TestClient, test_orchestrator: TradingBotOrchestrator) -> None:
     """Verifies that POST /api/control/symbol_toggle enables/disables symbol breakout evaluation."""
     # 1. Disable BTCUSDT

@@ -560,16 +560,39 @@
     <div class="border-b border-[var(--dp-color-hairline)] bg-[var(--dp-color-ground)] py-3">
       <div class="dp-container flex flex-wrap items-center justify-between gap-4">
         
-        <!-- Status Label -->
-        <div class="flex items-center space-x-3 text-xs font-mono">
+        <!-- Status Label & Mode Switcher -->
+        <div class="flex flex-wrap items-center gap-3 text-xs font-mono">
+          <!-- REAL vs DEMO Mode Toggle -->
+          <div class="flex items-center rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-bg)] p-0.5">
+            <button type="button" id="btn-mode-real" onclick="switchExecutionMode('real')" class="px-2.5 py-1 rounded text-white font-medium bg-[var(--dp-color-panel)] transition cursor-pointer flex items-center gap-1.5" title="Trade real funds on Delta Exchange India">
+              <span id="dot-mode-real" class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              REAL
+            </button>
+            <button type="button" id="btn-mode-demo" onclick="switchExecutionMode('demo')" class="px-2.5 py-1 rounded text-[var(--dp-color-meta)] hover:text-white transition cursor-pointer flex items-center gap-1.5" title="Trade demo funds on Delta Exchange Testnet">
+              <span id="dot-mode-demo" class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+              DEMO
+            </button>
+          </div>
+
+          <span class="text-[var(--dp-color-hairline-2)]">|</span>
+
           <div class="flex items-center space-x-2 text-[var(--dp-color-bright)]">
             <span id="dash-engine-signal" class="signal-live"></span>
             <span id="dash-status-text" class="font-medium">Live Terminal</span>
           </div>
+
           <span class="text-[var(--dp-color-hairline-2)]">|</span>
+
           <div class="flex items-center space-x-1.5 text-[var(--dp-color-meta)]">
             <span id="api-status-signal" class="signal-muted"></span>
             <span id="api-badge-text">Keys Configured</span>
+          </div>
+
+          <span class="text-[var(--dp-color-hairline-2)]">|</span>
+
+          <div class="flex items-center space-x-1 text-[var(--dp-color-meta)] text-[11px]" id="endpoint-badge-container">
+            <span class="text-white/40">Endpoint:</span>
+            <span id="endpoint-badge-text" class="text-white font-mono">Delta India (Live)</span>
           </div>
         </div>
 
@@ -742,7 +765,7 @@
   <!-- SETTINGS MODAL (DELTA API KEYS & RISK) -->
   <!-- ========================================================================= -->
   <div id="modal-settings" class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center hidden p-4">
-    <div class="dp-panel p-6 max-w-md w-full space-y-5 border border-[var(--dp-color-hairline-2)] shadow-2xl">
+    <div class="dp-panel p-6 max-w-lg w-full space-y-5 border border-[var(--dp-color-hairline-2)] shadow-2xl">
       
       <div class="flex items-center justify-between border-b border-[var(--dp-color-hairline)] pb-3">
         <div>
@@ -752,42 +775,82 @@
         <button type="button" onclick="closeSettingsModal()" class="text-[var(--dp-color-meta)] hover:text-white text-lg cursor-pointer">&times;</button>
       </div>
 
-      <!-- API Key Status and Reset Controls -->
-      <div id="cfg-key-status-box" class="p-3 rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-panel)] flex items-center justify-between">
-        <div class="space-y-0.5">
-          <span class="mono-label">Delta API Status</span>
-          <div class="text-xs font-mono font-medium text-white flex items-center gap-1.5">
-            <span id="cfg-modal-status-dot" class="signal-muted"></span>
-            <span id="cfg-modal-status-text">Keys Needed</span>
-          </div>
-        </div>
-        <button type="button" id="btn-reset-keys" onclick="resetApiKeys()" class="hidden btn-secondary text-[11px] py-1 px-2.5 text-red-400 hover:text-red-300 border-red-500/30">
-          Reset Keys
+      <!-- Environment Selection Tabs -->
+      <div class="flex rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-bg)] p-1 text-xs font-mono">
+        <button type="button" id="tab-btn-real" onclick="switchSettingsTab('real')" class="flex-1 py-1.5 rounded text-white font-medium bg-[var(--dp-color-panel)] transition text-center cursor-pointer flex items-center justify-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          REAL Trading (Delta India)
+        </button>
+        <button type="button" id="tab-btn-demo" onclick="switchSettingsTab('demo')" class="flex-1 py-1.5 rounded text-[var(--dp-color-meta)] hover:text-white transition text-center cursor-pointer flex items-center justify-center gap-1.5">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+          DEMO Trading (Testnet)
         </button>
       </div>
 
-      <!-- API Keys -->
-      <div class="space-y-3">
-        <div>
-          <label class="block mono-label mb-1">Delta API Key</label>
-          <input type="text" id="cfg-api-key" placeholder="Enter API Key..." class="dp-input">
-        </div>
-
-        <div>
-          <label class="block mono-label mb-1">Delta API Secret</label>
-          <input type="password" id="cfg-api-secret" placeholder="Enter API Secret..." class="dp-input">
-        </div>
-
-        <div>
-          <label class="block mono-label mb-1">Exchange Region (India Only)</label>
-          <div class="dp-input flex items-center justify-between text-xs text-white bg-[var(--dp-color-hairline)] cursor-default">
-            <span class="flex items-center gap-2">
-              <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
-              Delta Exchange India (api.india.delta.exchange)
-            </span>
-            <span class="text-[10px] text-[var(--dp-color-meta)] uppercase font-mono">India Only</span>
+      <!-- TAB 1: REAL TRADING CREDENTIALS -->
+      <div id="tab-pane-real" class="space-y-3">
+        <div class="p-3 rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-panel)] flex items-center justify-between">
+          <div class="space-y-0.5">
+            <span class="mono-label">Production Delta API Status</span>
+            <div class="text-xs font-mono font-medium text-white flex items-center gap-1.5">
+              <span id="cfg-modal-status-dot-real" class="signal-muted"></span>
+              <span id="cfg-modal-status-text-real">Keys Needed</span>
+            </div>
           </div>
-          <input type="hidden" id="cfg-api-url" value="https://api.india.delta.exchange">
+          <button type="button" id="btn-reset-real-keys" onclick="resetApiKeys('real')" class="hidden btn-secondary text-[11px] py-1 px-2.5 text-red-400 hover:text-red-300 border-red-500/30">
+            Reset Real Keys
+          </button>
+        </div>
+
+        <div>
+          <label class="block mono-label mb-1">Delta India API Key</label>
+          <input type="text" id="cfg-api-key" placeholder="Enter Delta India API Key..." class="dp-input">
+        </div>
+
+        <div>
+          <label class="block mono-label mb-1">Delta India API Secret</label>
+          <input type="password" id="cfg-api-secret" placeholder="Enter Delta India API Secret..." class="dp-input">
+        </div>
+
+        <div class="p-2.5 rounded bg-[var(--dp-color-bg)] border border-[var(--dp-color-hairline)] text-[11px] text-[var(--dp-color-meta)] flex items-center justify-between font-mono">
+          <span>Target REST: <span class="text-white">api.india.delta.exchange</span></span>
+          <span class="text-emerald-400 font-medium">Production</span>
+        </div>
+      </div>
+
+      <!-- TAB 2: DEMO TRADING CREDENTIALS (TESTNET) -->
+      <div id="tab-pane-demo" class="space-y-3 hidden">
+        <div class="p-3 rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-panel)] flex items-center justify-between">
+          <div class="space-y-0.5">
+            <span class="mono-label">Demo Testnet API Status</span>
+            <div class="text-xs font-mono font-medium text-white flex items-center gap-1.5">
+              <span id="cfg-modal-status-dot-demo" class="signal-muted"></span>
+              <span id="cfg-modal-status-text-demo">Keys Needed</span>
+            </div>
+          </div>
+          <button type="button" id="btn-reset-demo-keys" onclick="resetApiKeys('demo')" class="hidden btn-secondary text-[11px] py-1 px-2.5 text-red-400 hover:text-red-300 border-red-500/30">
+            Reset Demo Keys
+          </button>
+        </div>
+
+        <div>
+          <label class="block mono-label mb-1">Demo Testnet API Key</label>
+          <input type="text" id="cfg-demo-api-key" placeholder="Enter Demo API Key..." class="dp-input">
+        </div>
+
+        <div>
+          <label class="block mono-label mb-1">Demo Testnet API Secret</label>
+          <input type="password" id="cfg-demo-api-secret" placeholder="Enter Demo API Secret..." class="dp-input">
+        </div>
+
+        <div class="p-2.5 rounded bg-[var(--dp-color-bg)] border border-[var(--dp-color-hairline)] text-[11px] text-[var(--dp-color-meta)] flex flex-col gap-1 font-mono">
+          <div class="flex items-center justify-between">
+            <span>Target REST: <span class="text-white">cdn-ind.testnet.deltaex.org</span></span>
+            <span class="text-amber-400 font-medium">Testnet / Sandbox</span>
+          </div>
+          <a href="https://testnet.delta.exchange" target="_blank" rel="noopener" class="text-amber-400 hover:underline pt-0.5">
+            &rarr; Get free Demo API keys & balance on testnet.delta.exchange
+          </a>
         </div>
       </div>
 
@@ -1325,21 +1388,57 @@
         statusText.textContent = isRunning ? 'Live Terminal' : 'Engine Paused';
       }
 
-      // Delta API Key Status
-      const hasKey = Boolean(tenant.has_api_key || status.has_api_key || tenant.delta_api_key_masked || status.delta_api_key_masked);
-      const maskedKey = tenant.delta_api_key_masked || status.delta_api_key_masked || '';
+      // Execution Mode (REAL vs DEMO)
+      const rawMode = (status.mode || tenant.mode || 'REAL').toUpperCase();
+      const isDemo = status.is_demo || Boolean(tenant.is_demo) || (rawMode === 'DEMO' || rawMode === 'PAPER');
+      
+      const btnReal = document.getElementById('btn-mode-real');
+      const btnDemo = document.getElementById('btn-mode-demo');
+      const endpointBadge = document.getElementById('endpoint-badge-text');
+
+      if (btnReal && btnDemo) {
+        if (isDemo) {
+          btnReal.className = 'px-2.5 py-1 rounded text-[var(--dp-color-meta)] hover:text-white transition cursor-pointer flex items-center gap-1.5';
+          btnDemo.className = 'px-2.5 py-1 rounded text-white font-medium bg-amber-500/20 border border-amber-500/40 text-amber-300 transition cursor-pointer flex items-center gap-1.5';
+        } else {
+          btnReal.className = 'px-2.5 py-1 rounded text-white font-medium bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 transition cursor-pointer flex items-center gap-1.5';
+          btnDemo.className = 'px-2.5 py-1 rounded text-[var(--dp-color-meta)] hover:text-white transition cursor-pointer flex items-center gap-1.5';
+        }
+      }
+
+      if (endpointBadge) {
+        endpointBadge.textContent = isDemo ? 'Delta Testnet (cdn-ind.testnet.deltaex.org)' : 'Delta India Prod (api.india.delta.exchange)';
+        endpointBadge.className = isDemo ? 'text-amber-400 font-mono font-medium' : 'text-emerald-400 font-mono font-medium';
+      }
+
+      // Delta API Key Status for Active Mode
+      const activeMaskedKey = isDemo ? (tenant.demo_api_key_masked || status.demo_api_key_masked || '') : (tenant.delta_api_key_masked || status.delta_api_key_masked || '');
+      const hasActiveKey = isDemo ? Boolean(tenant.has_demo_key || status.has_demo_key || activeMaskedKey) : Boolean(tenant.has_real_key || status.has_real_key || activeMaskedKey);
+      
       const banner = document.getElementById('banner-api-needed');
       const apiBadgeText = document.getElementById('api-badge-text');
       const apiSignal = document.getElementById('api-status-signal');
 
       if (banner) {
-        banner.classList.toggle('hidden', hasKey);
+        banner.classList.toggle('hidden', hasActiveKey);
+        const bannerTitle = banner.querySelector('.text-white');
+        const bannerDesc = banner.querySelector('p');
+        if (bannerTitle && bannerDesc) {
+          if (isDemo) {
+            bannerTitle.textContent = 'Delta Demo / Testnet API Credentials Required';
+            bannerDesc.textContent = 'Enter demo testnet API keys to trade live contracts against Delta Exchange Testnet.';
+          } else {
+            bannerTitle.textContent = 'Delta Exchange India Production API Credentials Required';
+            bannerDesc.textContent = 'Enter your Delta India API key & secret to trade live perpetual futures.';
+          }
+        }
       }
       if (apiBadgeText) {
-        apiBadgeText.textContent = hasKey ? (maskedKey ? `Keys Configured (${maskedKey})` : 'Keys Configured') : 'Keys Needed';
+        const modeLabel = isDemo ? 'Demo' : 'Real';
+        apiBadgeText.textContent = hasActiveKey ? (activeMaskedKey ? `${modeLabel} Keys (${activeMaskedKey})` : `${modeLabel} Keys Active`) : `${modeLabel} Keys Needed`;
       }
       if (apiSignal) {
-        apiSignal.className = hasKey ? 'signal-live' : 'signal-muted';
+        apiSignal.className = hasActiveKey ? (isDemo ? 'signal-live bg-amber-400' : 'signal-live bg-emerald-400') : 'signal-muted';
       }
 
       // Connection Error / IP Whitelist Warning
@@ -1576,8 +1675,51 @@
     }
 
     // -------------------------------------------------------------------------
-    // Settings Modal (Delta API Credentials & Risk)
+    // Settings Modal (Delta API Credentials & Risk Governance)
     // -------------------------------------------------------------------------
+    let activeSettingsTab = 'real';
+
+    function switchSettingsTab(tab) {
+      activeSettingsTab = tab;
+      const btnReal = document.getElementById('tab-btn-real');
+      const btnDemo = document.getElementById('tab-btn-demo');
+      const paneReal = document.getElementById('tab-pane-real');
+      const paneDemo = document.getElementById('tab-pane-demo');
+
+      if (tab === 'real') {
+        if (btnReal) btnReal.className = 'flex-1 py-1.5 rounded text-white font-medium bg-[var(--dp-color-panel)] transition text-center cursor-pointer flex items-center justify-center gap-1.5';
+        if (btnDemo) btnDemo.className = 'flex-1 py-1.5 rounded text-[var(--dp-color-meta)] hover:text-white transition text-center cursor-pointer flex items-center justify-center gap-1.5';
+        if (paneReal) paneReal.classList.remove('hidden');
+        if (paneDemo) paneDemo.classList.add('hidden');
+      } else {
+        if (btnReal) btnReal.className = 'flex-1 py-1.5 rounded text-[var(--dp-color-meta)] hover:text-white transition text-center cursor-pointer flex items-center justify-center gap-1.5';
+        if (btnDemo) btnDemo.className = 'flex-1 py-1.5 rounded text-white font-medium bg-[var(--dp-color-panel)] transition text-center cursor-pointer flex items-center justify-center gap-1.5';
+        if (paneReal) paneReal.classList.add('hidden');
+        if (paneDemo) paneDemo.classList.remove('hidden');
+      }
+    }
+
+    async function switchExecutionMode(targetMode) {
+      const modeClean = targetMode.toLowerCase();
+      try {
+        const endpoint = (currentTenantId && currentTenantId !== 'default')
+          ? `${BACKEND_URL}/api/tenants/${currentTenantId}/update`
+          : `${BACKEND_URL}/api/control/mode`;
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ mode: modeClean })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || data.message || `Server returned ${res.status}`);
+        }
+        await forceFetchStatus();
+      } catch (err) {
+        alert(`Cannot switch to ${targetMode.toUpperCase()} mode: ${err.message || err}`);
+      }
+    }
+
     function openSettingsModal() {
       const modal = document.getElementById('modal-settings');
       if (!modal) return;
@@ -1585,27 +1727,55 @@
 
       const tenant = (latestStateData && latestStateData.current_tenant) || {};
       const status = (latestStateData && latestStateData.status) || {};
-      const hasKey = Boolean(tenant.has_api_key || status.has_api_key || tenant.delta_api_key_masked || status.delta_api_key_masked);
-      const maskedKey = tenant.delta_api_key_masked || status.delta_api_key_masked || '';
+      const isDemo = status.is_demo || Boolean(tenant.is_demo) || ((status.mode || tenant.mode) === 'DEMO');
 
-      const dot = document.getElementById('cfg-modal-status-dot');
-      const txt = document.getElementById('cfg-modal-status-text');
-      const btnReset = document.getElementById('btn-reset-keys');
+      // Auto-focus current mode tab
+      switchSettingsTab(isDemo ? 'demo' : 'real');
+
+      // Real status
+      const hasRealKey = Boolean(tenant.has_real_key || status.has_real_key || tenant.delta_api_key_masked || status.delta_api_key_masked);
+      const maskedRealKey = tenant.delta_api_key_masked || status.delta_api_key_masked || '';
+      const dotReal = document.getElementById('cfg-modal-status-dot-real');
+      const txtReal = document.getElementById('cfg-modal-status-text-real');
+      const btnResetReal = document.getElementById('btn-reset-real-keys');
       const keyInput = document.getElementById('cfg-api-key');
       const secretInput = document.getElementById('cfg-api-secret');
 
-      if (hasKey) {
-        if (dot) dot.className = 'signal-live';
-        if (txt) txt.textContent = maskedKey ? `Keys Configured (${maskedKey})` : 'Keys Configured';
-        if (btnReset) btnReset.classList.remove('hidden');
+      if (hasRealKey) {
+        if (dotReal) dotReal.className = 'signal-live bg-emerald-400';
+        if (txtReal) txtReal.textContent = maskedRealKey ? `Real Keys Configured (${maskedRealKey})` : 'Real Keys Configured';
+        if (btnResetReal) btnResetReal.classList.remove('hidden');
         if (keyInput) keyInput.placeholder = 'Leave blank to retain current key, or enter new...';
         if (secretInput) secretInput.placeholder = 'Leave blank to retain current secret, or enter new...';
       } else {
-        if (dot) dot.className = 'signal-muted';
-        if (txt) txt.textContent = 'No Keys Configured (Paper Simulation Active)';
-        if (btnReset) btnReset.classList.add('hidden');
-        if (keyInput) keyInput.placeholder = 'Enter API Key...';
-        if (secretInput) secretInput.placeholder = 'Enter API Secret...';
+        if (dotReal) dotReal.className = 'signal-muted';
+        if (txtReal) txtReal.textContent = 'No Real Keys Configured';
+        if (btnResetReal) btnResetReal.classList.add('hidden');
+        if (keyInput) keyInput.placeholder = 'Enter Delta India API Key...';
+        if (secretInput) secretInput.placeholder = 'Enter Delta India API Secret...';
+      }
+
+      // Demo status
+      const hasDemoKey = Boolean(tenant.has_demo_key || status.has_demo_key || tenant.demo_api_key_masked || status.demo_api_key_masked);
+      const maskedDemoKey = tenant.demo_api_key_masked || status.demo_api_key_masked || '';
+      const dotDemo = document.getElementById('cfg-modal-status-dot-demo');
+      const txtDemo = document.getElementById('cfg-modal-status-text-demo');
+      const btnResetDemo = document.getElementById('btn-reset-demo-keys');
+      const demoKeyInput = document.getElementById('cfg-demo-api-key');
+      const demoSecretInput = document.getElementById('cfg-demo-api-secret');
+
+      if (hasDemoKey) {
+        if (dotDemo) dotDemo.className = 'signal-live bg-amber-400';
+        if (txtDemo) txtDemo.textContent = maskedDemoKey ? `Demo Keys Configured (${maskedDemoKey})` : 'Demo Keys Configured';
+        if (btnResetDemo) btnResetDemo.classList.remove('hidden');
+        if (demoKeyInput) demoKeyInput.placeholder = 'Leave blank to retain current demo key, or enter new...';
+        if (demoSecretInput) demoSecretInput.placeholder = 'Leave blank to retain current demo secret, or enter new...';
+      } else {
+        if (dotDemo) dotDemo.className = 'signal-muted';
+        if (txtDemo) txtDemo.textContent = 'No Demo Keys Configured';
+        if (btnResetDemo) btnResetDemo.classList.add('hidden');
+        if (demoKeyInput) demoKeyInput.placeholder = 'Enter Demo Testnet API Key...';
+        if (demoSecretInput) demoSecretInput.placeholder = 'Enter Demo Testnet API Secret...';
       }
 
       // Populate slider values from current tenant / status
@@ -1640,18 +1810,19 @@
       document.getElementById('modal-settings').classList.add('hidden');
     }
 
-    async function resetApiKeys() {
-      if (!confirm('Are you sure you want to reset and remove your configured Delta API keys? The engine will return to unauthenticated / paper mode.')) {
+    async function resetApiKeys(which = 'real') {
+      const modeName = which === 'demo' ? 'DEMO Testnet' : 'REAL Production';
+      if (!confirm(`Are you sure you want to reset and remove your ${modeName} API keys?`)) {
         return;
       }
       try {
         const endpoint = (currentTenantId && currentTenantId !== 'default')
           ? `${BACKEND_URL}/api/tenants/${currentTenantId}/update`
-          : `${BACKEND_URL}/api/config/reset-keys`;
+          : `${BACKEND_URL}/api/config`;
 
-        const payload = (currentTenantId && currentTenantId !== 'default')
-          ? { delta_api_key: "", delta_api_secret: "" }
-          : { reset_keys: true };
+        const payload = which === 'demo'
+          ? { demo_api_key: "", demo_api_secret: "" }
+          : { delta_api_key: "", delta_api_secret: "" };
 
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -1663,13 +1834,15 @@
         if (!res.ok) {
           throw new Error(data.detail || data.message || `Server error (${res.status})`);
         }
-        alert(data.message || 'Delta API keys have been reset and removed.');
-        document.getElementById('cfg-api-key').value = '';
-        document.getElementById('cfg-api-secret').value = '';
-        closeSettingsModal();
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          try { ws.send(JSON.stringify({ action: 'resume' })); } catch (_) {}
+        alert(`${modeName} API keys have been removed.`);
+        if (which === 'demo') {
+          document.getElementById('cfg-demo-api-key').value = '';
+          document.getElementById('cfg-demo-api-secret').value = '';
+        } else {
+          document.getElementById('cfg-api-key').value = '';
+          document.getElementById('cfg-api-secret').value = '';
         }
+        closeSettingsModal();
         await forceFetchStatus();
       } catch (err) {
         alert(`Reset failed: ${err.message || err}`);
@@ -1679,7 +1852,9 @@
     async function saveSettings() {
       const apiKey = document.getElementById('cfg-api-key').value.trim();
       const apiSecret = document.getElementById('cfg-api-secret').value.trim();
-      const baseUrl = 'https://api.india.delta.exchange';
+      const demoKey = document.getElementById('cfg-demo-api-key').value.trim();
+      const demoSecret = document.getElementById('cfg-demo-api-secret').value.trim();
+
       const risk = parseFloat(document.getElementById('input-risk').value);
       const leverage = parseInt(document.getElementById('input-leverage').value, 10);
       const maxDd = parseFloat(document.getElementById('input-maxdd').value);
@@ -1688,10 +1863,11 @@
         risk_pct: risk,
         leverage: leverage,
         max_drawdown_pct: maxDd,
-        delta_base_url: baseUrl
       };
       if (apiKey) payload.delta_api_key = apiKey;
       if (apiSecret) payload.delta_api_secret = apiSecret;
+      if (demoKey) payload.demo_api_key = demoKey;
+      if (demoSecret) payload.demo_api_secret = demoSecret;
 
       try {
         const endpoint = (currentTenantId && currentTenantId !== 'default')
@@ -1709,23 +1885,16 @@
           throw new Error(data.detail || data.message || `Server error (${res.status})`);
         }
 
-        if (apiKey) {
-          const masked = apiKey.length >= 8 ? `${apiKey.slice(0,4)}...${apiKey.slice(-4)}` : '****';
-          const badge = document.getElementById('api-badge-text');
-          const sig = document.getElementById('api-status-signal');
-          const banner = document.getElementById('banner-api-needed');
-          if (badge) badge.textContent = `Keys Configured (${masked})`;
-          if (sig) sig.className = 'signal-live';
-          if (banner) banner.classList.add('hidden');
-        }
+        const savedMsg = (apiKey || apiSecret || demoKey || demoSecret)
+          ? 'Configuration and API Keys saved successfully!'
+          : (data.message || 'Settings saved');
+        alert(savedMsg);
 
-        alert(apiKey || apiSecret ? 'Delta India API Keys saved and activated!' : (data.message || 'Settings saved'));
         document.getElementById('cfg-api-key').value = '';
         document.getElementById('cfg-api-secret').value = '';
+        document.getElementById('cfg-demo-api-key').value = '';
+        document.getElementById('cfg-demo-api-secret').value = '';
         closeSettingsModal();
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          try { ws.send(JSON.stringify({ action: 'resume' })); } catch (_) {}
-        }
         await forceFetchStatus();
       } catch (err) {
         alert(`Settings error: ${err.message || err}`);
@@ -1739,6 +1908,17 @@
     window.handleSignIn = handleSignIn;
     window.handleSignUp = handleSignUp;
     window.signOut = signOut;
+    window.toggleEngine = toggleEngine;
+    window.switchExecutionMode = switchExecutionMode;
+    window.switchSettingsTab = switchSettingsTab;
+    window.emergencyFlatten = emergencyFlatten;
+    window.openSettingsModal = openSettingsModal;
+    window.closeSettingsModal = closeSettingsModal;
+    window.setLeveragePreset = setLeveragePreset;
+    window.saveSettings = saveSettings;
+    window.resetApiKeys = resetApiKeys;
+    window.closePosition = closePosition;
+    window.cancelOrder = cancelOrder;
     window.toggleEngine = toggleEngine;
     window.emergencyFlatten = emergencyFlatten;
     window.openSettingsModal = openSettingsModal;

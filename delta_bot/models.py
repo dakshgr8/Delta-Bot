@@ -278,11 +278,21 @@ class WalletBalance(BaseModel):
 
 
 class ExecutionMode(str, Enum):
-    """Trading execution mode."""
+    """Trading execution mode: REAL (Delta India Production) or DEMO (Delta India Testnet)."""
 
+    REAL = "REAL"
+    DEMO = "DEMO"
     LIVE = "LIVE"
-    DRY_RUN = "DRY_RUN"
     PAPER = "PAPER"
+    DRY_RUN = "DRY_RUN"
+
+    @property
+    def is_demo(self) -> bool:
+        return self in (ExecutionMode.DEMO, ExecutionMode.PAPER, ExecutionMode.DRY_RUN)
+
+    @property
+    def is_real(self) -> bool:
+        return self in (ExecutionMode.REAL, ExecutionMode.LIVE)
 
     @classmethod
     def from_str(cls, val: Any) -> "ExecutionMode":
@@ -293,11 +303,17 @@ class ExecutionMode(str, Enum):
         cleaned = raw.strip().upper()
         if "." in cleaned:
             cleaned = cleaned.split(".")[-1]
-        if cleaned in ("PAPER", "DRY_RUN", "DRYRUN", "SIM", "SIMULATED", "TEST"):
-            return cls.PAPER
-        if cleaned in ("LIVE", "PROD", "PRODUCTION"):
+        if cleaned in ("REAL", "PROD", "PRODUCTION"):
+            return cls.REAL
+        if cleaned == "LIVE":
             return cls.LIVE
-        return cls.PAPER
+        if cleaned == "PAPER":
+            return cls.PAPER
+        if cleaned in ("DEMO", "TESTNET"):
+            return cls.DEMO
+        if cleaned in ("DRY_RUN", "DRYRUN"):
+            return cls.DRY_RUN
+        return cls.REAL
 
 
 class ExchangeOrder(BaseModel):

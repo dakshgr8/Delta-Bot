@@ -204,13 +204,32 @@ class TradingBotOrchestrator:
         return clean in self.enabled_symbols
 
     def set_execution_mode(self, mode: ExecutionMode | str) -> ExecutionMode:
-        """Dynamically switches between PAPER and LIVE operational execution modes."""
+        """Dynamically switches between REAL and DEMO operational execution modes."""
         new_mode = ExecutionMode.from_str(mode) if isinstance(mode, str) else mode
-        if new_mode == ExecutionMode.LIVE:
-            if not self.config.has_valid_credentials():
+        if new_mode.is_real:
+            rk = self.config.delta_api_key.get_secret_value().strip()
+            rs = self.config.delta_api_secret.get_secret_value().strip()
+            if not rk or not rs:
+                from delta_bot.exceptions import ConfigurationError
                 raise ConfigurationError(
-                    "Cannot switch to LIVE mode: DELTA_API_KEY and DELTA_API_SECRET are not configured or invalid in .env."
+                    "Cannot switch to REAL / LIVE mode: DELTA_API_KEY and DELTA_API_SECRET are not configured or invalid."
                 )
+
+        self.mode = new_mode
+        self.config.execution_mode = new_mode.value.lower()
+
+        active_base = self.config.active_base_url
+        active_ws = self.config.active_ws_url
+        active_k = self.config.api_key_str
+        active_s = self.config.api_secret_str
+
+        self.rest_client.update_credentials(
+            api_key=active_k,
+            api_secret=active_s,
+            base_url=active_base,
+        )
+
+        if active_k and active_s:
             if self.execution_manager is None:
                 exec_cfg = ExecutionConfig(leverage=self.config.default_leverage)
                 self.execution_manager = ExecutionManager(
@@ -218,8 +237,8 @@ class TradingBotOrchestrator:
                     config=exec_cfg,
                     state_manager=self.state_manager,
                 )
-            self.mode = ExecutionMode.LIVE
-            logger.warning("[OPERATIONAL MODE] Switched to LIVE trading on Delta Exchange")
+            else:
+                self.execution_manager.client = self.rest_client
         else:
             if self.paper_simulator is None:
                 self.paper_simulator = PaperExchangeSimulator(
@@ -229,8 +248,13 @@ class TradingBotOrchestrator:
                 self.paper_simulator.set_state_manager(self.state_manager)
                 for spec in self.contract_specs.values():
                     self.paper_simulator.register_contract_spec(spec)
-            self.mode = ExecutionMode.PAPER
-            logger.info("[OPERATIONAL MODE] Switched to PAPER simulation mode")
+
+        if hasattr(self, "tenant_manager"):
+            def_t = self.tenant_manager.get_tenant("default")
+            if def_t:
+                def_t.set_execution_mode(new_mode)
+
+        logger.info("[OPERATIONAL MODE] Switched to %s mode (%s)", self.mode.value, active_base)
         return self.mode
 
     # -------------------------------------------------------------------------
@@ -1109,7 +1133,7 @@ class TradingBotOrchestrator:
         """Provides an atomic structured snapshot of system telemetry."""
         uptime_sec = max(0.0, time.time() - self.start_time) if self.start_time > 0 else 0.0
 
-        if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
+        if self.paper_simulator is not None and self.execution_manager is None:
             paper_stats = self.paper_simulator.get_summary()
             balance = paper_stats["balance"]
             equity = paper_stats["equity"]
@@ -1137,7 +1161,7 @@ class TradingBotOrchestrator:
             winning_trades = 0
 
         positions: list[str] = []
-        if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
+        if self.paper_simulator is not None and self.execution_manager is None:
             for pos in self.paper_simulator._open_positions.values():
                 positions.append(
                     f"{pos.symbol}: {pos.side.upper()} {pos.size} lots @ {pos.entry_price:.4f} (UPnL: ${pos.unrealized_pnl:+.2f})"
@@ -1149,7 +1173,7 @@ class TradingBotOrchestrator:
                 )
 
         pending_orders: list[str] = []
-        if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
+        if self.paper_simulator is not None and self.execution_manager is None:
             for o in self.paper_simulator._pending_orders.values():
                 pending_orders.append(
                     f"{o.symbol}: {o.side.upper()} STOP @ {o.stop_price:.4f} (Lots: {o.size})"

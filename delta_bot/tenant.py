@@ -138,12 +138,16 @@ class TenantConfig(BaseModel):
     tenant_id: str
     user_id: str | None = None
     name: str
-    mode: str = "live"  # Exclusively "live" for real trading
+    mode: str = "real"  # "real" (Production) or "demo" (Testnet)
     initial_balance: float = 0.0
     delta_api_key: str = ""
     delta_api_secret: str = ""
+    demo_api_key: str = ""
+    demo_api_secret: str = ""
     delta_base_url: str = "https://api.india.delta.exchange"
     delta_ws_url: str = "wss://socket.india.delta.exchange"
+    demo_base_url: str = "https://cdn-ind.testnet.deltaex.org"
+    demo_ws_url: str = "wss://socket-ind.testnet.deltaex.org"
     risk_pct: float = Field(default=1.0, ge=0.1, le=50.0)
     leverage: int = Field(default=5, ge=1, le=100)
     timeframe: str = "1m"
@@ -152,26 +156,56 @@ class TenantConfig(BaseModel):
     is_active: bool = True
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
+    @property
+    def is_demo(self) -> bool:
+        return self.mode.strip().lower() in ("demo", "testnet", "paper")
+
+    def get_active_api_key(self) -> str:
+        if self.is_demo:
+            k = self.demo_api_key.strip()
+            return k if k else self.delta_api_key.strip()
+        return self.delta_api_key.strip()
+
+    def get_active_api_secret(self) -> str:
+        if self.is_demo:
+            s = self.demo_api_secret.strip()
+            return s if s else self.delta_api_secret.strip()
+        return self.delta_api_secret.strip()
+
+    def get_active_base_url(self) -> str:
+        if self.is_demo:
+            return self.demo_base_url.strip() or "https://cdn-ind.testnet.deltaex.org"
+        return self.delta_base_url.strip() or "https://api.india.delta.exchange"
+
+    def get_active_ws_url(self) -> str:
+        if self.is_demo:
+            return self.demo_ws_url.strip() or "wss://socket-ind.testnet.deltaex.org"
+        return self.delta_ws_url.strip() or "wss://socket.india.delta.exchange"
+
     def safe_dict(self) -> dict[str, Any]:
         """Provides a sanitized dictionary view masking private credentials."""
         d = self.model_dump()
-        k = d.get("delta_api_key")
-        if k:
-            k_str = k.get_secret_value() if hasattr(k, "get_secret_value") else str(k)
-            k_clean = k_str.strip()
-            if k_clean.startswith("enc:"):
-                k_clean = decrypt_secret(k_clean)
-            if k_clean:
-                d["delta_api_key_masked"] = f"{k_clean[:4]}...{k_clean[-4:]}" if len(k_clean) >= 8 else "********"
-                d["has_api_key"] = True
-            else:
-                d["delta_api_key_masked"] = ""
-                d["has_api_key"] = False
-        else:
-            d["delta_api_key_masked"] = ""
-            d["has_api_key"] = False
+        rk = d.get("delta_api_key") or ""
+        rk_str = rk.get_secret_value() if hasattr(rk, "get_secret_value") else str(rk)
+        rk_clean = decrypt_secret(rk_str.strip()) if rk_str.strip().startswith("enc:") else rk_str.strip()
+        d["delta_api_key_masked"] = f"{rk_clean[:4]}...{rk_clean[-4:]}" if len(rk_clean) >= 8 else ("****" if rk_clean else "")
+        d["has_real_key"] = bool(rk_clean)
+
+        dk = d.get("demo_api_key") or ""
+        dk_str = dk.get_secret_value() if hasattr(dk, "get_secret_value") else str(dk)
+        dk_clean = decrypt_secret(dk_str.strip()) if dk_str.strip().startswith("enc:") else dk_str.strip()
+        d["demo_api_key_masked"] = f"{dk_clean[:4]}...{dk_clean[-4:]}" if len(dk_clean) >= 8 else ("****" if dk_clean else "")
+        d["has_demo_key"] = bool(dk_clean)
+
+        active_k = self.get_active_api_key()
+        d["has_api_key"] = bool(active_k)
+        d["is_demo"] = self.is_demo
+        d["active_mode"] = "DEMO" if self.is_demo else "REAL"
+
         d.pop("delta_api_key", None)
         d.pop("delta_api_secret", None)
+        d.pop("demo_api_key", None)
+        d.pop("demo_api_secret", None)
         return d
 
 
@@ -205,13 +239,19 @@ class TenantInstance:
         self.last_sync_error: str | None = None
         self.order_to_base_id: dict[str, str] = {}
 
+        # Active environment URLs and credentials
+        active_k = config.get_active_api_key()
+        active_s = config.get_active_api_secret()
+        active_base = config.get_active_base_url()
+        active_ws = config.get_active_ws_url()
+
         # BotConfig wrapper for rest client / live credentials
         self.bot_config = BotConfig(
-            delta_api_key=config.delta_api_key,
-            delta_api_secret=config.delta_api_secret,
-            delta_base_url=config.delta_base_url,
-            delta_ws_url=config.delta_ws_url,
-            execution_mode=config.mode,
+            delta_api_key=active_k,
+            delta_api_secret=active_s,
+            delta_base_url=active_base,
+            delta_ws_url=active_ws,
+            execution_mode="live" if self.mode == ExecutionMode.REAL else "demo",
             default_leverage=config.leverage,
             default_risk_pct=config.risk_pct,
             timeframe=config.timeframe,
@@ -222,11 +262,6 @@ class TenantInstance:
         self.rest_client = DeltaRestClient(config=self.bot_config)
         self.state_manager = state_manager or TradingStateManager(client=self.rest_client)
 
-        # Simulator or Live Execution Manager
-        is_real_live = (self.mode == ExecutionMode.LIVE and bool(config.delta_api_key and config.delta_api_secret))
-        if self.mode == ExecutionMode.LIVE and not is_real_live:
-            self.mode = ExecutionMode.PAPER
-
         risk_cfg = RiskConfig(
             max_account_risk_pct=config.risk_pct,
             max_leverage=config.leverage,
@@ -234,10 +269,11 @@ class TenantInstance:
         )
         self.risk_manager = risk_manager or RiskManager(
             config=risk_cfg,
-            initial_equity=config.initial_balance if self.mode != ExecutionMode.LIVE else 0.0,
+            initial_equity=config.initial_balance if not (active_k and active_s) else 0.0,
         )
 
-        if self.mode == ExecutionMode.LIVE and config.delta_api_key and config.delta_api_secret:
+        # Direct execution manager on Delta Exchange (Real or Testnet Demo)
+        if active_k and active_s:
             self.paper_simulator = None
             exec_cfg = ExecutionConfig(leverage=config.leverage)
             self.execution_manager: ExecutionManager | None = ExecutionManager(
@@ -248,12 +284,13 @@ class TenantInstance:
         else:
             self.execution_manager = None
             self.paper_simulator = paper_simulator or PaperExchangeSimulator(
-                initial_balance=config.initial_balance,
+                initial_balance=config.initial_balance if config.initial_balance > 0 else 10000.0,
                 state_manager=self.state_manager,
             )
-            self.paper_simulator.set_state_manager(self.state_manager)
-            for spec in self.contract_specs.values():
-                self.paper_simulator.register_contract_spec(spec)
+            if self.paper_simulator:
+                self.paper_simulator.set_state_manager(self.state_manager)
+                for spec in self.contract_specs.values():
+                    self.paper_simulator.register_contract_spec(spec)
 
         # Strategy Engines per symbol
         if strategies is not None:
@@ -270,8 +307,8 @@ class TenantInstance:
                 self._register_strategy_callbacks(strat)
                 self.strategies[sym] = strat
 
-        # Kick off initial live metrics synchronization if live credentials exist
-        if self.mode == ExecutionMode.LIVE and config.delta_api_key and config.delta_api_secret:
+        # Kick off initial live metrics synchronization if active credentials exist
+        if active_k and active_s:
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(self.sync_live_metrics())
@@ -463,66 +500,41 @@ class TenantInstance:
 
     async def get_account_equity(self) -> float:
         """Retrieves total floating equity for this tenant."""
-        if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
+        if self.paper_simulator is not None and self.execution_manager is None:
             return self.paper_simulator.wallet.equity
-        if self.mode == ExecutionMode.LIVE:
-            return self.live_equity
-        if self.last_sync_time > 0:
+        if self.last_sync_time > 0 or self.execution_manager is not None:
             return self.live_equity
         return self.config.initial_balance
 
     def get_active_positions_count(self) -> int:
-        if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
-            return len(self.paper_simulator._open_positions)
         if self.live_positions:
             return len(self.live_positions)
+        if self.paper_simulator is not None and self.execution_manager is None:
+            return len(self.paper_simulator._open_positions)
         return len(self.state_manager.get_all_positions())
 
     def set_execution_mode(self, mode: ExecutionMode | str) -> ExecutionMode:
-        """Dynamically switches tenant between PAPER and LIVE execution modes."""
+        """Dynamically switches tenant between REAL and DEMO execution modes."""
         new_mode = ExecutionMode.from_str(mode) if isinstance(mode, str) else mode
-        if new_mode == ExecutionMode.LIVE:
-            if not self.config.delta_api_key or not self.config.delta_api_secret:
-                raise ConfigurationError(
-                    f"Tenant '{self.config.name}' requires valid DELTA_API_KEY and DELTA_API_SECRET for LIVE mode."
-                )
-            if self.execution_manager is None:
-                exec_cfg = ExecutionConfig(leverage=self.config.leverage)
-                self.execution_manager = ExecutionManager(
-                    client=self.rest_client,
-                    config=exec_cfg,
-                    state_manager=self.state_manager,
-                )
-            self.mode = ExecutionMode.LIVE
-            self.config.mode = "live"
-            logger.warning("[TENANT %s] Switched to LIVE trading mode", self.config.tenant_id)
-        else:
-            if self.paper_simulator is None:
-                self.paper_simulator = PaperExchangeSimulator(
-                    initial_balance=self.config.initial_balance,
-                    state_manager=self.state_manager,
-                )
-                self.paper_simulator.set_state_manager(self.state_manager)
-                for spec in self.contract_specs.values():
-                    self.paper_simulator.register_contract_spec(spec)
-            self.mode = ExecutionMode.PAPER
-            self.config.mode = "paper"
-            logger.info("[TENANT %s] Switched to PAPER simulation mode", self.config.tenant_id)
+        self.mode = new_mode
+        self.config.mode = new_mode.value.lower()
+        self.reload_credentials()
+        logger.info("[TENANT %s] Switched to %s mode", self.config.tenant_id, self.mode.value)
         return self.mode
 
     def reload_credentials(self) -> None:
-        """Re-initializes REST client and ExecutionManager when user API keys change."""
-        base_u = self.config.delta_base_url or "https://api.india.delta.exchange"
-        ws_u = "wss://socket.india.delta.exchange" if "india" in base_u.lower() else self.config.delta_ws_url
-        self.config.delta_base_url = base_u
-        self.config.delta_ws_url = ws_u
+        """Re-initializes REST client and ExecutionManager when user API keys or mode change."""
+        active_k = self.config.get_active_api_key()
+        active_s = self.config.get_active_api_secret()
+        active_base = self.config.get_active_base_url()
+        active_ws = self.config.get_active_ws_url()
 
         self.bot_config = BotConfig(
-            delta_api_key=self.config.delta_api_key,
-            delta_api_secret=self.config.delta_api_secret,
-            delta_base_url=self.config.delta_base_url,
-            delta_ws_url=self.config.delta_ws_url,
-            execution_mode="live",
+            delta_api_key=active_k,
+            delta_api_secret=active_s,
+            delta_base_url=active_base,
+            delta_ws_url=active_ws,
+            execution_mode="live" if self.mode.is_real else "demo",
             default_leverage=self.config.leverage,
             default_risk_pct=self.config.risk_pct,
             timeframe=self.config.timeframe,
@@ -530,17 +542,21 @@ class TenantInstance:
         )
         self.rest_client = DeltaRestClient(config=self.bot_config)
         self.state_manager = TradingStateManager(client=self.rest_client)
-        if self.config.delta_api_key and self.config.delta_api_secret:
+
+        if active_k and active_s:
             exec_cfg = ExecutionConfig(leverage=self.config.leverage)
             self.execution_manager = ExecutionManager(
                 client=self.rest_client,
                 config=exec_cfg,
                 state_manager=self.state_manager,
             )
-            self.mode = ExecutionMode.LIVE
-            self.config.mode = "live"
             self.paper_simulator = None
-            logger.info("[TENANT %s] Live execution manager activated with user API credentials", self.config.tenant_id)
+            logger.info(
+                "[TENANT %s] Direct execution manager activated for %s mode on %s",
+                self.config.tenant_id,
+                self.mode.value,
+                active_base,
+            )
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(self.sync_live_metrics())
@@ -548,8 +564,14 @@ class TenantInstance:
                 pass
         else:
             self.execution_manager = None
-            self.mode = ExecutionMode.PAPER
-            self.config.mode = "paper"
+            if self.paper_simulator is None:
+                self.paper_simulator = PaperExchangeSimulator(
+                    initial_balance=self.config.initial_balance if self.config.initial_balance > 0 else 10000.0,
+                    state_manager=self.state_manager,
+                )
+                self.paper_simulator.set_state_manager(self.state_manager)
+                for spec in self.contract_specs.values():
+                    self.paper_simulator.register_contract_spec(spec)
             self.live_balance = 0.0
             self.live_equity = 0.0
             self.live_available_margin = 0.0
@@ -557,14 +579,12 @@ class TenantInstance:
             self.live_realized_pnl = 0.0
             self.live_positions = []
             self.last_sync_time = 0.0
-            if self.paper_simulator is None:
-                self.paper_simulator = PaperExchangeSimulator(initial_balance=self.config.initial_balance)
-                for spec in self.contract_specs.values():
-                    self.paper_simulator.register_contract_spec(spec)
 
     async def sync_live_metrics(self) -> None:
-        """Pulls real wallet balances, available margin, and positions from Delta Exchange India."""
-        if not self.config.delta_api_key or not self.config.delta_api_secret:
+        """Pulls real wallet balances, available margin, and positions from Delta Exchange."""
+        active_k = self.config.get_active_api_key()
+        active_s = self.config.get_active_api_secret()
+        if not active_k or not active_s:
             return
         try:
             balances = await self.rest_client.get_wallet_balances()
@@ -700,18 +720,18 @@ class TenantInstance:
         self.is_running = False
         self.config.is_active = False
 
-        if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
-            cancelled_orders = len(self.paper_simulator._pending_orders)
-            closed_positions = len(self.paper_simulator._open_positions)
-            self.paper_simulator.cancel_all_orders()
-            self.paper_simulator.flatten_all()
-        elif self.mode == ExecutionMode.LIVE and self.execution_manager is not None:
+        if self.execution_manager is not None:
             try:
                 res = await self.execution_manager.emergency_flatten()
                 cancelled_orders = res.get("cancelled_orders", 0)
                 closed_positions = res.get("closed_positions", 0)
             except Exception as e:
                 logger.error("[TENANT %s] Error during emergency flatten: %s", self.config.tenant_id, e)
+        elif self.paper_simulator is not None:
+            cancelled_orders = len(self.paper_simulator._pending_orders)
+            closed_positions = len(self.paper_simulator._open_positions)
+            self.paper_simulator.cancel_all_orders()
+            self.paper_simulator.flatten_all()
 
         logger.warning(
             "[TENANT %s] EMERGENCY FLATTEN EXECUTED: Cancelled %d orders, Closed %d positions",
@@ -728,26 +748,10 @@ class TenantInstance:
 
     def get_summary(self) -> dict[str, Any]:
         """Generates a complete telemetry status dictionary for this tenant."""
-        if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
-            stats = self.paper_simulator.get_summary()
-            bal = stats["balance"]
-            eq = stats["equity"]
-            upnl = stats["unrealized_pnl"]
-            rpnl = stats["realized_pnl"]
-            win_rate = stats["win_rate_pct"]
-            drawdown = stats["max_drawdown_pct"]
-            open_pos = len(self.paper_simulator._open_positions)
-            resting_orders = len(self.paper_simulator._pending_orders)
-            avail_margin = stats["available_margin"]
-        else:
-            if self.last_sync_time > 0 or self.mode == ExecutionMode.LIVE:
-                bal = self.live_balance
-                eq = self.live_equity
-                avail_margin = self.live_available_margin
-            else:
-                bal = self.config.initial_balance
-                eq = bal
-                avail_margin = bal
+        if self.execution_manager is not None or self.last_sync_time > 0:
+            bal = self.live_balance
+            eq = self.live_equity
+            avail_margin = self.live_available_margin
             upnl = self.live_unrealized_pnl
             rpnl = self.live_realized_pnl
             win_rate = 0.0
@@ -760,12 +764,35 @@ class TenantInstance:
             )
             act_list = act_src() if callable(act_src) else (act_src or [])
             resting_orders = len(act_list)
+        elif self.paper_simulator is not None:
+            stats = self.paper_simulator.get_summary()
+            bal = stats["balance"]
+            eq = stats["equity"]
+            upnl = stats["unrealized_pnl"]
+            rpnl = stats["realized_pnl"]
+            win_rate = stats["win_rate_pct"]
+            drawdown = stats["max_drawdown_pct"]
+            open_pos = len(self.paper_simulator._open_positions)
+            resting_orders = len(self.paper_simulator._pending_orders)
+            avail_margin = stats["available_margin"]
+        else:
+            bal = self.config.initial_balance
+            eq = bal
+            avail_margin = bal
+            upnl = 0.0
+            rpnl = 0.0
+            win_rate = 0.0
+            drawdown = 0.0
+            open_pos = 0
+            resting_orders = 0
 
+        active_k = self.config.get_active_api_key()
         return {
             "tenant_id": self.config.tenant_id,
             "user_id": self.config.user_id,
             "name": self.config.name,
             "mode": self.mode.value.upper(),
+            "is_demo": self.config.is_demo,
             "is_running": self.is_running,
             "equity": round(eq, 2),
             "balance": round(bal, 2),
@@ -781,7 +808,9 @@ class TenantInstance:
             "timeframe": self.config.timeframe,
             "symbols": list(self.enabled_symbols),
             "created_at": self.config.created_at,
-            "has_api_key": bool(self.config.delta_api_key),
+            "has_api_key": bool(active_k),
+            "has_real_key": bool(self.config.delta_api_key),
+            "has_demo_key": bool(self.config.demo_api_key),
             "last_sync_error": self.last_sync_error,
         }
 
@@ -1045,6 +1074,10 @@ class TenantManager:
                     dump["delta_api_key"] = encrypt_secret(dump["delta_api_key"])
                 if dump.get("delta_api_secret"):
                     dump["delta_api_secret"] = encrypt_secret(dump["delta_api_secret"])
+                if dump.get("demo_api_key"):
+                    dump["demo_api_key"] = encrypt_secret(dump["demo_api_key"])
+                if dump.get("demo_api_secret"):
+                    dump["demo_api_secret"] = encrypt_secret(dump["demo_api_secret"])
                 serializable[t_id] = dump
 
             with open(self.storage_path, "w", encoding="utf-8") as f:
@@ -1071,6 +1104,10 @@ class TenantManager:
                     c_copy["delta_api_key"] = decrypt_secret(c_copy["delta_api_key"])
                 if c_copy.get("delta_api_secret"):
                     c_copy["delta_api_secret"] = decrypt_secret(c_copy["delta_api_secret"])
+                if c_copy.get("demo_api_key"):
+                    c_copy["demo_api_key"] = decrypt_secret(c_copy["demo_api_key"])
+                if c_copy.get("demo_api_secret"):
+                    c_copy["demo_api_secret"] = decrypt_secret(c_copy["demo_api_secret"])
                 cfg = TenantConfig(**c_copy)
                 instance = TenantInstance(config=cfg, contract_specs=contract_specs)
                 self.tenants[t_id] = instance
@@ -1475,8 +1512,21 @@ class TenantManager:
                 order_intent.cancel(reject_reason or "RiskManager rejection", OrderStatus.CANCELLED_MANUAL)
                 continue
 
-            # Route to tenant simulator or live manager
-            if tenant.mode == ExecutionMode.PAPER and tenant.paper_simulator is not None:
+            # Route to tenant execution manager or paper simulator
+            if tenant.execution_manager is not None:
+                try:
+                    await tenant.execution_manager.execute_signal(
+                        order_intent=order_intent,
+                        account_equity=account_equity,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "[TENANT %s:%s] Error executing signal: %s",
+                        tenant.config.tenant_id,
+                        clean_symbol,
+                        e,
+                    )
+            elif tenant.paper_simulator is not None:
                 try:
                     avail_margin = (
                         tenant.paper_simulator.wallet.available_balance
@@ -1537,19 +1587,13 @@ class TenantManager:
                         clean_symbol,
                         e,
                     )
-            elif tenant.mode == ExecutionMode.LIVE and tenant.execution_manager is not None:
-                try:
-                    await tenant.execution_manager.execute_signal(
-                        order_intent=order_intent,
-                        account_equity=account_equity,
-                    )
-                except Exception as e:
-                    logger.error(
-                        "[TENANT %s:%s] Error executing live signal: %s",
-                        tenant.config.tenant_id,
-                        clean_symbol,
-                        e,
-                    )
+            else:
+                logger.warning(
+                    "[TENANT %s:%s] Order skipped: API credentials missing for %s mode. Fallback mock trading disabled.",
+                    tenant.config.tenant_id,
+                    clean_symbol,
+                    tenant.mode.value,
+                )
 
     async def fanout_order_intent(
         self,
@@ -1585,11 +1629,12 @@ class TenantManager:
 
             tenant.register_contract_spec(spec)
             account_equity = await tenant.get_account_equity()
-            if tenant.mode == ExecutionMode.LIVE and account_equity <= 0:
+            if tenant.execution_manager is not None and account_equity <= 0:
                 logger.warning(
-                    "[FANOUT %s:%s] Order skipped: Live account balance is $0.00 on Delta Exchange India. Please fund account to trade.",
+                    "[FANOUT %s:%s] Order skipped: Account balance is $0.00 on Delta Exchange (%s). Please fund account to trade.",
                     tenant.config.tenant_id,
                     clean_symbol,
+                    "DEMO Testnet" if tenant.config.is_demo else "REAL India",
                 )
                 continue
 
@@ -1613,7 +1658,16 @@ class TenantManager:
             tenant_intent.client_order_id = det_client_id
             tenant.order_to_base_id[det_client_id] = base_signal_id
 
-            if tenant.mode == ExecutionMode.PAPER and tenant.paper_simulator is not None:
+            if tenant.execution_manager is not None:
+                try:
+                    await tenant.execution_manager.execute_signal(
+                        order_intent=tenant_intent,
+                        account_equity=account_equity,
+                    )
+                    executed_tenants.append(tenant.config.tenant_id)
+                except Exception as e:
+                    logger.error("[FANOUT %s:%s] Live order failed: %s", tenant.config.tenant_id, clean_symbol, e)
+            elif tenant.paper_simulator is not None:
                 try:
                     avail_margin = (
                         tenant.paper_simulator.wallet.available_balance
@@ -1660,7 +1714,7 @@ class TenantManager:
                     tenant.risk_manager.record_trade_entry()
                     executed_tenants.append(tenant.config.tenant_id)
                     logger.info(
-                        "[FANOUT %s:%s] Placed paper breakout order #%d | ClientID=%s (Lots=%d, Stop=%.4f)",
+                        "[FANOUT %s:%s] Placed order #%d | ClientID=%s (Lots=%d, Stop=%.4f)",
                         tenant.config.tenant_id,
                         clean_symbol,
                         v_order.id,
@@ -1669,19 +1723,10 @@ class TenantManager:
                         v_order.stop_price,
                     )
                 except Exception as e:
-                    logger.error("[FANOUT %s:%s] Paper order failed: %s", tenant.config.tenant_id, clean_symbol, e)
-            elif tenant.mode == ExecutionMode.LIVE and tenant.execution_manager is not None:
-                try:
-                    await tenant.execution_manager.execute_signal(
-                        order_intent=tenant_intent,
-                        account_equity=account_equity,
-                    )
-                    executed_tenants.append(tenant.config.tenant_id)
-                except Exception as e:
-                    logger.error("[FANOUT %s:%s] Live order failed: %s", tenant.config.tenant_id, clean_symbol, e)
-            elif tenant.mode == ExecutionMode.LIVE:
+                    logger.error("[FANOUT %s:%s] Order failed: %s", tenant.config.tenant_id, clean_symbol, e)
+            else:
                 logger.warning(
-                    "[FANOUT %s:%s] Live order skipped: Tenant execution manager is not configured or credentials missing. Fallback demo orders disabled.",
+                    "[FANOUT %s:%s] Order skipped: Tenant execution manager is not configured or credentials missing. Fallback demo orders disabled.",
                     tenant.config.tenant_id,
                     clean_symbol,
                 )

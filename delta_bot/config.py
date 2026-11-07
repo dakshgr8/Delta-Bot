@@ -18,15 +18,19 @@ class DeltaEnvironment(str, Enum):
     """Officially supported Delta Exchange environment endpoints."""
 
     INDIA = "https://api.india.delta.exchange"
+    TESTNET_INDIA = "https://cdn-ind.testnet.deltaex.org"
     GLOBAL = "https://api.delta.exchange"
     TESTNET = "https://testnet-api.delta.exchange"
+    TESTNET_GLOBAL = "https://testnet-api.delta.exchange"
 
 
 class DeltaWebSocketEnvironment(str, Enum):
     """Officially supported Delta Exchange WebSocket endpoints."""
 
     INDIA = "wss://socket.india.delta.exchange"
+    TESTNET_INDIA = "wss://socket-ind.testnet.deltaex.org"
     GLOBAL = "wss://socket.delta.exchange"
+    TESTNET = "wss://socket-ind.testnet.deltaex.org"
 
 
 class BotConfig(BaseSettings):
@@ -67,6 +71,28 @@ class BotConfig(BaseSettings):
         default=DeltaWebSocketEnvironment.INDIA.value,
         validation_alias=AliasChoices("DELTA_WS_URL", "delta_ws_url"),
         description="Delta Exchange India WebSocket API URL",
+    )
+
+    # Demo / Testnet Credentials & URLs
+    delta_demo_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("DELTA_DEMO_API_KEY", "delta_demo_api_key"),
+        description="Delta Exchange Demo / Testnet API Key",
+    )
+    delta_demo_api_secret: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("DELTA_DEMO_API_SECRET", "delta_demo_api_secret"),
+        description="Delta Exchange Demo / Testnet API Secret",
+    )
+    delta_demo_base_url: str = Field(
+        default=DeltaEnvironment.TESTNET_INDIA.value,
+        validation_alias=AliasChoices("DELTA_DEMO_BASE_URL", "delta_demo_base_url"),
+        description="Delta Exchange Demo / Testnet REST API URL",
+    )
+    delta_demo_ws_url: str = Field(
+        default=DeltaWebSocketEnvironment.TESTNET_INDIA.value,
+        validation_alias=AliasChoices("DELTA_DEMO_WS_URL", "delta_demo_ws_url"),
+        description="Delta Exchange Demo / Testnet WebSocket API URL",
     )
     ws_heartbeat_interval_sec: float = Field(
         default=20.0,
@@ -291,13 +317,34 @@ class BotConfig(BaseSettings):
         return cleaned
 
     @property
+    def is_demo_mode(self) -> bool:
+        """Determines if the bot is currently in DEMO mode."""
+        return self.execution_mode.strip().lower() in ("demo", "testnet", "paper")
+
+    @property
+    def active_base_url(self) -> str:
+        """Returns the active Delta Exchange REST base URL (Demo Testnet or Real India)."""
+        return self.delta_demo_base_url if self.is_demo_mode else self.delta_base_url
+
+    @property
+    def active_ws_url(self) -> str:
+        """Returns the active Delta Exchange WebSocket URL (Demo Testnet or Real India)."""
+        return self.delta_demo_ws_url if self.is_demo_mode else self.delta_ws_url
+
+    @property
     def api_key_str(self) -> str:
-        """Retrieves raw unmasked API key for HMAC signing."""
+        """Retrieves active raw unmasked API key for HMAC signing."""
+        if self.is_demo_mode:
+            k = self.delta_demo_api_key.get_secret_value().strip()
+            return k if k else self.delta_api_key.get_secret_value()
         return self.delta_api_key.get_secret_value()
 
     @property
     def api_secret_str(self) -> str:
-        """Retrieves raw unmasked API secret for HMAC signing."""
+        """Retrieves active raw unmasked API secret for HMAC signing."""
+        if self.is_demo_mode:
+            s = self.delta_demo_api_secret.get_secret_value().strip()
+            return s if s else self.delta_api_secret.get_secret_value()
         return self.delta_api_secret.get_secret_value()
 
     @property
