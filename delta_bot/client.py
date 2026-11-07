@@ -41,7 +41,7 @@ class DeltaRestClient:
     Thread-safe and async-safe interface for trading algorithms.
     """
 
-    TARGET_BASE_SYMBOLS = ("BTC", "ETH", "SOL", "XRP")
+    TARGET_BASE_SYMBOLS = ("BTC", "ETH", "SOL", "XRP", "XAUT")
 
     def __init__(self, config: BotConfig | None = None) -> None:
         self._config: BotConfig = config or BotConfig()
@@ -384,8 +384,8 @@ class DeltaRestClient:
         }
         bar_sec = resolution_seconds_map.get(resolution, 60)
         end_sec = int(end if end is not None else time.time())
-        # Delta Exchange candle history requires a minimum window (>= 1-2 hours) to return data
-        window_sec = max(limit * bar_sec * 2, 7200)
+        # Delta Exchange candle history requires a minimum window (>= 3-4 hours) to return data
+        window_sec = max(limit * bar_sec * 3, 86400)
         start_sec = int(start if start is not None else (end_sec - window_sec))
 
         clean_symbol = symbol.strip().upper()
@@ -454,22 +454,36 @@ class DeltaRestClient:
     async def set_order_leverage(self, product_id: int, leverage: int | float) -> dict[str, Any]:
         """
         Sets order leverage for a specific contract product on Delta Exchange.
-        Endpoint: POST /v2/products/{product_id}/orders/leverage
-        Guarantees that new stop and limit orders adhere to the desired leverage tier.
+        Primary Endpoint: POST /v2/products/{product_id}/orders/leverage
+        Fallback Endpoint: POST /v2/orders/leverage
+        Guarantees that new stop and limit orders adhere to the desired leverage tier (1x - 100x).
         """
-        path = f"/v2/products/{product_id}/orders/leverage"
-        payload = {"leverage": str(int(leverage))}
+        lev_str = str(int(leverage))
+        payload = {"leverage": lev_str, "product_id": int(product_id)}
 
-        logger.info("Setting order leverage to %sx for product_id %d...", leverage, product_id)
-        raw_result = await self._http_engine.request(
-            method="POST",
-            path=path,
-            payload=payload,
-            is_authenticated=True,
-        )
+        logger.info("Setting exchange order leverage to %sx for product_id %d...", lev_str, product_id)
+        try:
+            raw_result = await self._http_engine.request(
+                method="POST",
+                path=f"/v2/products/{product_id}/orders/leverage",
+                payload=payload,
+                is_authenticated=True,
+            )
+        except Exception as exc:
+            # Fallback to alternate global path if product-scoped URL is not accepted
+            if "404" in str(exc) or "not_found" in str(exc).lower():
+                logger.debug("Falling back to /v2/orders/leverage for product_id %d", product_id)
+                raw_result = await self._http_engine.request(
+                    method="POST",
+                    path="/v2/orders/leverage",
+                    payload=payload,
+                    is_authenticated=True,
+                )
+            else:
+                raise
 
         if not isinstance(raw_result, dict):
-            return {"product_id": product_id, "leverage": leverage, "status": "success"}
+            return {"product_id": product_id, "leverage": int(leverage), "status": "success"}
         return raw_result
 
     async def place_order(

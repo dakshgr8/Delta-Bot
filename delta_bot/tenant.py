@@ -144,11 +144,11 @@ class TenantConfig(BaseModel):
     delta_api_secret: str = ""
     delta_base_url: str = "https://api.india.delta.exchange"
     delta_ws_url: str = "wss://socket.india.delta.exchange"
-    risk_pct: float = 1.0
-    leverage: int = 5
+    risk_pct: float = Field(default=1.0, ge=0.1, le=50.0)
+    leverage: int = Field(default=5, ge=1, le=100)
     timeframe: str = "1m"
-    max_drawdown_pct: float = 4.0
-    symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"])
+    max_drawdown_pct: float = Field(default=4.0, ge=0.1, le=100.0)
+    symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUTUSD"])
     is_active: bool = True
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -224,8 +224,8 @@ class TenantInstance:
 
         risk_cfg = RiskConfig(
             max_account_risk_pct=config.risk_pct,
-            default_leverage=config.leverage,
-            max_daily_drawdown_pct=config.max_drawdown_pct,
+            max_leverage=config.leverage,
+            daily_max_drawdown_pct=config.max_drawdown_pct,
         )
         self.risk_manager = risk_manager or RiskManager(
             config=risk_cfg,
@@ -314,10 +314,120 @@ class TenantInstance:
         )
 
     def register_contract_spec(self, spec: ContractSpec) -> None:
-        """Caches contract specification and registers with paper simulator."""
+        """Caches contract specification and registers with paper simulator (perpetual futures only)."""
+        if spec.contract_type != "perpetual_futures":
+            logger.warning(
+                "[TENANT %s] Ignored non-perpetual contract %s (contract_type=%s)",
+                self.config.tenant_id,
+                spec.symbol,
+                spec.contract_type,
+            )
+            return
         self.contract_specs[spec.symbol] = spec
         if self.paper_simulator is not None:
             self.paper_simulator.register_contract_spec(spec)
+
+    async def sync_exchange_leverage(self, leverage: int) -> dict[str, Any]:
+        """
+        Synchronizes order leverage across all registered perpetual futures contracts on Delta Exchange.
+        Guarantees that new stop and limit orders adhere to the desired leverage tier (1x - 100x).
+        """
+        results: dict[str, Any] = {}
+        target_lev = max(1, min(int(leverage), 100))
+        for sym, spec in list(self.contract_specs.items()):
+            if spec.contract_type != "perpetual_futures":
+                continue
+            try:
+                await self.rest_client.set_order_leverage(spec.product_id, target_lev)
+                results[sym] = {"status": "success", "product_id": spec.product_id, "leverage": target_lev}
+                if self.execution_manager is not None:
+                    self.execution_manager._configured_leverages[spec.product_id] = target_lev
+                logger.info(
+                    "[TENANT %s] Synchronized exchange leverage to %dx for %s (product_id=%d)",
+                    self.config.tenant_id,
+                    target_lev,
+                    sym,
+                    spec.product_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[TENANT %s] Failed to set exchange leverage to %dx for %s: %s",
+                    self.config.tenant_id,
+                    target_lev,
+                    sym,
+                    exc,
+                )
+                results[sym] = {"status": "error", "error": str(exc)}
+        return results
+
+    def apply_config_updates(self, updates: dict[str, Any]) -> None:
+        """
+        Hot-applies runtime configuration updates across tenant risk, execution, and strategy engines.
+        Ensures risk_pct, leverage, max_drawdown_pct, timeframe, and symbols immediately take effect.
+        """
+        if "is_active" in updates and updates["is_active"] is not None:
+            self.is_running = bool(updates["is_active"])
+            self.config.is_active = bool(updates["is_active"])
+
+        if "leverage" in updates and updates["leverage"] is not None:
+            lev = max(1, min(int(updates["leverage"]), 100))
+            self.config.leverage = lev
+            self.bot_config.default_leverage = lev
+            self.risk_manager.config = self.risk_manager.config.model_copy(
+                update={"default_leverage": lev, "max_leverage": lev}
+            )
+            if self.execution_manager is not None:
+                self.execution_manager.config = self.execution_manager.config.model_copy(
+                    update={"leverage": lev}
+                )
+                self.execution_manager._configured_leverages.clear()
+
+            if self.mode == ExecutionMode.LIVE and self.rest_client.config.has_valid_credentials():
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self.sync_exchange_leverage(lev))
+                except RuntimeError:
+                    pass
+
+        if "risk_pct" in updates and updates["risk_pct"] is not None:
+            risk = float(updates["risk_pct"])
+            self.config.risk_pct = risk
+            self.bot_config.default_risk_pct = risk
+            self.risk_manager.config = self.risk_manager.config.model_copy(
+                update={"max_account_risk_pct": risk}
+            )
+            for strat in self.strategies.values():
+                strat.config = strat.config.model_copy(update={"risk_per_trade_pct": risk})
+
+        if "max_drawdown_pct" in updates and updates["max_drawdown_pct"] is not None:
+            maxdd = float(updates["max_drawdown_pct"])
+            self.config.max_drawdown_pct = maxdd
+            self.risk_manager.config = self.risk_manager.config.model_copy(
+                update={"daily_max_drawdown_pct": maxdd}
+            )
+
+        if "timeframe" in updates and updates["timeframe"] is not None:
+            tf = str(updates["timeframe"]).strip()
+            self.config.timeframe = tf
+            self.bot_config.timeframe = tf
+            for strat in self.strategies.values():
+                strat.config = strat.config.model_copy(update={"resolution": tf})
+
+        if "symbols" in updates and isinstance(updates["symbols"], list):
+            new_syms = [s.strip().upper() for s in updates["symbols"] if s.strip()]
+            self.config.symbols = new_syms
+            self.enabled_symbols = set(new_syms)
+            self.bot_config.target_symbols_str = ",".join(new_syms)
+            for s in new_syms:
+                if s not in self.strategies:
+                    s_cfg = BreakoutStrategyConfig(
+                        symbol=s,
+                        resolution=self.config.timeframe,
+                        risk_per_trade_pct=self.config.risk_pct,
+                    )
+                    strat = BreakoutStrategyEngine(config=s_cfg)
+                    self._register_strategy_callbacks(strat)
+                    self.strategies[s] = strat
 
     async def get_account_equity(self) -> float:
         """Retrieves total floating equity for this tenant."""
@@ -703,7 +813,7 @@ class TenantManager:
             risk_pct=1.0,
             timeframe="1m",
             max_drawdown_pct=4.0,
-            symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"],
+            symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUTUSD"],
             is_active=True,
         )
         instance = TenantInstance(config=cfg, contract_specs=contract_specs or {})
@@ -771,14 +881,10 @@ class TenantManager:
         new_config = TenantConfig(**current)
         tenant.config = new_config
 
-        # Apply runtime overrides
-        if "is_active" in updates:
-            tenant.is_running = bool(updates["is_active"])
-        if "leverage" in updates:
-            tenant.config.leverage = int(updates["leverage"])
-        if "risk_pct" in updates:
-            tenant.config.risk_pct = float(updates["risk_pct"])
-        if "mode" in updates:
+        # Apply runtime overrides across risk, strategy, and execution components
+        tenant.apply_config_updates(updates)
+
+        if "mode" in updates and updates["mode"] is not None:
             tenant.set_execution_mode(updates["mode"])
         if (
             "delta_api_key" in updates
@@ -911,7 +1017,7 @@ class TenantManager:
                     leverage=int(row.get("leverage", 5)),
                     timeframe=row.get("timeframe", "1m"),
                     max_drawdown_pct=float(row.get("max_drawdown_pct", 4.0)),
-                    symbols=row.get("symbols") or ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"],
+                    symbols=row.get("symbols") or ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUTUSD"],
                     is_active=bool(row.get("is_active", True)),
                     created_at=row.get("created_at") or datetime.now(timezone.utc).isoformat(),
                 )

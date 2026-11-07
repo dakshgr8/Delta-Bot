@@ -661,6 +661,16 @@ class ExecutionManager:
         # 2. Resolve contract spec & product_id
         spec = await self.resolve_product_spec(order_intent.symbol)
 
+        # Strict perpetual futures enforcement (Spot and options are strictly prohibited)
+        if spec.contract_type != "perpetual_futures":
+            logger.error(
+                "Execution rejected: %s is not a perpetual futures contract (contract_type='%s')",
+                spec.symbol,
+                spec.contract_type,
+            )
+            order_intent.cancel(f"Non-perpetual contract rejected: {spec.contract_type}", OrderStatus.CANCELLED_MANUAL)
+            return None
+
         # 3. Synchronize leverage tier
         await self.ensure_order_leverage(spec)
 

@@ -101,7 +101,7 @@ def parse_cli_args() -> argparse.Namespace:
     parser.add_argument(
         "--symbols",
         type=str,
-        default="BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT",
+        default="BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,XAUTUSD",
         help="Comma-separated target perpetual contracts to trade concurrently",
     )
     parser.add_argument(

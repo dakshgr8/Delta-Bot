@@ -165,7 +165,7 @@ class TenantCreateRequest(BaseModel):
     leverage: int = Field(default=5, ge=1, le=100, description="Default leverage tier")
     timeframe: str = Field(default="1m", description="Resolution timeframe (e.g. 1m, 3m, 5m, 15m)")
     max_drawdown_pct: float = Field(default=4.0, ge=0.5, le=50.0, description="Daily max drawdown limit %")
-    symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"])
+    symbols: list[str] = Field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "XAUTUSD"])
     is_active: bool = Field(default=True, description="Whether trading signal evaluation is active")
 
 
@@ -178,10 +178,10 @@ class TenantUpdateRequest(BaseModel):
     delta_api_secret: str | None = None
     delta_base_url: str | None = None
     delta_ws_url: str | None = None
-    risk_pct: float | None = None
-    leverage: int | None = None
+    risk_pct: float | None = Field(default=None, ge=0.1, le=50.0)
+    leverage: int | None = Field(default=None, ge=1, le=100)
     timeframe: str | None = None
-    max_drawdown_pct: float | None = None
+    max_drawdown_pct: float | None = Field(default=None, ge=0.1, le=100.0)
     symbols: list[str] | None = None
     is_active: bool | None = None
 
@@ -1948,18 +1948,29 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             )
             for s in orchestrator.strategies.values():
                 s.config = s.config.model_copy(update={"risk_per_trade_pct": payload.risk_pct})
+            if hasattr(orchestrator, "tenant_manager") and "default" in orchestrator.tenant_manager.tenants:
+                orchestrator.tenant_manager.tenants["default"].apply_config_updates({"risk_pct": payload.risk_pct})
             updated.append(f"risk_pct={payload.risk_pct}%")
 
         if payload.leverage is not None:
-            orchestrator.config.default_leverage = payload.leverage
+            lev = max(1, min(int(payload.leverage), 100))
+            orchestrator.config.default_leverage = lev
             orchestrator.risk_manager.config = orchestrator.risk_manager.config.model_copy(
-                update={"max_leverage": payload.leverage}
+                update={"default_leverage": lev, "max_leverage": lev}
             )
             if orchestrator.execution_manager is not None:
                 orchestrator.execution_manager.config = orchestrator.execution_manager.config.model_copy(
-                    update={"leverage": payload.leverage}
+                    update={"leverage": lev}
                 )
-            updated.append(f"leverage={payload.leverage}x")
+                orchestrator.execution_manager._configured_leverages.clear()
+            if hasattr(orchestrator, "tenant_manager") and "default" in orchestrator.tenant_manager.tenants:
+                orchestrator.tenant_manager.tenants["default"].apply_config_updates({"leverage": lev})
+            if orchestrator.mode == ExecutionMode.LIVE and orchestrator.rest_client.config.has_valid_credentials():
+                try:
+                    asyncio.create_task(orchestrator.sync_exchange_leverage(lev))
+                except RuntimeError:
+                    pass
+            updated.append(f"leverage={lev}x")
 
         if payload.trailing_sl_enabled is not None:
             for s in orchestrator.strategies.values():
@@ -1995,6 +2006,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             orchestrator.risk_manager.config = orchestrator.risk_manager.config.model_copy(
                 update={"daily_max_drawdown_pct": payload.max_drawdown_pct}
             )
+            if hasattr(orchestrator, "tenant_manager") and "default" in orchestrator.tenant_manager.tenants:
+                orchestrator.tenant_manager.tenants["default"].apply_config_updates({"max_drawdown_pct": payload.max_drawdown_pct})
             updated.append(f"max_drawdown_pct={payload.max_drawdown_pct}%")
 
         if payload.max_pending_bars is not None:

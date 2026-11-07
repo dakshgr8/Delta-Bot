@@ -573,4 +573,133 @@ def test_wal_deduplication_on_23505_cloud_conflict(tmp_path: Path) -> None:
         assert len(data) == 0
 
 
+def test_tenant_leverage_100x_and_risk_updates(tmp_path: Path) -> None:
+    """Verifies that leverage up to 100x, risk per trade, and daily drawdown propagate dynamically."""
+    storage_file = tmp_path / "tenants.json"
+    mgr = TenantManager(storage_path=str(storage_file))
+
+    t_cfg = TenantConfig(
+        tenant_id="desk_100x",
+        name="100x Desk",
+        mode="paper",
+        leverage=5,
+        risk_pct=1.0,
+        max_drawdown_pct=4.0,
+        symbols=["BTCUSDT", "ETHUSDT", "XAUTUSD"],
+    )
+    instance = mgr.create_tenant(t_cfg)
+
+    # 1. Update leverage to 100x
+    updated = mgr.update_tenant("desk_100x", {"leverage": 100})
+    assert updated.config.leverage == 100
+    assert updated.risk_manager.config.default_leverage == 100
+    assert updated.risk_manager.config.max_leverage == 100
+
+    # 2. Update risk_pct to 2.5%
+    updated = mgr.update_tenant("desk_100x", {"risk_pct": 2.5})
+    assert updated.config.risk_pct == 2.5
+    assert updated.risk_manager.config.max_account_risk_pct == 2.5
+    for strat in updated.strategies.values():
+        assert strat.config.risk_per_trade_pct == 2.5
+
+    # 3. Update max_drawdown_pct to 7.5%
+    updated = mgr.update_tenant("desk_100x", {"max_drawdown_pct": 7.5})
+    assert updated.config.max_drawdown_pct == 7.5
+    assert updated.risk_manager.config.daily_max_drawdown_pct == 7.5
+
+
+def test_perpetual_futures_strict_enforcement(tmp_path: Path) -> None:
+    """Verifies that non-perpetual contracts (spot/options) are strictly rejected from tenant specs."""
+    storage_file = tmp_path / "tenants.json"
+    mgr = TenantManager(storage_path=str(storage_file))
+
+    instance = mgr.create_tenant(TenantConfig(tenant_id="perp_desk", name="Perpetual Desk", mode="paper"))
+
+    # Valid perpetual contract
+    perp_spec = ContractSpec(
+        product_id=131253,
+        symbol="XAUTUSD",
+        contract_type="perpetual_futures",
+        contract_value=0.001,
+        tick_size=0.01,
+        maker_commission_rate=0.0001,
+        taker_commission_rate=0.0001,
+    )
+    instance.register_contract_spec(perp_spec)
+    assert "XAUTUSD" in instance.contract_specs
+
+    # Invalid spot contract
+    spot_spec = ContractSpec(
+        product_id=999,
+        symbol="BTCUSD_SPOT",
+        contract_type="spot",
+        contract_value=1.0,
+        tick_size=0.01,
+        maker_commission_rate=0.0001,
+        taker_commission_rate=0.0001,
+    )
+    instance.register_contract_spec(spot_spec)
+    assert "BTCUSD_SPOT" not in instance.contract_specs
+
+    # Invalid options contract
+    option_spec = ContractSpec(
+        product_id=888,
+        symbol="C-BTC-70000",
+        contract_type="call_options",
+        contract_value=1.0,
+        tick_size=0.5,
+        maker_commission_rate=0.0001,
+        taker_commission_rate=0.0001,
+    )
+    instance.register_contract_spec(option_spec)
+    assert "C-BTC-70000" not in instance.contract_specs
+
+
+def test_xautusd_stop_loss_and_risk_sizing(tmp_path: Path) -> None:
+    """Verifies Stop Loss per-unit risk distance and lot sizing for XAUTUSD under 100x leverage."""
+    storage_file = tmp_path / "tenants.json"
+    mgr = TenantManager(storage_path=str(storage_file))
+
+    instance = mgr.create_tenant(TenantConfig(
+        tenant_id="gold_desk",
+        name="Gold Desk",
+        mode="paper",
+        leverage=100,
+        risk_pct=1.0,
+        initial_balance=10000.0,
+    ))
+
+    xaut_spec = ContractSpec(
+        product_id=131253,
+        symbol="XAUTUSD",
+        contract_type="perpetual_futures",
+        contract_value=0.001,
+        tick_size=0.01,
+        quoting_symbol="USD",
+        maker_commission_rate=0.0001,
+        taker_commission_rate=0.0001,
+    )
+    instance.register_contract_spec(xaut_spec)
+
+    # Trigger = $4000.00, SL = $3960.00 ($40 per oz risk)
+    # Per-unit risk = $40.00
+    # Risk budget (1% of $10,000) = $100.00
+    # Target asset qty = $100 / $40 = 2.5 oz
+    # Lots = 2.5 / 0.001 = 2500 contracts
+    margin_res = instance.risk_manager.size_position(
+        spec=xaut_spec,
+        trigger_price=4000.00,
+        stop_loss_price=3960.00,
+        account_equity=10000.0,
+        available_margin=9500.0,
+        risk_pct_override=1.0,
+    )
+
+    assert margin_res.is_margin_sufficient is True
+    assert margin_res.final_lots == 2500
+    # Required initial margin at 100x: (2500 * 0.001 * 4000) / 100 = $100.00 USD
+    assert margin_res.required_margin == pytest.approx(100.0, abs=0.1)
+
+
+
 

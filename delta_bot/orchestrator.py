@@ -804,6 +804,9 @@ class TradingBotOrchestrator:
         for sym in self.target_symbols:
             try:
                 spec = await self.rest_client.get_contract_spec(sym)
+                if spec.contract_type != "perpetual_futures":
+                    logger.warning("Symbol %s is not a perpetual futures contract (got '%s'). Skipping.", sym, spec.contract_type)
+                    continue
                 self.contract_specs[sym] = spec
                 if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
                     self.paper_simulator.register_contract_spec(spec)
@@ -874,6 +877,27 @@ class TradingBotOrchestrator:
         finally:
             if not self._shutdown_completed:
                 await self.shutdown(reason="Event loop exit")
+
+    async def sync_exchange_leverage(self, leverage: int) -> dict[str, Any]:
+        """
+        Synchronizes order leverage across all registered perpetual futures contracts on Delta Exchange.
+        Guarantees that new stop and limit orders adhere to the desired leverage tier (1x - 100x).
+        """
+        results: dict[str, Any] = {}
+        target_lev = max(1, min(int(leverage), 100))
+        for sym, spec in list(self.contract_specs.items()):
+            if spec.contract_type != "perpetual_futures":
+                continue
+            try:
+                await self.rest_client.set_order_leverage(spec.product_id, target_lev)
+                results[sym] = {"status": "success", "product_id": spec.product_id, "leverage": target_lev}
+                if self.execution_manager is not None:
+                    self.execution_manager._configured_leverages[spec.product_id] = target_lev
+                logger.info("Synchronized exchange order leverage for %s (id=%d) to %dx", sym, spec.product_id, target_lev)
+            except Exception as exc:
+                logger.warning("Could not set exchange order leverage for %s (id=%d): %s", sym, spec.product_id, exc)
+                results[sym] = {"status": "error", "error": str(exc)}
+        return results
 
     async def shutdown(self, reason: str = "SIGINT") -> None:
         """

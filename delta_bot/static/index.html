@@ -420,12 +420,13 @@
           </div>
         </div>
 
-        <div id="landing-tickers" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[var(--dp-spacing-gap)]">
+        <div id="landing-tickers" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-[var(--dp-spacing-gap)]">
           <!-- Populated by JS -->
           <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading BTC/USDT...</div>
           <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading ETH/USDT...</div>
           <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading SOL/USDT...</div>
           <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading XRP/USDT...</div>
+          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading XAUT/USD...</div>
         </div>
       </div>
     </section>
@@ -648,7 +649,7 @@
           <span class="mono-label">Active Perpetual Markets</span>
           <span class="mono-meta">Live Delta Quotes</span>
         </div>
-        <div id="dash-market-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[var(--dp-spacing-gap)]">
+        <div id="dash-market-cards" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-[var(--dp-spacing-gap)]">
           <!-- Populated by JS -->
         </div>
       </div>
@@ -805,7 +806,14 @@
             <span>Default Leverage:</span>
             <span id="label-leverage" class="text-white font-medium">5x</span>
           </div>
-          <input type="range" id="input-leverage" min="1" max="20" step="1" value="5" class="w-full accent-white" oninput="document.getElementById('label-leverage').textContent = this.value + 'x'">
+          <input type="range" id="input-leverage" min="1" max="100" step="1" value="5" class="w-full accent-white" oninput="document.getElementById('label-leverage').textContent = this.value + 'x'">
+          <div class="flex justify-between gap-1 pt-1.5">
+            <button type="button" onclick="setLeveragePreset(5)" class="px-2 py-0.5 text-[10px] rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-bg)] hover:bg-white/10 text-[var(--dp-color-read)] hover:text-white font-mono">5x</button>
+            <button type="button" onclick="setLeveragePreset(10)" class="px-2 py-0.5 text-[10px] rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-bg)] hover:bg-white/10 text-[var(--dp-color-read)] hover:text-white font-mono">10x</button>
+            <button type="button" onclick="setLeveragePreset(25)" class="px-2 py-0.5 text-[10px] rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-bg)] hover:bg-white/10 text-[var(--dp-color-read)] hover:text-white font-mono">25x</button>
+            <button type="button" onclick="setLeveragePreset(50)" class="px-2 py-0.5 text-[10px] rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-bg)] hover:bg-white/10 text-[var(--dp-color-read)] hover:text-white font-mono">50x</button>
+            <button type="button" onclick="setLeveragePreset(100)" class="px-2 py-0.5 text-[10px] rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-bg)] hover:bg-white/10 text-[var(--dp-color-read)] hover:text-white font-mono">100x</button>
+          </div>
         </div>
 
         <div>
@@ -1261,7 +1269,7 @@
     function renderLandingTickers(tickers) {
       const container = document.getElementById('landing-tickers');
       if (!container) return;
-      const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+      const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'XAUTUSD'];
       container.replaceChildren();
 
       symbols.forEach(sym => {
@@ -1274,7 +1282,7 @@
         card.className = 'dp-panel p-4 flex flex-col justify-between';
         card.innerHTML = `
           <div class="flex items-center justify-between text-xs font-mono text-[var(--dp-color-meta)]">
-            <span class="font-medium text-white">${sym.replace('USDT', '/USDT')}</span>
+            <span class="font-medium text-white">${sym.replace('USDT', '/USDT').replace('USD', '/USD')}</span>
             <span class="${isUp ? 'text-white' : 'text-[var(--dp-color-meta)]'}">${isUp ? '+' : ''}${chg.toFixed(2)}%</span>
           </div>
           <div class="text-xl font-mono text-[var(--dp-color-bright)] mt-3">
@@ -1381,7 +1389,7 @@
     function renderMarketCards(tickers, indicators) {
       const container = document.getElementById('dash-market-cards');
       if (!container) return;
-      const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+      const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'XAUTUSD'];
       container.replaceChildren();
 
       symbols.forEach(sym => {
@@ -1394,7 +1402,7 @@
         card.className = 'dp-panel p-4 flex flex-col justify-between';
         card.innerHTML = `
           <div class="flex items-center justify-between">
-            <span class="mono-label">${sym.replace('USDT', '/USDT')}</span>
+            <span class="mono-label">${sym.replace('USDT', '/USDT').replace('USD', '/USD')}</span>
             <span class="signal-live" title="Active Feed"></span>
           </div>
           <div class="mt-3">
@@ -1593,6 +1601,33 @@
         if (keyInput) keyInput.placeholder = 'Enter API Key...';
         if (secretInput) secretInput.placeholder = 'Enter API Secret...';
       }
+
+      // Populate slider values from current tenant / status
+      const curLev = tenant.leverage || status.default_leverage || status.leverage || 5;
+      const curRisk = tenant.risk_pct || status.default_risk_pct || status.risk_pct || 1.0;
+      const curMaxDd = tenant.max_drawdown_pct || status.max_drawdown_pct || 4.0;
+
+      const inputLev = document.getElementById('input-leverage');
+      const labelLev = document.getElementById('label-leverage');
+      if (inputLev) inputLev.value = curLev;
+      if (labelLev) labelLev.textContent = curLev + 'x';
+
+      const inputRisk = document.getElementById('input-risk');
+      const labelRisk = document.getElementById('label-risk');
+      if (inputRisk) inputRisk.value = curRisk;
+      if (labelRisk) labelRisk.textContent = Number(curRisk).toFixed(1) + '%';
+
+      const inputMaxDd = document.getElementById('input-maxdd');
+      const labelMaxDd = document.getElementById('label-maxdd');
+      if (inputMaxDd) inputMaxDd.value = curMaxDd;
+      if (labelMaxDd) labelMaxDd.textContent = Number(curMaxDd).toFixed(1) + '%';
+    }
+
+    function setLeveragePreset(val) {
+      const input = document.getElementById('input-leverage');
+      const label = document.getElementById('label-leverage');
+      if (input) input.value = val;
+      if (label) label.textContent = val + 'x';
     }
 
     function closeSettingsModal() {
@@ -1702,6 +1737,7 @@
     window.emergencyFlatten = emergencyFlatten;
     window.openSettingsModal = openSettingsModal;
     window.closeSettingsModal = closeSettingsModal;
+    window.setLeveragePreset = setLeveragePreset;
     window.saveSettings = saveSettings;
     window.resetApiKeys = resetApiKeys;
     window.closePosition = closePosition;

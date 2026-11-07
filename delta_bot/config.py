@@ -162,9 +162,9 @@ class BotConfig(BaseSettings):
         description="Whether to market-close active positions when SIGINT/SIGTERM is received",
     )
     target_symbols_str: str = Field(
-        default="BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT",
+        default="BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,XAUTUSD",
         validation_alias=AliasChoices("TARGET_SYMBOLS", "target_symbols"),
-        description="Comma-separated target assets (e.g. BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT)",
+        description="Comma-separated target assets (e.g. BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,XAUTUSD)",
     )
     timeframe: str = Field(
         default="1m",

@@ -19,7 +19,7 @@ import logging
 import time
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from delta_bot.exceptions import InsufficientMarginError
 from delta_bot.models import ContractSpec, MarginCheckResult
@@ -40,6 +40,7 @@ class RiskConfig(BaseModel):
     )
     max_leverage: int = Field(
         default=5,
+        validation_alias=AliasChoices("max_leverage", "default_leverage", "leverage"),
         ge=1,
         le=100,
         description="Maximum allowable leverage tier across perpetual contracts",
@@ -52,6 +53,7 @@ class RiskConfig(BaseModel):
     )
     daily_max_drawdown_pct: float = Field(
         default=4.0,
+        validation_alias=AliasChoices("daily_max_drawdown_pct", "max_daily_drawdown_pct"),
         gt=0.0,
         le=50.0,
         description="Circuit breaker: Halt all new trades if daily loss exceeds this percentage (e.g. 4.0%)",
