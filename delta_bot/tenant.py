@@ -1679,46 +1679,12 @@ class TenantManager:
                     executed_tenants.append(tenant.config.tenant_id)
                 except Exception as e:
                     logger.error("[FANOUT %s:%s] Live order failed: %s", tenant.config.tenant_id, clean_symbol, e)
-            elif tenant.paper_simulator is not None:
-                # Fallback to paper simulator if live credentials are not yet configured
-                try:
-                    avail_margin = (
-                        tenant.paper_simulator.wallet.available_balance
-                        if tenant.paper_simulator.wallet.available_balance > 0
-                        else account_equity
-                    )
-                    margin_res = tenant.risk_manager.size_position(
-                        spec=spec,
-                        trigger_price=tenant_intent.trigger_price,
-                        stop_loss_price=tenant_intent.initial_stop_loss,
-                        account_equity=account_equity,
-                        available_margin=avail_margin,
-                        risk_pct_override=tenant.config.risk_pct,
-                    )
-                    if margin_res.is_margin_sufficient and margin_res.final_lots >= 1:
-                        tenant_intent.contract_lots = margin_res.final_lots
-                        tenant_intent.product_id = spec.product_id
-                        tenant_intent.leverage = tenant.config.leverage
-                        side = "buy" if tenant_intent.signal_type == SignalType.BULLISH_BREAKOUT else "sell"
-                        v_order = tenant.paper_simulator.submit_stop_order(
-                            product_id=spec.product_id,
-                            symbol=spec.symbol,
-                            side=side,
-                            size=tenant_intent.contract_lots,
-                            stop_price=tenant_intent.trigger_price,
-                            bracket_stop_loss_price=tenant_intent.initial_stop_loss,
-                            bracket_take_profit_price=tenant_intent.take_profit,
-                            leverage=tenant.config.leverage,
-                            intent_id=tenant_intent.intent_id,
-                            client_order_id=det_client_id,
-                        )
-                        tenant_intent.exchange_order_id = v_order.id
-                        tenant.state_manager.register_intent(tenant_intent)
-                        tenant.state_manager.bind_exchange_order_id(tenant_intent.intent_id, v_order.id)
-                        tenant.risk_manager.record_trade_entry()
-                        executed_tenants.append(tenant.config.tenant_id)
-                except Exception as e:
-                    logger.error("[FANOUT %s:%s] Fallback paper order failed: %s", tenant.config.tenant_id, clean_symbol, e)
+            elif tenant.mode == ExecutionMode.LIVE:
+                logger.warning(
+                    "[FANOUT %s:%s] Live order skipped: Tenant execution manager is not configured or credentials missing. Fallback demo orders disabled.",
+                    tenant.config.tenant_id,
+                    clean_symbol,
+                )
 
         return executed_tenants
 

@@ -561,9 +561,8 @@ class ExecutionManager:
         """
         available_margin = available_margin_override
         if available_margin is None:
-            if self.config.execution_mode == ExecutionMode.DRY_RUN or not self.client.config.has_valid_credentials():
-                available_margin = account_equity * 0.95 if account_equity > 0 else 0.0
-            else:
+            if self.client.config.has_valid_credentials():
+                # Real live trading with configured API credentials: query real exchange balances strictly
                 try:
                     balances = await self.client.get_wallet_balances()
                     target_symbol = spec.quoting_symbol or self.config.default_collateral_symbol
@@ -577,8 +576,10 @@ class ExecutionManager:
                     else:
                         available_margin = 0.0
                 except Exception as exc:
-                    logger.warning("Failed to fetch live wallet balances (%s), falling back to equity.", exc)
-                    available_margin = account_equity * 0.95 if account_equity > 0 else 0.0
+                    logger.error("Failed to fetch live wallet balances from Delta Exchange: %s. Disallowing trade sizing on fallback demo values.", exc)
+                    available_margin = 0.0
+            else:
+                available_margin = account_equity if account_equity > 0 else 0.0
 
         if account_equity <= 0 and available_margin is not None and available_margin > 0:
             account_equity = available_margin

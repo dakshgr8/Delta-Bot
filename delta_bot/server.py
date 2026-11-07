@@ -429,6 +429,10 @@ def get_all_positions_summary(
         target_sim = orchestrator.paper_simulator
         target_sm = orchestrator.state_manager
         lev = orchestrator.config.default_leverage
+        if orchestrator.mode == ExecutionMode.LIVE and hasattr(orchestrator, "tenant_manager"):
+            def_t = orchestrator.tenant_manager.get_tenant("default")
+            if def_t and getattr(def_t, "live_positions", None):
+                return list(def_t.live_positions)
 
     if target_mode == ExecutionMode.PAPER and target_sim is not None:
         for pid, pos in target_sim._open_positions.items():

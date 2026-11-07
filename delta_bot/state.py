@@ -372,9 +372,9 @@ class TradingStateManager:
         mark_px = self._cached_mark_prices.get(clean_symbol, pos.mark_price)
         atr = self._cached_atrs.get(clean_symbol, 0.0)
 
-        # Fallback ATR estimation if not yet seeded
+        # Proximity threshold strictly requires verified market ATR
         if atr <= 0:
-            atr = pos.entry_price * 0.015
+            return None
 
         distance = abs(mark_px - pos.liquidation_price)
         threshold_distance = self.proximity_atr_mult * atr

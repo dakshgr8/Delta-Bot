@@ -388,6 +388,15 @@ class TradingBotOrchestrator:
         session_anchor = self.public_ws.get_session_anchor(clean_symbol)
         account_equity = await self.get_account_equity()
 
+        if self.mode == ExecutionMode.LIVE and account_equity <= 0:
+            logger.debug(
+                "[%s] Live account equity is $0.00 on Delta Exchange India. Skipping signal evaluation (no fallback demo values).",
+                clean_symbol,
+            )
+            if hasattr(self, "tenant_manager"):
+                await self._dispatch_candle_to_custom_tenants(clean_symbol, candle, spec)
+            return
+
         # Update circuit breaker high-watermark
         self.risk_manager.update_daily_equity(account_equity)
 
