@@ -19,91 +19,97 @@
       darkMode: 'class',
       theme: {
         extend: {
-          fontFamily: {
-            sans: ['"Plus Jakarta Sans"', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
-            display: ['"Space Grotesk"', 'sans-serif'],
-            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
-          },
           colors: {
-            brand: {
-              50: '#ecfeff',
-              100: '#cffafe',
-              200: '#a5f3fc',
-              300: '#67e8f9',
-              400: '#22d3ee',
-              500: '#06b6d4',
-              600: '#0891b2',
-              700: '#0e7490',
-              800: '#155e75',
-              900: '#164e63',
-              950: '#083344',
-            },
             obsidian: {
-              950: '#05070B',
-              900: '#0A0E17',
-              850: '#0F1422',
-              800: '#161C2E',
-              750: '#1D253B',
-              700: '#252F4A',
+              950: '#07090e',
+              900: '#0b0f19',
+              850: '#111726',
+              800: '#172033',
+              750: '#1e2942',
+              700: '#253352'
+            },
+            brand: {
+              50: '#f0fdfa',
+              100: '#ccfbf1',
+              200: '#99f6e4',
+              300: '#5eead4',
+              400: '#2dd4bf',
+              500: '#14b8a6',
+              600: '#0d9488',
+              700: '#0f766e',
+              800: '#115e59',
+              900: '#134e4a',
+              950: '#042f2e'
             }
           },
-          backgroundImage: {
-            'radial-glow': 'radial-gradient(circle at 50% 0%, rgba(6, 182, 212, 0.15), transparent 70%)',
-            'radial-accent': 'radial-gradient(circle at 80% 20%, rgba(16, 185, 129, 0.12), transparent 50%)',
-            'grid-pattern': 'linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px)'
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+            display: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace']
           }
         }
       }
-    }
+    };
   </script>
 
   <style>
-    /* Custom Scrollbar */
-    ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #0A0E17; }
-    ::-webkit-scrollbar-thumb { background: #1D253B; border-radius: 3px; }
-    ::-webkit-scrollbar-thumb:hover { background: #0891b2; }
-
-    /* Shimmer Effect */
-    @keyframes shimmer {
-      0% { background-position: -200% 0; }
-      100% { background-position: 200% 0; }
-    }
-    .animate-shimmer {
-      background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0) 100%);
-      background-size: 200% 100%;
-      animation: shimmer 3s infinite;
-    }
-
-    /* Subtle Glass Border */
+    /* Premium Glassmorphism & Custom Accents */
     .glass-card {
-      background: rgba(15, 20, 34, 0.7);
+      background: rgba(15, 23, 42, 0.65);
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
       border: 1px solid rgba(255, 255, 255, 0.07);
     }
     .glass-card-hover {
-      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .glass-card-hover:hover {
-      background: rgba(22, 28, 46, 0.85);
-      border-color: rgba(6, 182, 212, 0.35);
+      border-color: rgba(45, 212, 191, 0.35);
+      box-shadow: 0 10px 30px -10px rgba(13, 148, 136, 0.25);
       transform: translateY(-2px);
-      box-shadow: 0 12px 30px -10px rgba(6, 182, 212, 0.15);
+    }
+    .bg-radial-glow {
+      background: radial-gradient(circle at 50% 0%, rgba(13, 148, 136, 0.18) 0%, rgba(7, 9, 14, 0) 70%);
+    }
+    .bg-grid-pattern {
+      background-size: 32px 32px;
+      background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    }
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #07090e;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1e2942;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #2dd4bf;
+    }
+    .view-container {
+      display: none;
+    }
+    .view-container.active {
+      display: block;
     }
   </style>
 </head>
-
-<body class="bg-obsidian-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-brand-500 selection:text-white antialiased">
+<body class="bg-obsidian-950 text-slate-100 font-sans antialiased selection:bg-brand-500/30 selection:text-brand-300 min-h-screen flex flex-col">
 
   <!-- ========================================================================= -->
-  <!-- NAVIGATION BAR (Global across views) -->
+  <!-- GLOBAL CLIENT NAVIGATION BAR -->
   <!-- ========================================================================= -->
   <nav id="global-nav" class="sticky top-0 z-50 backdrop-blur-xl bg-obsidian-950/85 border-b border-white/5 transition-all duration-200">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
       
-      <!-- Logo & Brand -->
-      <div class="flex items-center space-x-3 cursor-pointer" onclick="navigateTo('landing')">
+      <!-- Brand Logo -->
+      <div class="flex items-center space-x-3 cursor-pointer" onclick="navigateToHome()">
         <div class="h-9 w-9 rounded-xl bg-gradient-to-tr from-brand-600 via-cyan-500 to-emerald-400 p-[1px] shadow-lg shadow-cyan-950/50">
           <div class="h-full w-full bg-obsidian-950 rounded-[11px] flex items-center justify-center font-display font-bold text-transparent bg-clip-text bg-gradient-to-tr from-brand-400 to-emerald-300 text-lg">
             Δ
@@ -112,80 +118,68 @@
         <div>
           <div class="flex items-center gap-2">
             <span class="font-display font-bold tracking-tight text-white text-base">DELTA<span class="text-brand-400">BOT</span></span>
-            <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-brand-950/80 text-brand-300 border border-brand-800/60 font-semibold tracking-wider">v2.4 PRO</span>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-brand-950/80 text-brand-300 border border-brand-800/60 font-semibold tracking-wider">PRO</span>
           </div>
-          <p class="text-[10px] text-slate-400 font-mono tracking-wide hidden sm:block">Quantitative Perpetual Engine</p>
+          <p class="text-[10px] text-slate-400 font-mono tracking-wide hidden sm:block">Autonomous Perpetual Engine</p>
         </div>
       </div>
 
-      <!-- Nav Links (Visible on Landing) -->
+      <!-- Landing Navigation Links (Smooth Scroll) -->
       <div id="nav-landing-links" class="hidden md:flex items-center space-x-8 text-xs font-semibold tracking-wide text-slate-300">
         <a href="#features" class="hover:text-brand-400 transition-colors">Features</a>
-        <a href="#architecture" class="hover:text-brand-400 transition-colors">Architecture</a>
-        <a href="#performance" class="hover:text-brand-400 transition-colors">Telemetry</a>
-        <a href="#security" class="hover:text-brand-400 transition-colors">Multi-Tenant Vaults</a>
+        <a href="#markets" class="hover:text-brand-400 transition-colors">Live Markets</a>
+        <a href="#safeguards" class="hover:text-brand-400 transition-colors">Risk Controls</a>
+        <a href="#pricing" class="hover:text-brand-400 transition-colors">Pricing</a>
+        <a href="#faq" class="hover:text-brand-400 transition-colors">FAQ</a>
       </div>
 
-      <!-- Nav Action Buttons -->
+      <!-- Action Buttons -->
       <div class="flex items-center space-x-3">
-        <!-- Backend Status Badge -->
-        <button onclick="openBackendModal()" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-obsidian-900 border border-white/5 text-[11px] font-mono text-slate-300 hover:border-brand-500/40 transition cursor-pointer" title="Configured Backend Host">
-          <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span id="nav-backend-label">Render Online</span>
-        </button>
+        
+        <!-- Unauthenticated State: Sign In & Deploy Desk -->
+        <div id="nav-guest-actions" class="flex items-center space-x-2">
+          <button onclick="navigateTo('auth')" class="text-xs font-semibold px-3.5 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-white/5 transition cursor-pointer">
+            Sign In
+          </button>
+          <button onclick="navigateTo('auth')" class="text-xs font-semibold px-4 py-2 rounded-xl bg-gradient-to-r from-brand-600 via-cyan-500 to-emerald-500 hover:from-brand-500 hover:to-emerald-400 text-white shadow-lg shadow-cyan-950/60 transition cursor-pointer flex items-center gap-1.5">
+            <span>Get Started</span>
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+          </button>
+        </div>
 
-        <!-- Dynamic User Auth Nav State -->
-        <div id="nav-auth-state">
-          <!-- Unauthenticated: Sign In + Launch Terminal CTA -->
-          <div id="nav-guest-actions" class="flex items-center space-x-2">
-            <button onclick="navigateTo('auth')" class="text-xs font-semibold px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/5 transition cursor-pointer">
-              Sign In
+        <!-- Authenticated State: Active Profile & Terminal Shortcut -->
+        <div id="nav-user-actions" class="hidden relative inline-block text-left">
+          <div class="flex items-center space-x-2">
+            <button onclick="navigateTo('dashboard')" class="text-xs font-semibold px-3.5 py-1.5 rounded-xl bg-brand-950/70 border border-brand-500/40 text-brand-300 hover:bg-brand-900/50 transition flex items-center gap-1.5 cursor-pointer">
+              <span class="h-1.5 w-1.5 rounded-full bg-brand-400 animate-pulse"></span>
+              <span>Trading Desk</span>
             </button>
-            <button onclick="navigateTo('dashboard')" class="text-xs font-semibold px-4 py-1.5 rounded-lg bg-gradient-to-r from-brand-600 to-cyan-500 hover:from-brand-500 hover:to-cyan-400 text-white shadow-lg shadow-cyan-950/60 transition cursor-pointer flex items-center gap-1.5">
-              <span>Launch Desk</span>
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+            <button onclick="toggleUserMenu()" class="h-8 px-2.5 rounded-xl bg-obsidian-900 border border-white/10 hover:border-brand-500/50 text-slate-200 text-xs font-mono flex items-center gap-2 cursor-pointer transition">
+              <div class="h-5 w-5 rounded-full bg-gradient-to-tr from-brand-500 to-emerald-400 text-[10px] font-bold text-obsidian-950 flex items-center justify-center font-sans" id="nav-user-avatar">
+                U
+              </div>
+              <span id="nav-user-email-display" class="max-w-[120px] truncate text-slate-300 font-sans font-medium">user@domain.com</span>
+              <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
             </button>
           </div>
 
-          <!-- Authenticated: Active Profile Dropdown -->
-          <div id="nav-user-actions" class="hidden relative inline-block text-left">
-            <div class="flex items-center space-x-2">
-              <button onclick="navigateTo('dashboard')" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-brand-950/70 border border-brand-500/40 text-brand-300 hover:bg-brand-900/50 transition flex items-center gap-1.5 cursor-pointer">
-                <span class="h-1.5 w-1.5 rounded-full bg-brand-400"></span>
-                <span>Terminal</span>
-              </button>
-              <button onclick="toggleUserMenu()" class="h-8 px-2.5 rounded-lg bg-obsidian-900 border border-white/10 hover:border-brand-500/50 text-slate-200 text-xs font-mono flex items-center gap-2 cursor-pointer transition">
-                <div class="h-5 w-5 rounded-full bg-gradient-to-tr from-brand-500 to-emerald-400 text-[10px] font-bold text-obsidian-950 flex items-center justify-center" id="nav-user-avatar">
-                  U
-                </div>
-                <span id="nav-user-email-display" class="max-w-[110px] truncate text-slate-300 font-sans font-medium">user@domain.com</span>
-                <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          <!-- Profile Dropdown Menu -->
+          <div id="nav-user-menu" class="hidden absolute right-0 mt-2 w-64 rounded-xl glass-card shadow-2xl z-50 p-2 divide-y divide-white/5 text-xs font-sans">
+            <div class="px-3 py-2">
+              <div class="text-[10px] uppercase font-semibold text-slate-400 font-mono">Connected Desk</div>
+              <div class="font-semibold text-white truncate mt-0.5" id="menu-user-email">--</div>
+            </div>
+            <div class="py-1">
+              <button onclick="openConfigModal(); toggleUserMenu();" class="w-full text-left px-3 py-2 rounded-lg hover:bg-white/5 text-slate-300 hover:text-white transition cursor-pointer flex items-center justify-between">
+                <span>Delta API Keys & Risk</span>
+                <span class="text-[10px] font-mono text-brand-400">SETTINGS</span>
               </button>
             </div>
-
-            <!-- Profile Dropdown Menu -->
-            <div id="nav-user-menu" class="hidden absolute right-0 mt-2 w-64 rounded-xl glass-card shadow-2xl z-50 p-2 divide-y divide-white/5 text-xs font-sans">
-              <div class="px-3 py-2">
-                <div class="text-[10px] uppercase font-semibold text-slate-400 font-mono">Connected Desk</div>
-                <div class="font-semibold text-white truncate mt-0.5" id="menu-user-email">--</div>
-                <div class="text-[11px] font-mono text-brand-400 truncate mt-0.5" id="menu-tenant-id">Tenant: --</div>
-              </div>
-              <div class="py-1">
-                <button onclick="openConfigModal(); toggleUserMenu();" class="w-full text-left px-3 py-1.5 rounded-lg hover:bg-white/5 text-slate-300 hover:text-white transition cursor-pointer flex items-center justify-between">
-                  <span>Delta API Keys</span>
-                  <span class="text-[10px] font-mono text-brand-400">CONFIG</span>
-                </button>
-                <button onclick="openTenantFleetModal(); toggleUserMenu();" class="w-full text-left px-3 py-1.5 rounded-lg hover:bg-white/5 text-slate-300 hover:text-white transition cursor-pointer flex items-center justify-between">
-                  <span>Multi-Tenant Fleet</span>
-                  <span class="text-[10px] font-mono text-cyan-400">FLEET</span>
-                </button>
-              </div>
-              <div class="pt-1">
-                <button onclick="signOutSupabase(); toggleUserMenu();" class="w-full text-left px-3 py-1.5 rounded-lg text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 transition cursor-pointer flex items-center justify-between">
-                  <span>Sign Out</span>
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
-                </button>
-              </div>
+            <div class="pt-1">
+              <button onclick="signOutSupabase(); toggleUserMenu();" class="w-full text-left px-3 py-2 rounded-lg text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 transition cursor-pointer flex items-center justify-between">
+                <span>Sign Out</span>
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+              </button>
             </div>
           </div>
         </div>
@@ -196,70 +190,68 @@
 
 
   <!-- ========================================================================= -->
-  <!-- 1. VIEW: INSTITUTIONAL LANDING PAGE -->
+  <!-- 1. VIEW: INSTITUTIONAL LANDING PAGE (SALES & PRODUCT SHOWCASE) -->
   <!-- ========================================================================= -->
-  <div id="view-landing" class="view-container">
+  <div id="view-landing" class="view-container active">
 
     <!-- HERO SECTION -->
     <header class="relative overflow-hidden pt-20 pb-28 md:pt-32 md:pb-40 border-b border-white/5 bg-radial-glow">
-      <!-- Ambient Grid Background -->
       <div class="absolute inset-0 bg-grid-pattern [mask-image:linear-gradient(to_bottom,white_30%,transparent_90%)] pointer-events-none opacity-40"></div>
 
       <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
         
         <!-- Live Engine Announcement Pill -->
-        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-950/60 border border-brand-500/30 text-brand-300 text-xs font-mono mb-8 backdrop-blur-md shadow-inner shadow-brand-500/10">
+        <div class="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-brand-950/70 border border-brand-500/30 text-brand-300 text-xs font-mono mb-8 backdrop-blur-md shadow-inner shadow-brand-500/10">
           <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>LIVE EXECUTION ENGINE ACTIVE</span>
+          <span>LIVE QUANTITATIVE EXECUTION</span>
           <span class="text-white/30">•</span>
-          <span class="text-slate-300 font-sans">Multi-Tenant Quantitative Architecture</span>
+          <span class="text-slate-300 font-sans">Delta Exchange Perpetuals</span>
         </div>
 
         <!-- Big Display Headline -->
         <h1 class="text-4xl sm:text-6xl lg:text-7xl font-display font-extrabold tracking-tight text-white max-w-5xl mx-auto leading-[1.08]">
-          Institutional Breakout Intelligence for <span class="text-transparent bg-clip-text bg-gradient-to-r from-brand-400 via-cyan-300 to-emerald-400">Delta Exchange</span>
+          Autonomous Volatility Breakouts for <span class="text-transparent bg-clip-text bg-gradient-to-r from-brand-400 via-cyan-300 to-emerald-400">Delta Exchange</span>
         </h1>
 
         <!-- Subheading -->
         <p class="mt-6 text-base sm:text-lg lg:text-xl text-slate-300 max-w-3xl mx-auto leading-relaxed font-normal">
-          High-frequency breakout quantification across BTC, ETH, SOL, and XRP perpetuals.
-          Automated ADX volatility expansion triggers, trailing bracket protection, and cryptographically isolated per-trader vaults.
+          High-frequency algorithmic breakout engine across BTC, ETH, SOL, and XRP perpetuals.
+          Strict ADX trend filters, automated trailing ATR stop brackets, and 100% non-custodial API execution.
         </p>
 
         <!-- Primary CTA Buttons -->
         <div class="mt-10 flex flex-wrap items-center justify-center gap-4">
-          <button onclick="navigateTo('auth')" class="px-8 py-4 rounded-xl bg-gradient-to-r from-brand-600 via-cyan-500 to-emerald-500 hover:from-brand-500 hover:to-emerald-400 text-white font-semibold text-sm shadow-xl shadow-cyan-950/80 transition-all duration-300 cursor-pointer flex items-center gap-2 group">
-            <span>Launch Trading Terminal</span>
+          <button onclick="handlePrimaryCTA()" class="px-8 py-4 rounded-xl bg-gradient-to-r from-brand-600 via-cyan-500 to-emerald-500 hover:from-brand-500 hover:to-emerald-400 text-white font-semibold text-sm shadow-xl shadow-cyan-950/80 transition-all duration-300 cursor-pointer flex items-center gap-2 group">
+            <span id="hero-cta-label">Deploy Trading Desk</span>
             <svg class="w-4 h-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
           </button>
           
-          <button onclick="demoTraderLogin()" class="px-7 py-4 rounded-xl bg-obsidian-900/90 hover:bg-obsidian-850 text-slate-200 border border-white/10 hover:border-brand-500/40 font-semibold text-sm transition-all duration-200 cursor-pointer flex items-center gap-2">
-            <span class="h-2 w-2 rounded-full bg-cyan-400"></span>
-            <span>1-Click Demo Desk Access</span>
-          </button>
+          <a href="#pricing" class="px-7 py-4 rounded-xl bg-obsidian-900/90 hover:bg-obsidian-850 text-slate-200 border border-white/10 hover:border-brand-500/40 font-semibold text-sm transition-all duration-200 cursor-pointer flex items-center gap-2">
+            <span>Explore Pricing & Plans</span>
+          </a>
         </div>
 
-        <!-- Trust Signals / Metric Badges -->
-        <div class="mt-14 pt-10 border-t border-white/5 grid grid-cols-2 sm:grid-cols-4 gap-6 max-w-4xl mx-auto text-left">
+        <!-- Value Metric Badges -->
+        <div class="mt-16 pt-10 border-t border-white/5 grid grid-cols-2 sm:grid-cols-4 gap-6 max-w-4xl mx-auto text-left">
           <div class="glass-card p-4 rounded-xl">
-            <span class="text-xs text-slate-400 font-mono uppercase tracking-wider block">Real-Execution Mode</span>
-            <span class="text-lg font-bold font-mono text-emerald-400 mt-1 block">Live Perpetuals</span>
-            <span class="text-[11px] text-slate-400 mt-0.5 block">Direct order routing to Delta</span>
+            <span class="text-xs text-slate-400 font-mono uppercase tracking-wider block">Security Model</span>
+            <span class="text-lg font-bold font-mono text-emerald-400 mt-1 block">100% Non-Custodial</span>
+            <span class="text-[11px] text-slate-400 mt-0.5 block">Capital never leaves Delta</span>
           </div>
           <div class="glass-card p-4 rounded-xl">
-            <span class="text-xs text-slate-400 font-mono uppercase tracking-wider block">Latency Precision</span>
-            <span class="text-lg font-bold font-mono text-cyan-400 mt-1 block">500ms Stream</span>
-            <span class="text-[11px] text-slate-400 mt-0.5 block">FastAPI + Asyncio WebSocket</span>
+            <span class="text-xs text-slate-400 font-mono uppercase tracking-wider block">Real Order Routing</span>
+            <span class="text-lg font-bold font-mono text-cyan-400 mt-1 block">Live Perpetuals</span>
+            <span class="text-[11px] text-slate-400 mt-0.5 block">Direct HMAC-SHA256 API</span>
           </div>
           <div class="glass-card p-4 rounded-xl">
-            <span class="text-xs text-slate-400 font-mono uppercase tracking-wider block">Multi-Tenant Vault</span>
-            <span class="text-lg font-bold font-mono text-brand-300 mt-1 block">100% Isolated</span>
-            <span class="text-[11px] text-slate-400 mt-0.5 block">Supabase Auth & Row Isolation</span>
+            <span class="text-xs text-slate-400 font-mono uppercase tracking-wider block">Trailing Protection</span>
+            <span class="text-lg font-bold font-mono text-brand-300 mt-1 block">ATR Dynamic SL/TP</span>
+            <span class="text-[11px] text-slate-400 mt-0.5 block">Automated profit ratcheting</span>
           </div>
           <div class="glass-card p-4 rounded-xl">
-            <span class="text-xs text-slate-400 font-mono uppercase tracking-wider block">Risk Safeguard</span>
-            <span class="text-lg font-bold font-mono text-amber-400 mt-1 block">Circuit Breaker</span>
-            <span class="text-[11px] text-slate-400 mt-0.5 block">Automated Daily Drawdown Halt</span>
+            <span class="text-xs text-slate-400 font-mono uppercase tracking-wider block">Capital Safeguard</span>
+            <span class="text-lg font-bold font-mono text-rose-400 mt-1 block">Circuit Breaker</span>
+            <span class="text-[11px] text-slate-400 mt-0.5 block">Automated daily drawdown halt</span>
           </div>
         </div>
 
@@ -267,15 +259,15 @@
     </header>
 
 
-    <!-- LIVE MARKET MARQUEE (Dynamic Prices from Backend) -->
-    <section id="performance" class="py-12 bg-obsidian-900 border-b border-white/5 relative">
+    <!-- LIVE MARKET MARQUEE -->
+    <section id="markets" class="py-12 bg-obsidian-900 border-b border-white/5 relative">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="flex items-center justify-between mb-6">
           <div class="flex items-center space-x-2">
             <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
             <h2 class="text-xs font-mono font-bold tracking-wider uppercase text-slate-300">Live Delta Exchange Perpetual Feeds</h2>
           </div>
-          <span class="text-xs font-mono text-brand-400">Direct WebSocket Stream</span>
+          <span class="text-xs font-mono text-brand-400">Real-Time Data Feed</span>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="landing-ticker-cards">
@@ -308,18 +300,18 @@
     <!-- BENTO GRID FEATURES -->
     <section id="features" class="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="text-center max-w-3xl mx-auto mb-16">
-        <h2 class="text-xs font-mono text-brand-400 uppercase tracking-widest font-bold">Algorithmic Architecture</h2>
+        <h2 class="text-xs font-mono text-brand-400 uppercase tracking-widest font-bold">Algorithmic Edge</h2>
         <p class="mt-2 text-3xl sm:text-4xl font-display font-extrabold text-white tracking-tight">
-          Engineered for Rigorous Quant Execution
+          Engineered for Quantitative Precision & Capital Preservation
         </p>
         <p class="mt-4 text-sm sm:text-base text-slate-400 leading-relaxed">
-          Every component is built for speed, safety, and strict separation between institutional traders.
+          The engine operates 24/7 scanning consolidation zones, eliminating emotional decision-making, and executing mathematically verified volatility breakouts.
         </p>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         
-        <!-- Bento 1: Breakout Detection (Wide) -->
+        <!-- Bento 1: Breakout Detection -->
         <div class="md:col-span-2 glass-card glass-card-hover p-8 rounded-2xl flex flex-col justify-between">
           <div>
             <div class="h-12 w-12 rounded-xl bg-brand-500/10 border border-brand-500/30 flex items-center justify-center text-brand-400 mb-6">
@@ -327,13 +319,13 @@
             </div>
             <h3 class="text-xl font-display font-bold text-white">Sub-Second Volatility Breakout Detection</h3>
             <p class="text-slate-300 text-sm mt-3 leading-relaxed">
-              Continuous session consolidation scanning. The daemon enforces an ADX &ge; 20 trend filter coupled with dynamic ATR expansion confirmation before staging resting stop orders. Zero speculative counter-trend trades.
+              Continuous 1-minute candle analysis. The engine enforces an ADX &ge; 20 trend-strength filter coupled with dynamic ATR expansion confirmation before staging resting breakout orders. Sideways whipsaws and false breaks are discarded automatically.
             </p>
           </div>
           <div class="mt-6 pt-6 border-t border-white/5 flex flex-wrap items-center gap-3 font-mono text-xs text-slate-400">
-            <span class="px-2.5 py-1 rounded-md bg-obsidian-900 border border-white/5 text-emerald-400 font-semibold">ADX Threshold Filter</span>
+            <span class="px-2.5 py-1 rounded-md bg-obsidian-900 border border-white/5 text-emerald-400 font-semibold">ADX Trend Filter</span>
             <span class="px-2.5 py-1 rounded-md bg-obsidian-900 border border-white/5 text-cyan-400 font-semibold">Session VWAP Anchor</span>
-            <span class="px-2.5 py-1 rounded-md bg-obsidian-900 border border-white/5 text-slate-300">Previous Day High/Low</span>
+            <span class="px-2.5 py-1 rounded-md bg-obsidian-900 border border-white/5 text-slate-300">Previous High/Low Consolidation</span>
           </div>
         </div>
 
@@ -345,7 +337,7 @@
             </div>
             <h3 class="text-xl font-display font-bold text-white">Automated Trailing Risk Brackets</h3>
             <p class="text-slate-300 text-sm mt-3 leading-relaxed">
-              Every position is fortified instantly upon fill with hard Stop-Loss and Take-Profit orders. ATR-based trailing ratchets lock in profits during momentum runs.
+              Every position is fortified instantly upon fill with hard Stop-Loss and Take-Profit orders. Dynamic ATR trailing stops ratchet higher during momentum runs to lock in profits.
             </p>
           </div>
           <div class="mt-6 pt-6 border-t border-white/5 font-mono text-xs text-emerald-400 font-semibold">
@@ -353,7 +345,7 @@
           </div>
         </div>
 
-        <!-- Bento 3: Isolated Multi-Tenant Vaults -->
+        <!-- Bento 3: Isolated Non-Custodial Vaults -->
         <div class="glass-card glass-card-hover p-8 rounded-2xl flex flex-col justify-between">
           <div>
             <div class="h-12 w-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-6">
@@ -361,31 +353,31 @@
             </div>
             <h3 class="text-xl font-display font-bold text-white">Private Non-Custodial Keys</h3>
             <p class="text-slate-300 text-sm mt-3 leading-relaxed">
-              Each user provisions their own tenant account and supplies their personal Delta Exchange API Key & Secret. Credentials never leave your private vault.
+              You provide your personal Delta Exchange API credentials with Trading-only permissions. We never hold your deposits or request withdrawal rights.
             </p>
           </div>
           <div class="mt-6 pt-6 border-t border-white/5 font-mono text-xs text-amber-300">
-            <span>Supabase Auth & RLS Protected</span>
+            <span>Encrypted Tenant Isolation</span>
           </div>
         </div>
 
-        <!-- Bento 4: Circuit Breaker & Kill Switch (Wide) -->
-        <div class="md:col-span-2 glass-card glass-card-hover p-8 rounded-2xl flex flex-col justify-between">
+        <!-- Bento 4: Circuit Breakers & Kill Switch -->
+        <div id="safeguards" class="md:col-span-2 glass-card glass-card-hover p-8 rounded-2xl flex flex-col justify-between">
           <div>
             <div class="h-12 w-12 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mb-6">
               <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
             </div>
-            <h3 class="text-xl font-display font-bold text-white">Max Drawdown Circuit Breaker & Emergency Flatten</h3>
+            <h3 class="text-xl font-display font-bold text-white">Daily Drawdown Governor & Emergency Kill Switch</h3>
             <p class="text-slate-300 text-sm mt-3 leading-relaxed">
-              An institutional-grade risk governor tracks daily high-water mark drawdown. If total equity dips beyond the configurable threshold (default 4.0%), all resting orders are revoked and the bot halts instantly. One-click Kill Switch closes all positions simultaneously.
+              An institutional risk manager tracks your daily high-water mark. If account drawdown approaches the risk limit (default 4.0%), all pending resting orders are instantly revoked and the engine halts. One-click Kill Switch closes all open positions on demand.
             </p>
           </div>
           <div class="mt-6 pt-6 border-t border-white/5 flex flex-wrap items-center gap-4 font-mono text-xs text-slate-400">
-            <span class="text-rose-400 font-semibold">Immediate Execution Flatten</span>
+            <span class="text-rose-400 font-semibold">Instant Execution Flatten</span>
             <span>•</span>
-            <span class="text-slate-300">High-Water Mark Auditing</span>
+            <span class="text-slate-300">High-Water Mark Governor</span>
             <span>•</span>
-            <span class="text-cyan-400">In-Memory RingBuffer Audit Logs</span>
+            <span class="text-cyan-400">Per-Trade Margin Limits</span>
           </div>
         </div>
 
@@ -393,108 +385,207 @@
     </section>
 
 
-    <!-- ARCHITECTURE & DEPLOYMENT SPECS -->
-    <section id="architecture" class="py-20 bg-obsidian-900/60 border-y border-white/5">
+    <!-- PRICING & MEMBERSHIP TIERS (COMMERCIAL SECTION) -->
+    <section id="pricing" class="py-24 bg-obsidian-900/60 border-y border-white/5">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-          <div>
-            <span class="text-xs font-mono text-cyan-400 uppercase tracking-widest font-bold">Cloud Infrastructure</span>
-            <h2 class="text-3xl font-display font-extrabold text-white mt-2 tracking-tight">
-              Decoupled High-Speed Cloud Deployment
-            </h2>
-            <p class="mt-4 text-sm text-slate-300 leading-relaxed">
-              The Delta-Bot platform is engineered with clean separation of concerns:
-            </p>
-
-            <div class="mt-6 space-y-4 text-sm">
-              <div class="flex items-start space-x-3">
-                <div class="h-6 w-6 rounded-md bg-brand-500/20 text-brand-400 flex items-center justify-center shrink-0 mt-0.5 font-bold text-xs">▲</div>
-                <div>
-                  <strong class="text-white">Vercel Edge Frontend:</strong> Ultra-fast zero-latency dashboard delivery globally with instant state hydration and fallback sync.
-                </div>
-              </div>
-              <div class="flex items-start space-x-3">
-                <div class="h-6 w-6 rounded-md bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5 font-bold text-xs">⚙</div>
-                <div>
-                  <strong class="text-white">Render Dedicated Backend:</strong> Persistent Python 3.14 orchestrator daemon running non-blocking AsyncIO WebSocket execution loops.
-                </div>
-              </div>
-              <div class="flex items-start space-x-3">
-                <div class="h-6 w-6 rounded-md bg-brand-400/20 text-brand-300 flex items-center justify-center shrink-0 mt-0.5 font-bold text-xs">⚡</div>
-                <div>
-                  <strong class="text-white">Supabase Multi-Tenant Auth:</strong> PostgreSQL Row Level Security safeguarding isolated tenant credentials and settings.
-                </div>
-              </div>
-            </div>
-
-            <div class="mt-8 flex gap-3">
-              <a href="https://github.com/dakshgr8/Delta-Bot" target="_blank" class="px-5 py-2.5 rounded-lg bg-obsidian-800 hover:bg-obsidian-750 border border-white/10 text-xs font-semibold text-slate-200 transition flex items-center gap-2 cursor-pointer">
-                <svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
-                <span>View Source on GitHub</span>
-              </a>
-            </div>
-          </div>
-
-          <!-- Architecture Visual Card -->
-          <div class="glass-card p-6 rounded-2xl border border-brand-500/20 shadow-2xl space-y-4 font-mono text-xs">
-            <div class="flex items-center justify-between pb-3 border-b border-white/5">
-              <span class="text-slate-400">DAEMON RUNTIME TOPOLOGY</span>
-              <span class="text-emerald-400 font-bold">ALL SYSTEMS LIVE</span>
-            </div>
-            
-            <div class="space-y-3">
-              <div class="p-3 rounded-lg bg-obsidian-950/80 border border-white/5 flex items-center justify-between">
-                <div>
-                  <span class="text-white font-semibold">FastAPI Gateway</span>
-                  <span class="text-[10px] text-slate-400 block font-sans">REST & Streaming WebSocket</span>
-                </div>
-                <span class="text-emerald-400">PORT 8000</span>
-              </div>
-              <div class="p-3 rounded-lg bg-obsidian-950/80 border border-white/5 flex items-center justify-between">
-                <div>
-                  <span class="text-white font-semibold">Delta Exchange REST Client</span>
-                  <span class="text-[10px] text-slate-400 block font-sans">HMAC SHA-256 Signatures</span>
-                </div>
-                <span class="text-cyan-400">api.delta.exchange</span>
-              </div>
-              <div class="p-3 rounded-lg bg-obsidian-950/80 border border-white/5 flex items-center justify-between">
-                <div>
-                  <span class="text-white font-semibold">Market Feed WebSocket</span>
-                  <span class="text-[10px] text-slate-400 block font-sans">v2/ticker + l2_orderbook</span>
-                </div>
-                <span class="text-cyan-400">socket.delta.exchange</span>
-              </div>
-              <div class="p-3 rounded-lg bg-obsidian-950/80 border border-white/5 flex items-center justify-between">
-                <div>
-                  <span class="text-white font-semibold">PostgreSQL Multi-Tenant</span>
-                  <span class="text-[10px] text-slate-400 block font-sans">Tenants, Keys, Settings</span>
-                </div>
-                <span class="text-brand-300">Supabase DB</span>
-              </div>
-            </div>
-          </div>
+        
+        <div class="text-center max-w-3xl mx-auto mb-16">
+          <h2 class="text-xs font-mono text-brand-400 uppercase tracking-widest font-bold">Transparent Plans</h2>
+          <p class="mt-2 text-3xl sm:text-4xl font-display font-extrabold text-white tracking-tight">
+            Simple, Institutional-Grade Pricing
+          </p>
+          <p class="mt-4 text-sm sm:text-base text-slate-400 leading-relaxed">
+            Deploy your automated desk in 60 seconds. Connect your Delta Exchange account and trade perpetuals 24/7 with zero revenue sharing.
+          </p>
         </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
+          
+          <!-- Tier 1: Starter -->
+          <div class="glass-card rounded-2xl p-8 flex flex-col justify-between border border-white/10 hover:border-white/20 transition">
+            <div>
+              <div class="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">Starter Desk</div>
+              <div class="mt-4 flex items-baseline">
+                <span class="text-4xl font-display font-extrabold text-white">$0</span>
+                <span class="ml-2 text-xs font-mono text-slate-400">/ trial</span>
+              </div>
+              <p class="mt-3 text-xs text-slate-300 leading-relaxed">
+                Ideal for testing algorithmic breakouts on BTC with conservative leverage.
+              </p>
+
+              <div class="mt-6 space-y-3 font-sans text-xs text-slate-300 border-t border-white/5 pt-6">
+                <div class="flex items-center gap-2">
+                  <span class="text-brand-400">✓</span> <span>1 Active Contract (BTCUSDT)</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-brand-400">✓</span> <span>Up to 5x Leverage</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-brand-400">✓</span> <span>Automated ATR Trailing Stops</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-brand-400">✓</span> <span>Web Terminal Access</span>
+                </div>
+              </div>
+            </div>
+
+            <button onclick="navigateTo('auth')" class="mt-8 w-full py-3 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 text-white font-semibold text-xs border border-white/10 transition cursor-pointer">
+              Deploy Free Trial
+            </button>
+          </div>
+
+          <!-- Tier 2: Pro Quant (Featured) -->
+          <div class="glass-card rounded-2xl p-8 flex flex-col justify-between border-2 border-brand-500/60 bg-gradient-to-b from-brand-950/40 via-obsidian-900 to-obsidian-950 relative shadow-2xl shadow-cyan-950/50">
+            <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-gradient-to-r from-brand-500 to-cyan-400 text-obsidian-950 text-[10px] font-mono font-extrabold uppercase tracking-widest shadow">
+              Most Popular
+            </div>
+
+            <div>
+              <div class="text-xs font-mono font-bold uppercase tracking-wider text-brand-300">Pro Quant Desk</div>
+              <div class="mt-4 flex items-baseline">
+                <span class="text-4xl font-display font-extrabold text-white">$99</span>
+                <span class="ml-2 text-xs font-mono text-slate-400">/ month</span>
+              </div>
+              <p class="mt-3 text-xs text-slate-300 leading-relaxed">
+                Full-scale autonomous trading across all major perpetuals with priority order routing.
+              </p>
+
+              <div class="mt-6 space-y-3 font-sans text-xs text-slate-200 border-t border-white/10 pt-6">
+                <div class="flex items-center gap-2">
+                  <span class="text-emerald-400 font-bold">✓</span> <span>All 4 Assets (BTC, ETH, SOL, XRP)</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-emerald-400 font-bold">✓</span> <span>Up to 20x Configurable Leverage</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-emerald-400 font-bold">✓</span> <span>Sub-second Priority Execution</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-emerald-400 font-bold">✓</span> <span>Dynamic Multi-bracket ATR Trailing</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-emerald-400 font-bold">✓</span> <span>24/7 Dedicated Cloud Daemon</span>
+                </div>
+              </div>
+            </div>
+
+            <button onclick="navigateTo('auth')" class="mt-8 w-full py-3.5 rounded-xl bg-gradient-to-r from-brand-500 to-cyan-400 hover:from-brand-400 hover:to-cyan-300 text-obsidian-950 font-bold text-xs shadow-lg shadow-cyan-950/70 transition cursor-pointer">
+              Launch Pro Quant Desk
+            </button>
+          </div>
+
+          <!-- Tier 3: Institutional VIP -->
+          <div class="glass-card rounded-2xl p-8 flex flex-col justify-between border border-white/10 hover:border-white/20 transition">
+            <div>
+              <div class="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">Institutional VIP</div>
+              <div class="mt-4 flex items-baseline">
+                <span class="text-4xl font-display font-extrabold text-white">$299</span>
+                <span class="ml-2 text-xs font-mono text-slate-400">/ month</span>
+              </div>
+              <p class="mt-3 text-xs text-slate-300 leading-relaxed">
+                For prop traders & funds requiring bespoke leverage, API webhooks, and private instances.
+              </p>
+
+              <div class="mt-6 space-y-3 font-sans text-xs text-slate-300 border-t border-white/5 pt-6">
+                <div class="flex items-center gap-2">
+                  <span class="text-brand-400">✓</span> <span>Unlimited Custom Perpetual Assets</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-brand-400">✓</span> <span>Dedicated Execution Instance (VPS)</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-brand-400">✓</span> <span>Custom Risk Governor & Webhooks</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-brand-400">✓</span> <span>1-on-1 Dedicated Quant Support</span>
+                </div>
+              </div>
+            </div>
+
+            <button onclick="navigateTo('auth')" class="mt-8 w-full py-3 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 text-white font-semibold text-xs border border-white/10 transition cursor-pointer">
+              Contact Institutional Sales
+            </button>
+          </div>
+
+        </div>
+
       </div>
     </section>
 
 
-    <!-- BOTTOM CTA BANNER -->
-    <section class="py-24 relative overflow-hidden bg-radial-glow">
+    <!-- FAQ SECTION -->
+    <section id="faq" class="py-24 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-16">
+        <h2 class="text-xs font-mono text-brand-400 uppercase tracking-widest font-bold">Frequently Asked Questions</h2>
+        <p class="mt-2 text-3xl font-display font-extrabold text-white tracking-tight">
+          Everything You Need to Know
+        </p>
+      </div>
+
+      <div class="space-y-4 text-xs font-sans">
+        
+        <!-- FAQ 1 -->
+        <div class="glass-card rounded-xl p-5 border border-white/5 space-y-2">
+          <h3 class="font-display font-bold text-sm text-white flex items-center justify-between">
+            <span>Can Delta-Bot withdraw funds from my Delta Exchange account?</span>
+            <span class="text-brand-400">01</span>
+          </h3>
+          <p class="text-slate-300 leading-relaxed">
+            <strong>Absolutely not.</strong> You supply Delta Exchange API credentials created with Trading-only permissions. Withdrawal permissions should remain disabled. Your capital stays 100% in your custody on Delta Exchange.
+          </p>
+        </div>
+
+        <!-- FAQ 2 -->
+        <div class="glass-card rounded-xl p-5 border border-white/5 space-y-2">
+          <h3 class="font-display font-bold text-sm text-white flex items-center justify-between">
+            <span>Which markets does the bot trade?</span>
+            <span class="text-brand-400">02</span>
+          </h3>
+          <p class="text-slate-300 leading-relaxed">
+            The bot trades USD and USDT perpetual futures contracts on Delta Exchange (BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT) using real limit and stop-market orders.
+          </p>
+        </div>
+
+        <!-- FAQ 3 -->
+        <div class="glass-card rounded-xl p-5 border border-white/5 space-y-2">
+          <h3 class="font-display font-bold text-sm text-white flex items-center justify-between">
+            <span>Do I need to leave my computer or browser open?</span>
+            <span class="text-brand-400">03</span>
+          </h3>
+          <p class="text-slate-300 leading-relaxed">
+            No. The execution engine runs 24/7 on dedicated cloud infrastructure. The web terminal is simply your live monitoring and control desk—you can close your tab anytime and your orders will execute normally.
+          </p>
+        </div>
+
+        <!-- FAQ 4 -->
+        <div class="glass-card rounded-xl p-5 border border-white/5 space-y-2">
+          <h3 class="font-display font-bold text-sm text-white flex items-center justify-between">
+            <span>How does the Trailing Stop-Loss protect my capital?</span>
+            <span class="text-brand-400">04</span>
+          </h3>
+          <p class="text-slate-300 leading-relaxed">
+            Every trade is immediately assigned a dynamic Stop-Loss bracket based on market volatility (ATR). As price moves in your favor, the trailing stop ratchets upwards, locking in profits and eliminating downside risk.
+          </p>
+        </div>
+
+      </div>
+    </section>
+
+
+    <!-- BOTTOM CTA SECTION -->
+    <section class="py-24 relative overflow-hidden bg-radial-glow border-t border-white/5">
       <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
         <h2 class="text-3xl sm:text-5xl font-display font-extrabold text-white tracking-tight">
-          Automate Your Delta Trading Today
+          Ready to Automate Your Delta Trading?
         </h2>
         <p class="mt-4 text-base text-slate-300 max-w-2xl mx-auto leading-relaxed">
-          Create an isolated trading desk in 30 seconds. Connect your Delta Exchange keys and let the breakout engine manage positions 24/7.
+          Create an isolated trading desk in 60 seconds. Connect your Delta Exchange keys and let the breakout engine manage positions 24/7.
         </p>
 
         <div class="mt-8 flex flex-wrap items-center justify-center gap-4">
-          <button onclick="navigateTo('auth')" class="px-8 py-4 rounded-xl bg-gradient-to-r from-brand-600 via-cyan-500 to-emerald-500 hover:from-brand-500 hover:to-emerald-400 text-white font-semibold text-sm shadow-xl shadow-cyan-950/90 transition cursor-pointer flex items-center gap-2">
-            <span>Create Free Trading Desk</span>
+          <button onclick="handlePrimaryCTA()" class="px-8 py-4 rounded-xl bg-gradient-to-r from-brand-600 via-cyan-500 to-emerald-500 hover:from-brand-500 hover:to-emerald-400 text-white font-semibold text-sm shadow-xl shadow-cyan-950/90 transition cursor-pointer flex items-center gap-2">
+            <span>Get Started Now</span>
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
-          </button>
-          <button onclick="navigateTo('dashboard')" class="px-7 py-4 rounded-xl bg-obsidian-900 border border-white/10 hover:border-brand-500/40 text-slate-200 font-semibold text-sm transition cursor-pointer">
-            View Live Public Feed
           </button>
         </div>
       </div>
@@ -509,10 +600,14 @@
           <span>Autonomous Perpetual Breakout Engine</span>
         </div>
         <div class="flex items-center space-x-6">
-          <a href="https://github.com/dakshgr8/Delta-Bot" target="_blank" class="hover:text-white transition">GitHub Repo</a>
-          <a href="https://delta-bot-07e2.onrender.com/api/status" target="_blank" class="hover:text-white transition">Render API</a>
+          <a href="#features" class="hover:text-white transition">Features</a>
+          <a href="#pricing" class="hover:text-white transition">Pricing</a>
+          <a href="#faq" class="hover:text-white transition">FAQ</a>
           <a href="#global-nav" class="hover:text-white transition">Back to Top ↑</a>
         </div>
+      </div>
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4 pt-4 border-t border-white/5 text-[11px] text-slate-500 text-center sm:text-left">
+        Disclaimer: Cryptocurrency and perpetual futures trading carries financial risk. Algorithmic execution tools do not guarantee profits. Non-custodial API execution engine.
       </div>
     </footer>
 
@@ -520,52 +615,49 @@
 
 
   <!-- ========================================================================= -->
-  <!-- 2. VIEW: DEDICATED AUTHENTICATION DESK (Login / Sign Up) -->
+  <!-- 2. VIEW: CLIENT AUTH DESK (FRICTIONLESS SIGN IN / REGISTRATION) -->
   <!-- ========================================================================= -->
-  <div id="view-auth" class="view-container hidden min-h-[calc(100vh-4rem)] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-radial-glow relative">
-    
-    <div class="w-full max-w-md space-y-6 relative z-10">
-      
-      <!-- Top Card Header -->
-      <div class="text-center space-y-2">
-        <div class="inline-flex h-12 w-12 rounded-2xl bg-gradient-to-tr from-brand-600 via-cyan-500 to-emerald-400 p-[1px] shadow-xl shadow-cyan-950/60 mb-2">
-          <div class="h-full w-full bg-obsidian-950 rounded-[15px] flex items-center justify-center font-display font-extrabold text-brand-400 text-xl">
-            Δ
-          </div>
-        </div>
-        <h2 class="text-2xl font-display font-bold text-white tracking-tight">Trader Authentication Vault</h2>
-        <p class="text-xs text-slate-400 font-sans">Access your isolated multi-tenant algorithmic trading desk</p>
-      </div>
+  <div id="view-auth" class="view-container">
+    <div class="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4 sm:p-6 relative bg-radial-glow">
+      <div class="absolute inset-0 bg-grid-pattern [mask-image:radial-gradient(ellipse_at_center,transparent_20%,black)] pointer-events-none opacity-40"></div>
 
-      <!-- Main Auth Box -->
-      <div class="glass-card rounded-2xl p-6 sm:p-8 shadow-2xl border border-white/10 relative overflow-hidden">
+      <div class="max-w-md w-full glass-card rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 border border-white/10 space-y-6">
         
-        <!-- Tab Selector: Sign In vs Sign Up -->
-        <div class="flex rounded-xl bg-obsidian-950/80 p-1 border border-white/5 mb-6 text-xs font-semibold">
-          <button id="tab-btn-signin" onclick="switchAuthTab('signin')" class="flex-1 py-2 rounded-lg text-center transition-all duration-200 cursor-pointer bg-brand-600 text-white shadow">
+        <!-- Header -->
+        <div class="text-center space-y-2">
+          <div class="inline-flex h-12 w-12 rounded-2xl bg-gradient-to-tr from-brand-600 via-cyan-500 to-emerald-400 p-[1px] shadow-lg shadow-cyan-950/60 mb-1">
+            <div class="h-full w-full bg-obsidian-950 rounded-[15px] flex items-center justify-center font-display font-bold text-transparent bg-clip-text bg-gradient-to-tr from-brand-400 to-emerald-300 text-xl">
+              Δ
+            </div>
+          </div>
+          <h2 class="font-display font-bold text-2xl text-white tracking-tight">Client Trading Desk</h2>
+          <p class="text-xs text-slate-400 leading-normal">
+            Access your private algorithmic execution terminal.
+          </p>
+        </div>
+
+        <!-- Tab Switcher -->
+        <div class="flex rounded-xl bg-obsidian-950 p-1 border border-white/5 font-mono text-xs">
+          <button id="auth-tab-signin" onclick="switchAuthTab('signin')" class="flex-1 py-2 rounded-lg font-semibold transition cursor-pointer text-white bg-brand-600 shadow-sm">
             Sign In
           </button>
-          <button id="tab-btn-signup" onclick="switchAuthTab('signup')" class="flex-1 py-2 rounded-lg text-center transition-all duration-200 cursor-pointer text-slate-400 hover:text-white">
-            Create Desk
+          <button id="auth-tab-signup" onclick="switchAuthTab('signup')" class="flex-1 py-2 rounded-lg font-semibold transition cursor-pointer text-slate-400 hover:text-white">
+            Create Account
           </button>
         </div>
 
-        <!-- Feedback Alert Container -->
-        <div id="auth-feedback-box" class="hidden mb-4 p-3 rounded-lg text-xs font-mono border"></div>
+        <!-- Auth Feedback Alert Box -->
+        <div id="auth-feedback" class="hidden p-3 rounded-xl text-xs font-mono border"></div>
 
         <!-- TAB 1: SIGN IN FORM -->
         <div id="auth-panel-signin" class="space-y-4">
           <div>
             <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono mb-1.5">Email Address</label>
-            <div class="relative">
-              <input type="email" id="login-email" placeholder="trader@domain.com" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition font-sans">
-            </div>
+            <input type="email" id="login-email" placeholder="trader@domain.com" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition font-sans">
           </div>
 
           <div>
-            <div class="flex items-center justify-between mb-1.5">
-              <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono">Password</label>
-            </div>
+            <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono mb-1.5">Password</label>
             <input type="password" id="login-password" placeholder="••••••••••••" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition font-sans">
           </div>
 
@@ -573,38 +665,6 @@
             <span>Sign In to Trading Desk</span>
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
           </button>
-
-          <!-- One-Click Demo Trader Button -->
-          <div class="pt-2">
-            <div class="relative flex py-2 items-center">
-              <div class="flex-grow border-t border-white/5"></div>
-              <span class="flex-shrink mx-3 text-[10px] text-slate-400 uppercase tracking-wider font-mono">Quick Access</span>
-              <div class="flex-grow border-t border-white/5"></div>
-            </div>
-
-            <button onclick="demoTraderLogin()" class="w-full mt-1 py-2.5 rounded-xl bg-obsidian-900 hover:bg-obsidian-850 text-brand-300 border border-brand-500/30 hover:border-brand-500/60 font-semibold text-xs transition cursor-pointer flex items-center justify-center gap-2">
-              <span class="h-2 w-2 rounded-full bg-brand-400 animate-pulse"></span>
-              <span>1-Click Demo Trader Access</span>
-            </button>
-          </div>
-
-          <!-- Master Token Admin Toggle -->
-          <div class="pt-2">
-            <button onclick="toggleAdminTokenPanel()" class="text-[11px] text-slate-400 hover:text-slate-200 transition font-mono flex items-center gap-1 cursor-pointer">
-              <span>› Developer Master Token Access</span>
-            </button>
-            <div id="admin-token-panel" class="hidden mt-2 p-3 rounded-xl bg-obsidian-950 border border-white/5 space-y-2">
-              <input type="password" id="input-auth-token" placeholder="Enter DASHBOARD_AUTH_TOKEN..." class="w-full bg-obsidian-900 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 font-mono">
-              <div class="flex gap-2">
-                <button onclick="saveAuthTokenFromModal()" class="flex-1 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition cursor-pointer">
-                  Save Admin Token
-                </button>
-                <button onclick="clearAuthToken()" class="px-3 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900/60 text-xs font-semibold text-rose-300 transition cursor-pointer">
-                  Clear
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
 
         <!-- TAB 2: SIGN UP FORM -->
@@ -616,54 +676,45 @@
 
           <div>
             <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono mb-1.5">Password (Min 6 Characters)</label>
-            <input type="password" id="signup-password" placeholder="Create strong password..." class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition font-sans">
+            <input type="password" id="signup-password" placeholder="Create secure password..." class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition font-sans">
           </div>
 
           <div>
-            <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono mb-1.5">Trading Desk Name</label>
+            <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono mb-1.5">Trading Desk Name (Optional)</label>
             <input type="text" id="signup-name" placeholder="e.g. Apex Alpha Desk" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition font-sans">
           </div>
 
-          <div>
-            <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono mb-1.5">Initial Margin (USD Collateral)</label>
-            <input type="number" id="signup-balance" value="10000" min="100" step="100" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition font-mono">
-          </div>
-
-          <button id="btn-submit-signup" onclick="signupWithSupabase()" class="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-500 hover:from-emerald-500 hover:to-cyan-400 text-white font-semibold text-sm shadow-lg shadow-emerald-950/80 transition cursor-pointer flex items-center justify-center gap-2">
-            <span>Provision New Trading Vault</span>
+          <button id="btn-submit-signup" onclick="signupWithSupabase()" class="w-full py-3 rounded-xl bg-gradient-to-r from-brand-600 to-cyan-500 hover:from-brand-500 hover:to-cyan-400 text-white font-semibold text-sm shadow-lg shadow-cyan-950/80 transition cursor-pointer flex items-center justify-center gap-2">
+            <span>Create Trading Desk</span>
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
           </button>
         </div>
 
-      </div>
+        <div class="text-center pt-2 border-t border-white/5">
+          <button onclick="navigateTo('landing')" class="text-xs text-slate-400 hover:text-slate-200 transition font-mono">
+            ← Back to Product Overview
+          </button>
+        </div>
 
-      <!-- Back to Landing Link -->
-      <div class="text-center">
-        <button onclick="navigateTo('landing')" class="text-xs text-slate-400 hover:text-white transition font-mono flex items-center justify-center gap-1.5 mx-auto cursor-pointer">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
-          <span>Return to Institutional Homepage</span>
-        </button>
       </div>
-
     </div>
   </div>
 
 
   <!-- ========================================================================= -->
-  <!-- 3. VIEW: QUANTITATIVE TERMINAL DASHBOARD -->
+  <!-- 3. VIEW: CLIENT QUANT TERMINAL / DASHBOARD -->
   <!-- ========================================================================= -->
-  <div id="view-dashboard" class="view-container hidden flex-1 flex flex-col">
-    
-    <!-- SUB-NAV / TERMINAL TELEMETRY HEADER -->
-    <div class="bg-obsidian-900 border-b border-white/5 px-4 sm:px-6 py-2.5">
+  <div id="view-dashboard" class="view-container">
+
+    <!-- Top Command Strip -->
+    <div class="bg-obsidian-900 border-b border-white/5 px-4 sm:px-6 lg:px-8 py-3">
       <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
         
-        <!-- Left: Execution Badge & Active Tenant Selector -->
+        <!-- Left: Status & API Connection Badge -->
         <div class="flex items-center gap-2.5 flex-wrap">
-          <!-- Permanent Real Trading Badge -->
           <div class="text-xs px-2.5 py-1 rounded-lg font-mono font-semibold flex items-center gap-1.5 border border-emerald-500/40 bg-emerald-950/60 text-emerald-300 shadow-sm" title="Live Real Order Routing Active">
             <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>LIVE REAL TRADING</span>
+            <span>LIVE TRADING</span>
           </div>
 
           <!-- Delta API Key Status Button -->
@@ -672,33 +723,7 @@
             <span id="api-key-status-text">Keys Needed</span>
           </button>
 
-          <!-- Tenant Dropdown Selector -->
-          <div class="relative inline-block text-left" id="tenant-dropdown-container">
-            <button onclick="toggleTenantDropdown()" class="text-xs px-3 py-1 rounded-lg font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 bg-obsidian-850 hover:bg-obsidian-800 text-cyan-300 border border-white/10 shadow-sm">
-              <span class="h-1.5 w-1.5 rounded-full bg-cyan-400"></span>
-              <span id="current-tenant-label">Account: default</span>
-              <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-            </button>
-
-            <!-- Tenant Dropdown Menu -->
-            <div id="tenant-dropdown-menu" class="hidden absolute left-0 mt-2 w-72 rounded-xl glass-card shadow-2xl z-50 py-1 divide-y divide-white/5">
-              <div class="px-3 py-2 text-[10px] uppercase font-semibold text-slate-400 flex justify-between items-center bg-obsidian-950/70 font-mono">
-                <span>Tenant Accounts</span>
-                <span class="text-cyan-400" id="tenant-count-badge">1 active</span>
-              </div>
-              <div id="tenant-dropdown-list" class="max-h-60 overflow-y-auto divide-y divide-white/5">
-                <!-- Injected via JS -->
-              </div>
-              <div class="p-2 bg-obsidian-950/90 flex gap-2">
-                <button onclick="openNewTenantModal(); toggleTenantDropdown();" class="flex-1 text-center py-1.5 text-xs rounded-lg bg-brand-600 hover:bg-brand-500 font-semibold text-white transition cursor-pointer">
-                  + New Tenant
-                </button>
-                <button onclick="openTenantFleetModal(); toggleTenantDropdown();" class="flex-1 text-center py-1.5 text-xs rounded-lg bg-obsidian-850 hover:bg-obsidian-800 text-slate-200 font-semibold transition border border-white/10 cursor-pointer">
-                  Fleet View
-                </button>
-              </div>
-            </div>
-          </div>
+          <span class="text-xs text-slate-400 font-mono hidden sm:inline" id="client-desk-label">Desk: Apex Alpha</span>
         </div>
 
         <!-- Center: Quick Portfolio Metrics Strip -->
@@ -728,21 +753,21 @@
         <!-- Right: Engine Controls -->
         <div class="flex items-center space-x-2">
           <!-- Strategy Start/Pause -->
-          <button id="btn-toggle-trading" onclick="toggleTrading()" class="px-3 py-1 rounded-lg font-semibold text-xs uppercase tracking-wider transition flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow cursor-pointer">
+          <button id="btn-toggle-trading" onclick="toggleTrading()" class="px-3.5 py-1.5 rounded-xl font-semibold text-xs uppercase tracking-wider transition flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow cursor-pointer">
             <span class="h-2 w-2 rounded-full bg-white animate-pulse"></span>
             <span id="btn-trading-text">RUNNING</span>
           </button>
 
           <!-- Emergency Kill Switch -->
-          <button onclick="triggerEmergencyFlatten()" class="px-3 py-1 rounded-lg font-semibold text-xs uppercase tracking-wider transition bg-rose-700 hover:bg-rose-600 text-white shadow flex items-center gap-1 cursor-pointer" title="Emergency Flatten: Close all positions and cancel all resting orders">
+          <button onclick="triggerEmergencyFlatten()" class="px-3 py-1.5 rounded-xl font-semibold text-xs uppercase tracking-wider transition bg-rose-700 hover:bg-rose-600 text-white shadow flex items-center gap-1 cursor-pointer" title="Emergency Flatten: Close all positions and cancel all resting orders">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
             <span>KILL SWITCH</span>
           </button>
 
           <!-- Config Settings Modal -->
-          <button onclick="openConfigModal()" class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-obsidian-850 hover:bg-obsidian-800 text-slate-200 border border-white/10 transition flex items-center gap-1 cursor-pointer" title="Strategy & Exchange Settings">
+          <button onclick="openConfigModal()" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-obsidian-850 hover:bg-obsidian-800 text-slate-200 border border-white/10 transition flex items-center gap-1 cursor-pointer" title="Strategy & Exchange Settings">
             <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-            <span>CONFIG</span>
+            <span>SETTINGS</span>
           </button>
         </div>
 
@@ -756,12 +781,9 @@
             <span id="ws-latency-indicator" class="text-emerald-400">WebSocket: Connected (500ms)</span>
           </span>
           <span>Ping: <span id="ws-ping-badge" class="text-slate-200">-- ms</span></span>
-          <span>Uptime: <span id="top-uptime" class="text-slate-200">--</span></span>
-          <span>Memory: <span id="top-mem" class="text-slate-200">-- MB</span></span>
+          <span>Timeframe: <span id="top-timeframe" class="text-cyan-400 font-semibold">1m</span></span>
         </div>
         <div class="flex items-center space-x-4">
-          <span>Server: <span id="top-backend-badge" class="text-cyan-400 font-medium">--</span></span>
-          <span>Timeframe: <span id="top-timeframe" class="text-cyan-400 font-semibold">1m</span></span>
           <span>Circuit Breaker: <span id="top-cb-status" class="text-emerald-400 font-semibold">NORMAL</span></span>
         </div>
       </div>
@@ -771,31 +793,25 @@
     <!-- MAIN DASHBOARD VIEWPORT -->
     <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
 
-      <!-- GUEST / PUBLIC BANNER (Appears if visitor has no session) -->
-      <div id="guest-welcome-banner" class="hidden glass-card rounded-2xl p-4 sm:p-5 border border-brand-500/40 bg-gradient-to-r from-brand-950/80 via-obsidian-900 to-brand-950/80 flex flex-wrap items-center justify-between gap-4 shadow-xl">
-        <div class="flex items-center space-x-3.5">
-          <div class="h-10 w-10 rounded-xl bg-brand-500/20 border border-brand-500/40 flex items-center justify-center text-brand-300 shrink-0 text-lg">
-            ⚡
+      <!-- BANNER: API KEYS NEEDED (Visible only when API keys are not yet configured) -->
+      <div id="banner-api-keys-needed" class="hidden glass-card rounded-2xl p-5 border border-amber-500/40 bg-gradient-to-r from-amber-950/60 via-obsidian-900 to-amber-950/60 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
+        <div class="flex items-center space-x-4">
+          <div class="h-11 w-11 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 text-xl">
+            🔑
           </div>
           <div>
             <div class="flex items-center gap-2">
-              <h3 class="font-display font-bold text-sm text-brand-300">Public Live Terminal View</h3>
-              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-brand-900/60 text-brand-200 border border-brand-800">GUEST MODE</span>
+              <h3 class="font-display font-bold text-sm text-white">Connect Your Delta Exchange Account</h3>
+              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800 font-semibold">ACTION REQUIRED</span>
             </div>
-            <p class="text-xs text-slate-300 mt-0.5">
-              You are watching live market breakout telemetry. <strong class="text-white">Sign In or Register</strong> to deploy your private trading desk and enter your Delta Exchange API keys.
+            <p class="text-xs text-slate-300 mt-0.5 leading-normal">
+              Enter your personal Delta Exchange API Key & Secret to enable automated order execution. Your funds remain 100% in your custody on Delta Exchange.
             </p>
           </div>
         </div>
-        <div class="flex items-center space-x-2">
-          <button onclick="navigateTo('auth')" class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white font-semibold text-xs transition cursor-pointer shadow-md shadow-brand-950 flex items-center gap-1.5">
-            <span>Sign In / Register</span>
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
-          </button>
-          <button onclick="demoTraderLogin()" class="px-3.5 py-2 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 text-brand-300 border border-brand-500/30 text-xs font-semibold transition cursor-pointer">
-            1-Click Demo Desk
-          </button>
-        </div>
+        <button onclick="openConfigModal()" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-obsidian-950 font-bold text-xs shadow-lg shadow-amber-950/50 transition cursor-pointer shrink-0">
+          Enter Delta API Keys
+        </button>
       </div>
 
 
@@ -809,7 +825,7 @@
             </h2>
             <span class="text-[11px] text-slate-400 font-mono hidden sm:inline">(BTC, ETH, SOL, XRP Perpetuals)</span>
           </div>
-          <span class="text-xs text-slate-400 font-mono">Filter: ADX &ge; 20 &bull; ATR Expansion &bull; Session VWAP</span>
+          <span class="text-xs text-slate-400 font-mono">Filter: ADX &ge; 20 &bull; ATR Expansion</span>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" id="asset-cards-grid">
@@ -829,7 +845,7 @@
               <h3 class="font-display font-semibold text-sm text-white">Active Positions</h3>
               <span class="text-xs px-2 py-0.5 rounded-full bg-obsidian-850 text-slate-300 font-mono" id="positions-count-badge">0</span>
             </div>
-            <span class="text-xs text-slate-400 font-mono">Trailing SL & TP Protected</span>
+            <span class="text-xs text-slate-400 font-mono">Dynamic ATR Stops Active</span>
           </div>
 
           <div class="overflow-x-auto flex-1 min-h-[160px]">
@@ -851,12 +867,13 @@
               </tbody>
             </table>
             <div id="no-positions-msg" class="text-center py-10 text-slate-500 font-mono text-xs flex flex-col items-center justify-center space-y-1">
-              <span class="text-slate-600 text-lg">⚖</span>
+              <span class="text-slate-600 text-lg">📊</span>
               <span>No active positions currently open.</span>
-              <span class="text-[10px] text-slate-600">Breakout orders will trigger automatically when volatility expands.</span>
+              <span class="text-[10px] text-slate-600">Resting orders will trigger automatically when breakout conditions are met.</span>
             </div>
           </div>
         </section>
+
 
         <!-- RESTING BREAKOUT ORDERS TABLE -->
         <section class="glass-card rounded-2xl border border-white/5 overflow-hidden shadow-sm flex flex-col">
@@ -866,7 +883,7 @@
               <h3 class="font-display font-semibold text-sm text-white">Resting Breakout Orders</h3>
               <span class="text-xs px-2 py-0.5 rounded-full bg-obsidian-850 text-slate-300 font-mono" id="orders-count-badge">0</span>
             </div>
-            <span class="text-xs text-slate-400 font-mono">TTL: 3 Bars &bull; Stop-Market</span>
+            <span class="text-xs text-slate-400 font-mono">Stop-Trigger Orders</span>
           </div>
 
           <div class="overflow-x-auto flex-1 min-h-[160px]">
@@ -896,19 +913,19 @@
       </div>
 
 
-      <!-- 3. QUANT ENGINE AUDIT LOG STREAM -->
+      <!-- 3. STRATEGY EXECUTION FEED -->
       <section class="glass-card rounded-2xl border border-white/5 overflow-hidden shadow-sm">
         <div class="px-5 py-3 border-b border-white/5 flex flex-wrap items-center justify-between bg-obsidian-900/60 gap-2">
           <div class="flex items-center space-x-2">
             <span class="h-2 w-2 rounded-full bg-brand-400"></span>
-            <h3 class="font-display font-semibold text-sm text-white">Engine Execution Logs</h3>
-            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-obsidian-850 text-slate-400">RingBuffer Audit Stream</span>
+            <h3 class="font-display font-semibold text-sm text-white">Execution Feed & Strategy Audit</h3>
+            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-obsidian-850 text-slate-400">Live Stream</span>
           </div>
           <div class="flex items-center space-x-2 text-xs font-mono">
             <button onclick="setLogFilter('ALL')" id="filter-all" class="px-2.5 py-1 rounded-lg bg-brand-600 text-white font-semibold transition cursor-pointer">ALL</button>
             <button onclick="setLogFilter('TRADE')" id="filter-trade" class="px-2.5 py-1 rounded-lg bg-obsidian-850 text-slate-400 hover:text-white transition cursor-pointer">TRADES</button>
-            <button onclick="setLogFilter('INFO')" id="filter-info" class="px-2.5 py-1 rounded-lg bg-obsidian-850 text-slate-400 hover:text-white transition cursor-pointer">INFO</button>
-            <button onclick="setLogFilter('ERROR')" id="filter-error" class="px-2.5 py-1 rounded-lg bg-obsidian-850 text-slate-400 hover:text-white transition cursor-pointer">ERROR</button>
+            <button onclick="setLogFilter('INFO')" id="filter-info" class="px-2.5 py-1 rounded-lg bg-obsidian-850 text-slate-400 hover:text-white transition cursor-pointer">SIGNALS</button>
+            <button onclick="setLogFilter('ERROR')" id="filter-error" class="px-2.5 py-1 rounded-lg bg-obsidian-850 text-slate-400 hover:text-white transition cursor-pointer">ALERTS</button>
           </div>
         </div>
 
@@ -939,10 +956,10 @@
       <div class="p-4 rounded-xl bg-obsidian-950/90 border border-brand-500/30 space-y-3">
         <div class="flex items-center justify-between">
           <span class="text-xs font-bold font-mono text-brand-300 uppercase">🔑 Delta Exchange API Credentials</span>
-          <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800">REAL LIVE ORDERS</span>
+          <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800">REAL ORDERS</span>
         </div>
         <p class="text-[11px] text-slate-400 leading-normal">
-          Provide your personal Delta Exchange API credentials. Credentials are saved directly to your isolated Supabase tenant record and hot-reloaded into your execution manager in memory.
+          Provide your Delta Exchange API credentials with Trading-only permissions. Credentials are saved encrypted into your isolated tenant vault.
         </p>
 
         <div>
@@ -960,7 +977,6 @@
           <select id="cfg-delta-url" class="w-full bg-obsidian-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500 font-mono">
             <option value="https://api.delta.exchange">Delta Global (api.delta.exchange)</option>
             <option value="https://cdn.india.delta.exchange">Delta India (cdn.india.delta.exchange)</option>
-            <option value="https://testnet-api.delta.exchange">Delta Testnet (testnet-api.delta.exchange)</option>
           </select>
         </div>
       </div>
@@ -995,7 +1011,7 @@
       <!-- Actions -->
       <div class="flex gap-2 pt-2">
         <button onclick="saveConfig()" class="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-cyan-500 hover:from-brand-500 hover:to-cyan-400 text-white font-semibold text-xs transition cursor-pointer shadow-lg shadow-cyan-950">
-          Apply & Hot-Reload Credentials
+          Save Settings & Activate Keys
         </button>
         <button onclick="closeConfigModal()" class="px-4 py-2.5 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 text-slate-300 text-xs font-semibold transition cursor-pointer">
           Cancel
@@ -1007,141 +1023,97 @@
 
 
   <!-- ========================================================================= -->
-  <!-- MODAL: FLEET OVERVIEW MODAL -->
-  <!-- ========================================================================= -->
-  <div id="fleet-modal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center hidden">
-    <div class="glass-card rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-4 border border-white/10 max-h-[85vh] overflow-y-auto">
-      <div class="flex items-center justify-between border-b border-white/5 pb-3">
-        <div class="flex items-center space-x-2">
-          <span class="text-lg">👥</span>
-          <h3 class="font-display font-bold text-white text-base">Multi-Tenant Fleet Command</h3>
-        </div>
-        <button onclick="closeTenantFleetModal()" class="text-slate-400 hover:text-white text-lg cursor-pointer">&times;</button>
-      </div>
-      <div id="fleet-tenants-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <!-- Injected via renderFleetModal() -->
-      </div>
-    </div>
-  </div>
-
-
-  <!-- ========================================================================= -->
-  <!-- MODAL: BACKEND API CONNECTION CONFIGURATION -->
-  <!-- ========================================================================= -->
-  <div id="backend-modal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center hidden">
-    <div class="glass-card rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-white/10">
-      <div class="flex items-center justify-between border-b border-white/5 pb-3">
-        <div class="flex items-center space-x-2">
-          <span class="text-brand-400 font-bold">🌐</span>
-          <h3 class="font-display font-bold text-white text-base">Backend Server Configuration</h3>
-        </div>
-        <button onclick="closeBackendModal()" class="text-slate-400 hover:text-white text-lg cursor-pointer">&times;</button>
-      </div>
-      <div>
-        <label class="block text-xs font-mono text-slate-400 uppercase mb-1">Backend Server URL</label>
-        <input type="text" id="input-backend-url" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 font-mono">
-      </div>
-      <div id="backend-test-result" class="hidden p-3 rounded-lg text-xs font-mono"></div>
-      <div class="flex gap-2">
-        <button onclick="testBackendConnection()" class="flex-1 py-2 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 text-slate-200 text-xs font-semibold transition cursor-pointer">
-          Test Ping
-        </button>
-        <button onclick="saveBackendUrlFromModal()" class="flex-1 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold transition cursor-pointer">
-          Save URL
-        </button>
-      </div>
-    </div>
-  </div>
-
-
-  <!-- ========================================================================= -->
-  <!-- JAVASCRIPT APPLICATION CORE (SPA Routing, State Engine, Auth, WebSocket) -->
+  <!-- JAVASCRIPT APPLICATION CORE -->
   <!-- ========================================================================= -->
   <script>
     // -------------------------------------------------------------------------
-    // Config & Supabase Initialization
+    // 1. Core Config & Multi-Tenant State
     // -------------------------------------------------------------------------
     const DEFAULT_RENDER_BACKEND = 'https://delta-bot-07e2.onrender.com';
     const SUPABASE_URL = 'https://clkkzwgpumbnbtvsxkmw.supabase.co';
-    const SUPABASE_ANON_KEY = 'sb_publishable_rvcmboPnre20bT51oz82qQ_q3SvnIZY';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsa2t6d2dwdW1ibmJ0dnN4a213Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5NTM5NTgsImV4cCI6MjA4ODUyOTk1OH0.3c6e5f15d2fbdfa070e176df9fc9d5d5b783adfc48b263914a21e428c04ec567';
 
     let supabaseClient = null;
     try {
-      if (window.supabase) {
+      if (typeof window.supabase !== 'undefined' && window.supabase.createClient) {
         supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
       }
     } catch (e) {
-      console.warn('Supabase initialization notice:', e);
+      console.warn('Supabase initialization fallback:', e);
     }
 
-    // State Variables
-    let currentUser = null;
-    let currentTenantId = 'default';
-    let currentTenantName = 'Default Account';
-    let knownTenants = [];
+    let ws = null;
+    let wsHeartbeatTimer = null;
+    let restPollingTimer = null;
     let isRunning = false;
     let currentMode = 'LIVE';
-    let activeLogFilter = 'ALL';
-    let ws = null;
-    let wsPingStartTime = 0;
-    let reconnectTimer = null;
-    let pingIntervalTimer = null;
-    let restPollingTimer = null;
+    let currentTenantId = 'default';
+    let currentTenantName = 'Default Desk';
+    let currentUser = null;
     let currentView = 'landing';
+    let activeLogFilter = 'ALL';
+    let cachedLogs = [];
+    let pingStartTime = 0;
 
     // -------------------------------------------------------------------------
-    // 1. SPA View Router
+    // 2. View Router & Navigation
     // -------------------------------------------------------------------------
     function navigateTo(viewName) {
+      // Guard: Require login for dashboard
+      if (viewName === 'dashboard') {
+        const hasSession = Boolean(currentUser || getAuthToken());
+        if (!hasSession) {
+          showAuthFeedback('Please sign in or create an account to access the quant terminal.', false);
+          viewName = 'auth';
+        }
+      }
+
       currentView = viewName;
-      const views = ['landing', 'auth', 'dashboard'];
-      
-      views.forEach(v => {
-        const el = document.getElementById(`view-${v}`);
-        if (el) {
+      ['landing', 'auth', 'dashboard'].forEach(v => {
+        const elem = document.getElementById(`view-${v}`);
+        if (elem) {
           if (v === viewName) {
-            el.classList.remove('hidden');
+            elem.classList.add('active');
           } else {
-            el.classList.add('hidden');
+            elem.classList.remove('active');
           }
         }
       });
 
-      // Update Nav Link visibility
-      const navLinks = document.getElementById('nav-landing-links');
-      if (navLinks) {
-        if (viewName === 'landing') {
-          navLinks.classList.remove('hidden');
-        } else {
-          navLinks.classList.add('hidden');
-        }
-      }
-
-      // Update Hash without reload
+      // Update URL hash
       if (window.location.hash !== `#${viewName}`) {
         window.history.replaceState(null, '', `#${viewName}`);
       }
 
+      // Smooth scroll to top on view change
       window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      // If entering dashboard, immediately fetch latest data
+      if (viewName === 'dashboard') {
+        fetchLatestStatus();
+      }
     }
 
-    window.addEventListener('hashchange', () => {
-      const hash = window.location.hash.replace('#', '').trim();
-      if (hash === 'auth' || hash === 'login') {
-        navigateTo('auth');
-      } else if (hash === 'dashboard' || hash === 'terminal') {
+    function navigateToHome() {
+      if (currentUser || getAuthToken()) {
         navigateTo('dashboard');
       } else {
         navigateTo('landing');
       }
-    });
+    }
+
+    function handlePrimaryCTA() {
+      if (currentUser || getAuthToken()) {
+        navigateTo('dashboard');
+      } else {
+        navigateTo('auth');
+      }
+    }
 
     // -------------------------------------------------------------------------
-    // 2. Supabase Auth Logic
+    // 3. Authentication Handlers (Supabase Auth)
     // -------------------------------------------------------------------------
     function getAuthToken() {
-      const sbToken = localStorage.getItem('delta_supabase_token');
-      if (sbToken && sbToken.trim()) return sbToken.trim();
       return localStorage.getItem('delta_bot_auth_token') || '';
     }
 
@@ -1156,53 +1128,53 @@
 
     function setSupabaseUserSession(session) {
       if (session && session.access_token) {
-        localStorage.setItem('delta_supabase_token', session.access_token);
-        currentUser = session.user || null;
+        currentUser = session.user;
+        setAuthToken(session.access_token);
+        if (session.user && session.user.id) {
+          currentTenantId = session.user.id;
+          localStorage.setItem('delta_bot_current_tenant', currentTenantId);
+        }
       } else {
-        localStorage.removeItem('delta_supabase_token');
-        currentUser = null;
+        clearSupabaseUserSession();
       }
-      updateAuthUI();
     }
 
     function clearSupabaseUserSession() {
-      localStorage.removeItem('delta_supabase_token');
       currentUser = null;
+      setAuthToken('');
+      currentTenantId = 'default';
+      localStorage.removeItem('delta_bot_current_tenant');
       updateAuthUI();
     }
 
     function updateAuthUI() {
-      const sbToken = localStorage.getItem('delta_supabase_token');
-      const masterToken = localStorage.getItem('delta_bot_auth_token');
-      
       const guestActions = document.getElementById('nav-guest-actions');
       const userActions = document.getElementById('nav-user-actions');
-      const userEmailDisplay = document.getElementById('nav-user-email-display');
-      const menuEmail = document.getElementById('menu-user-email');
-      const menuTenant = document.getElementById('menu-tenant-id');
-      const guestBanner = document.getElementById('guest-welcome-banner');
+      const heroCta = document.getElementById('hero-cta-label');
 
-      if (sbToken && currentUser) {
+      if (currentUser || getAuthToken()) {
         if (guestActions) guestActions.classList.add('hidden');
         if (userActions) userActions.classList.remove('hidden');
-        if (guestBanner) guestBanner.classList.add('hidden');
-        
-        const email = currentUser.email || 'Trader';
-        if (userEmailDisplay) userEmailDisplay.textContent = email;
-        if (menuEmail) menuEmail.textContent = email;
-        if (menuTenant) menuTenant.textContent = `Tenant: ${currentTenantId}`;
-      } else if (masterToken) {
-        if (guestActions) guestActions.classList.add('hidden');
-        if (userActions) userActions.classList.remove('hidden');
-        if (guestBanner) guestBanner.classList.add('hidden');
-        
-        if (userEmailDisplay) userEmailDisplay.textContent = 'Admin Token';
-        if (menuEmail) menuEmail.textContent = 'Master Admin';
-        if (menuTenant) menuTenant.textContent = 'Role: Superuser';
+        if (heroCta) heroCta.textContent = 'Open Trading Desk';
+
+        const displayEmail = currentUser ? currentUser.email : 'Authenticated Desk';
+        const deskLabel = document.getElementById('client-desk-label');
+        if (deskLabel) deskLabel.textContent = `Desk: ${displayEmail.split('@')[0]}`;
+
+        const menuEmail = document.getElementById('menu-user-email');
+        if (menuEmail) menuEmail.textContent = displayEmail;
+
+        const navEmail = document.getElementById('nav-user-email-display');
+        if (navEmail) navEmail.textContent = displayEmail;
+
+        const avatar = document.getElementById('nav-user-avatar');
+        if (avatar && displayEmail) {
+          avatar.textContent = displayEmail.charAt(0).toUpperCase();
+        }
       } else {
         if (guestActions) guestActions.classList.remove('hidden');
         if (userActions) userActions.classList.add('hidden');
-        if (guestBanner) guestBanner.classList.remove('hidden');
+        if (heroCta) heroCta.textContent = 'Deploy Trading Desk';
       }
     }
 
@@ -1211,50 +1183,42 @@
       if (menu) menu.classList.toggle('hidden');
     }
 
-    window.addEventListener('click', (e) => {
-      const menu = document.getElementById('nav-user-menu');
-      const userActions = document.getElementById('nav-user-actions');
-      if (menu && userActions && !userActions.contains(e.target)) {
-        menu.classList.add('hidden');
-      }
-    });
-
     function switchAuthTab(tab) {
-      const isSignIn = tab === 'signin';
-      document.getElementById('tab-btn-signin').className = isSignIn
-        ? 'flex-1 py-2 rounded-lg text-center transition-all duration-200 cursor-pointer bg-brand-600 text-white shadow'
-        : 'flex-1 py-2 rounded-lg text-center transition-all duration-200 cursor-pointer text-slate-400 hover:text-white';
-      document.getElementById('tab-btn-signup').className = !isSignIn
-        ? 'flex-1 py-2 rounded-lg text-center transition-all duration-200 cursor-pointer bg-brand-600 text-white shadow'
-        : 'flex-1 py-2 rounded-lg text-center transition-all duration-200 cursor-pointer text-slate-400 hover:text-white';
+      const tabSignIn = document.getElementById('auth-tab-signin');
+      const tabSignUp = document.getElementById('auth-tab-signup');
+      const panelSignIn = document.getElementById('auth-panel-signin');
+      const panelSignUp = document.getElementById('auth-panel-signup');
+      const feedback = document.getElementById('auth-feedback');
+      if (feedback) feedback.classList.add('hidden');
 
-      document.getElementById('auth-panel-signin').classList.toggle('hidden', !isSignIn);
-      document.getElementById('auth-panel-signup').classList.toggle('hidden', isSignIn);
-      
-      const fb = document.getElementById('auth-feedback-box');
-      if (fb) fb.classList.add('hidden');
+      if (tab === 'signin') {
+        tabSignIn.className = 'flex-1 py-2 rounded-lg font-semibold transition cursor-pointer text-white bg-brand-600 shadow-sm';
+        tabSignUp.className = 'flex-1 py-2 rounded-lg font-semibold transition cursor-pointer text-slate-400 hover:text-white';
+        panelSignIn.classList.remove('hidden');
+        panelSignUp.classList.add('hidden');
+      } else {
+        tabSignUp.className = 'flex-1 py-2 rounded-lg font-semibold transition cursor-pointer text-white bg-brand-600 shadow-sm';
+        tabSignIn.className = 'flex-1 py-2 rounded-lg font-semibold transition cursor-pointer text-slate-400 hover:text-white';
+        panelSignUp.classList.remove('hidden');
+        panelSignIn.classList.add('hidden');
+      }
     }
 
     function showAuthFeedback(msg, isError) {
-      const fb = document.getElementById('auth-feedback-box');
+      const fb = document.getElementById('auth-feedback');
       if (!fb) return;
-      fb.textContent = msg;
-      fb.className = `p-3 rounded-lg text-xs font-mono border ${
-        isError
-          ? 'bg-rose-950/70 border-rose-800 text-rose-300'
-          : 'bg-emerald-950/70 border-emerald-800 text-emerald-300'
-      }`;
       fb.classList.remove('hidden');
-    }
-
-    function toggleAdminTokenPanel() {
-      const p = document.getElementById('admin-token-panel');
-      if (p) p.classList.toggle('hidden');
+      if (isError) {
+        fb.className = 'p-3 rounded-xl text-xs font-mono border bg-rose-950/60 border-rose-800 text-rose-300';
+      } else {
+        fb.className = 'p-3 rounded-xl text-xs font-mono border bg-emerald-950/60 border-emerald-800 text-emerald-300';
+      }
+      fb.textContent = msg;
     }
 
     async function loginWithSupabase() {
       if (!supabaseClient) {
-        showAuthFeedback('Supabase client unavailable. Check network connection.', true);
+        showAuthFeedback('Authentication client initializing. Please refresh.', true);
         return;
       }
       const email = document.getElementById('login-email').value.trim();
@@ -1266,7 +1230,7 @@
       const btn = document.getElementById('btn-submit-signin');
       if (btn) {
         btn.disabled = true;
-        btn.textContent = 'Authenticating Vault...';
+        btn.textContent = 'Authenticating...';
       }
       try {
         const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
@@ -1274,7 +1238,7 @@
           showAuthFeedback(error.message, true);
           return;
         }
-        if (data.session) {
+        if (data && data.session) {
           setSupabaseUserSession(data.session);
           await fetchAuthMe();
           navigateTo('dashboard');
@@ -1282,7 +1246,7 @@
           initWebSocket();
         }
       } catch (err) {
-        showAuthFeedback('Login error: ' + (err.message || err), true);
+        showAuthFeedback('Sign in error: ' + (err.message || err), true);
       } finally {
         if (btn) {
           btn.disabled = false;
@@ -1291,23 +1255,14 @@
       }
     }
 
-    function demoTraderLogin() {
-      navigateTo('auth');
-      switchAuthTab('signin');
-      document.getElementById('login-email').value = 'demo_trader@gmail.com';
-      document.getElementById('login-password').value = 'DeltaTrader2026!';
-      loginWithSupabase();
-    }
-
     async function signupWithSupabase() {
       if (!supabaseClient) {
-        showAuthFeedback('Supabase client unavailable.', true);
+        showAuthFeedback('Authentication client initializing.', true);
         return;
       }
       const email = document.getElementById('signup-email').value.trim();
       const password = document.getElementById('signup-password').value.trim();
       const deskName = document.getElementById('signup-name').value.trim();
-      const balance = parseFloat(document.getElementById('signup-balance').value) || 10000;
       
       if (!email || !password) {
         showAuthFeedback('Please provide both email and password.', true);
@@ -1320,7 +1275,7 @@
       const btn = document.getElementById('btn-submit-signup');
       if (btn) {
         btn.disabled = true;
-        btn.textContent = 'Provisioning Trading Vault...';
+        btn.textContent = 'Provisioning Trading Desk...';
       }
       try {
         const { data, error } = await supabaseClient.auth.signUp({
@@ -1328,8 +1283,7 @@
           password,
           options: {
             data: {
-              desk_name: deskName || (email.split('@')[0] + "'s Trading Desk"),
-              initial_balance: balance
+              desk_name: deskName || (email.split('@')[0] + "'s Trading Desk")
             }
           }
         });
@@ -1343,9 +1297,8 @@
           navigateTo('dashboard');
           if (ws) { try { ws.close(); } catch (_) {} }
           initWebSocket();
-          alert(`Welcome to your private trading desk, ${email}`);
         } else {
-          // Attempt automatic login
+          // Automatic login fallback
           const loginRes = await supabaseClient.auth.signInWithPassword({ email, password });
           if (loginRes.data && loginRes.data.session) {
             setSupabaseUserSession(loginRes.data.session);
@@ -1354,7 +1307,7 @@
             if (ws) { try { ws.close(); } catch (_) {} }
             initWebSocket();
           } else {
-            showAuthFeedback('Account provisioned successfully. Please Sign In.', false);
+            showAuthFeedback('Trading desk provisioned. Please sign in.', false);
             switchAuthTab('signin');
           }
         }
@@ -1363,7 +1316,7 @@
       } finally {
         if (btn) {
           btn.disabled = false;
-          btn.textContent = 'Provision New Trading Vault';
+          btn.textContent = 'Create Trading Desk';
         }
       }
     }
@@ -1373,8 +1326,6 @@
         try { await supabaseClient.auth.signOut(); } catch (_) {}
       }
       clearSupabaseUserSession();
-      localStorage.removeItem('delta_bot_current_tenant');
-      currentTenantId = 'default';
       navigateTo('landing');
       if (ws) { try { ws.close(); } catch (_) {} }
       initWebSocket();
@@ -1416,61 +1367,27 @@
       }
     }
 
-    function saveAuthTokenFromModal() {
-      const val = document.getElementById('input-auth-token').value.trim();
-      setAuthToken(val);
-      navigateTo('dashboard');
-      if (ws) { try { ws.close(); } catch (_) {} }
-      initWebSocket();
-    }
-
-    function clearAuthToken() {
-      setAuthToken('');
-      document.getElementById('input-auth-token').value = '';
-      if (ws) { try { ws.close(); } catch (_) {} }
-      initWebSocket();
-    }
-
     function getAuthHeaders() {
       const headers = { 'Content-Type': 'application/json' };
       const token = getAuthToken();
       if (token) {
-        headers['X-Dashboard-Token'] = token;
-        headers['Authorization'] = 'Bearer ' + token;
-      }
-      if (currentTenantId) {
-        headers['X-Tenant-ID'] = currentTenantId;
+        headers['Authorization'] = `Bearer ${token}`;
       }
       return headers;
     }
 
     async function handleAuthError(res) {
       if (res.status === 401) {
-        alert('Authentication required or session expired. Redirecting to sign in.');
+        showAuthFeedback('Your session has expired. Please sign in again.', true);
+        clearSupabaseUserSession();
         navigateTo('auth');
-      } else if (res.status === 403) {
-        alert('Access Denied: You do not have permission to modify this tenant.');
       }
     }
 
     // -------------------------------------------------------------------------
-    // 3. Backend & REST API Helpers
+    // 4. Backend Communication (Transparent & Automatic)
     // -------------------------------------------------------------------------
     function getBackendUrl() {
-      const urlParams = new URLSearchParams(window.location.search);
-      const qBackend = urlParams.get('backend');
-      if (qBackend && qBackend.trim()) {
-        let clean = qBackend.trim().replace(/\/+$/, '');
-        if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
-          clean = (window.location.protocol === 'https:' ? 'https://' : 'http://') + clean;
-        }
-        localStorage.setItem('delta_bot_backend_url', clean);
-        return clean;
-      }
-      const stored = localStorage.getItem('delta_bot_backend_url');
-      if (stored && stored.trim()) {
-        return stored.trim().replace(/\/+$/, '');
-      }
       if (
         window.location.hostname.endsWith('.vercel.app') ||
         window.location.hostname.endsWith('.now.sh') ||
@@ -1479,24 +1396,9 @@
         !window.location.origin ||
         window.location.origin === 'null'
       ) {
-        localStorage.setItem('delta_bot_backend_url', DEFAULT_RENDER_BACKEND);
         return DEFAULT_RENDER_BACKEND;
       }
       return window.location.origin;
-    }
-
-    function setBackendUrl(url) {
-      if (!url || !url.trim()) {
-        localStorage.removeItem('delta_bot_backend_url');
-      } else {
-        let clean = url.trim();
-        if (!clean.startsWith('http://') && !clean.startsWith('https://')) {
-          clean = (window.location.protocol === 'https:' ? 'https://' : 'http://') + clean;
-        }
-        clean = clean.replace(/\/+$/, '');
-        localStorage.setItem('delta_bot_backend_url', clean);
-      }
-      updateBackendBadges();
     }
 
     function getApiUrl(endpoint) {
@@ -1510,121 +1412,44 @@
       const token = getAuthToken();
       const params = new URLSearchParams();
       if (token) params.set('token', token);
-      if (currentTenantId) params.set('tenant_id', currentTenantId);
+      if (currentTenantId && currentTenantId !== 'default') params.set('tenant_id', currentTenantId);
       const qs = params.toString() ? `?${params.toString()}` : '';
       try {
         const u = new URL(backend);
         const wsProto = u.protocol === 'https:' ? 'wss:' : 'ws:';
         return `${wsProto}//${u.host}/ws/live${qs}`;
       } catch (_) {
-        const loc = window.location;
-        const wsProto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
-        return `${wsProto}//${loc.host}/ws/live${qs}`;
-      }
-    }
-
-    function openBackendModal() {
-      const stored = localStorage.getItem('delta_bot_backend_url') || DEFAULT_RENDER_BACKEND;
-      document.getElementById('input-backend-url').value = stored;
-      const resDiv = document.getElementById('backend-test-result');
-      if (resDiv) {
-        resDiv.classList.add('hidden');
-        resDiv.textContent = '';
-      }
-      document.getElementById('backend-modal').classList.remove('hidden');
-    }
-
-    function closeBackendModal() {
-      document.getElementById('backend-modal').classList.add('hidden');
-    }
-
-    function saveBackendUrlFromModal() {
-      const val = document.getElementById('input-backend-url').value.trim();
-      setBackendUrl(val);
-      closeBackendModal();
-      if (ws) { try { ws.close(); } catch (_) {} }
-      initWebSocket();
-    }
-
-    async function testBackendConnection() {
-      const input = document.getElementById('input-backend-url').value.trim();
-      const resultDiv = document.getElementById('backend-test-result');
-      resultDiv.className = 'p-3 rounded-lg text-xs font-mono bg-obsidian-950 border border-white/10 text-slate-300';
-      resultDiv.textContent = 'Testing connection...';
-      resultDiv.classList.remove('hidden');
-
-      let target = input || getBackendUrl();
-      if (!target.startsWith('http://') && !target.startsWith('https://')) {
-        target = 'https://' + target;
-      }
-      target = target.replace(/\/+$/, '');
-
-      try {
-        const res = await fetch(`${target}/api/status`, { mode: 'cors' });
-        if (res.ok) {
-          const data = await res.json();
-          resultDiv.className = 'p-3 rounded-lg text-xs font-mono bg-emerald-950/60 border border-emerald-700 text-emerald-400';
-          resultDiv.textContent = `Connected! Engine status: ${data.status?.mode || 'live'} | Collateral: $${(data.collateral?.balance || 0).toLocaleString()}`;
-        } else {
-          resultDiv.className = 'p-3 rounded-lg text-xs font-mono bg-amber-950/60 border border-amber-700 text-amber-400';
-          resultDiv.textContent = `Reached host but HTTP status: ${res.status}`;
-        }
-      } catch (err) {
-        resultDiv.className = 'p-3 rounded-lg text-xs font-mono bg-rose-950/60 border border-rose-700 text-rose-400';
-        resultDiv.textContent = `Failed to reach ${target}. Check CORS & backend status.`;
-      }
-    }
-
-    function updateBackendBadges() {
-      const badge = document.getElementById('top-backend-badge');
-      const navLabel = document.getElementById('nav-backend-label');
-      const stored = localStorage.getItem('delta_bot_backend_url') || getBackendUrl();
-      if (stored) {
-        try {
-          const u = new URL(stored);
-          if (badge) badge.textContent = u.host;
-          if (navLabel) navLabel.textContent = u.host.includes('render') ? 'Render Online' : u.host.slice(0, 14);
-        } catch (_) {
-          if (badge) badge.textContent = stored;
-          if (navLabel) navLabel.textContent = 'Online';
-        }
+        return `wss://delta-bot-07e2.onrender.com/ws/live${qs}`;
       }
     }
 
     // -------------------------------------------------------------------------
-    // 4. Real-Time State Hydration & WebSocket Stream
+    // 5. REST Polling & WebSocket Lifecycle
     // -------------------------------------------------------------------------
     async function fetchLatestStatus() {
       try {
         const res = await fetch(getApiUrl('/api/status'), {
-          headers: getAuthHeaders(),
-          mode: 'cors'
+          headers: getAuthHeaders()
         });
+        if (res.status === 401) {
+          await handleAuthError(res);
+          return;
+        }
         if (res.ok) {
           const data = await res.json();
           updateDashboard(data);
-          updateLandingTickers(data.tickers);
-          
-          if (!ws || ws.readyState !== WebSocket.OPEN) {
-            const ind = document.getElementById('ws-latency-indicator');
-            const dot = document.getElementById('ws-dot');
-            if (ind && dot) {
-              ind.textContent = 'REST Live Sync (2s)';
-              ind.className = 'text-xs text-cyan-400 font-mono';
-              dot.className = 'h-2 w-2 rounded-full bg-cyan-400';
-            }
+          if (data.tickers) {
+            updateLandingTickers(data.tickers);
           }
         }
       } catch (err) {
-        console.debug('REST fetch status notification:', err);
+        console.debug('REST snapshot poll fallback error:', err);
       }
     }
 
     function startRestPolling() {
-      if (!restPollingTimer) {
-        fetchLatestStatus();
-        restPollingTimer = setInterval(fetchLatestStatus, 2500);
-      }
+      stopRestPolling();
+      restPollingTimer = setInterval(fetchLatestStatus, 3000);
     }
 
     function stopRestPolling() {
@@ -1636,132 +1461,113 @@
 
     function initWebSocket() {
       const wsUrl = getWsUrl();
-      const latInd = document.getElementById('ws-latency-indicator');
       const wsDot = document.getElementById('ws-dot');
-      if (latInd) latInd.textContent = 'WebSocket: Connecting...';
-      if (wsDot) wsDot.className = 'h-2 w-2 rounded-full bg-amber-400 animate-pulse';
+      const wsLatency = document.getElementById('ws-latency-indicator');
+      const wsPingBadge = document.getElementById('ws-ping-badge');
 
-      if (ws) {
-        try { ws.close(); } catch (_) {}
+      try {
+        if (ws) {
+          try { ws.close(); } catch (_) {}
+        }
+        ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          if (wsDot) {
+            wsDot.className = 'h-2 w-2 rounded-full bg-emerald-400 animate-pulse';
+          }
+          if (wsLatency) {
+            wsLatency.textContent = 'WebSocket: Connected (500ms)';
+            wsLatency.className = 'text-emerald-400';
+          }
+          pingStartTime = Date.now();
+          try { ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() })); } catch (_) {}
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'pong' || data.pong) {
+              const rtt = Date.now() - pingStartTime;
+              if (wsPingBadge) wsPingBadge.textContent = `${rtt} ms`;
+              return;
+            }
+            updateDashboard(data);
+            if (data.tickers) {
+              updateLandingTickers(data.tickers);
+            }
+          } catch (e) {
+            console.error('Failed to parse WebSocket message:', e);
+          }
+        };
+
+        ws.onclose = () => {
+          if (wsDot) wsDot.className = 'h-2 w-2 rounded-full bg-amber-400';
+          if (wsLatency) {
+            wsLatency.textContent = 'Live Feed: Syncing via REST';
+            wsLatency.className = 'text-amber-400';
+          }
+          setTimeout(() => {
+            if (document.visibilityState !== 'hidden') {
+              initWebSocket();
+            }
+          }, 4000);
+        };
+
+        ws.onerror = () => {
+          if (wsDot) wsDot.className = 'h-2 w-2 rounded-full bg-rose-500';
+        };
+
+      } catch (err) {
+        console.warn('WebSocket connection attempt failed:', err);
       }
-
-      ws = new WebSocket(wsUrl);
-
-      ws.onopen = () => {
-        stopRestPolling();
-        if (latInd) {
-          latInd.textContent = 'WebSocket: Connected (500ms)';
-          latInd.className = 'text-xs text-emerald-400 font-mono';
-        }
-        if (wsDot) wsDot.className = 'h-2 w-2 rounded-full bg-emerald-500';
-        if (reconnectTimer) {
-          clearInterval(reconnectTimer);
-          reconnectTimer = null;
-        }
-
-        // Periodic Ping for latency badge
-        if (pingIntervalTimer) clearInterval(pingIntervalTimer);
-        pingIntervalTimer = setInterval(() => {
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            wsPingStartTime = performance.now();
-            ws.send('ping');
-          }
-        }, 5000);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const packet = JSON.parse(event.data);
-          if (packet.type === 'state_update') {
-            updateDashboard(packet);
-            updateLandingTickers(packet.tickers);
-          } else if (packet.type === 'pong') {
-            const rtt = Math.round(performance.now() - wsPingStartTime);
-            const badge = document.getElementById('ws-ping-badge');
-            if (badge) badge.textContent = `${rtt} ms`;
-          }
-        } catch (err) {
-          console.debug('State parse notice:', err);
-        }
-      };
-
-      ws.onclose = (event) => {
-        if (pingIntervalTimer) clearInterval(pingIntervalTimer);
-        startRestPolling();
-
-        const token = getAuthToken();
-        if (event.code === 1008 || (!token && event.code === 1006)) {
-          if (latInd) {
-            latInd.textContent = 'Live Feed (Guest Mode)';
-            latInd.className = 'text-xs text-brand-300 font-mono';
-          }
-          if (wsDot) wsDot.className = 'h-2 w-2 rounded-full bg-cyan-400';
-          return;
-        }
-
-        if (latInd) {
-          latInd.textContent = 'WebSocket: Reconnecting...';
-          latInd.className = 'text-xs text-amber-400 font-mono';
-        }
-        if (wsDot) wsDot.className = 'h-2 w-2 rounded-full bg-amber-400 animate-pulse';
-
-        if (!reconnectTimer) {
-          reconnectTimer = setInterval(initWebSocket, 4000);
-        }
-      };
-
-      ws.onerror = (err) => {
-        console.debug('WS notice:', err);
-        startRestPolling();
-      };
     }
 
     // -------------------------------------------------------------------------
-    // 5. UI Renderers (Dashboard & Landing)
+    // 6. UI Renderers: Dashboard & Landing
     // -------------------------------------------------------------------------
     function updateDashboard(data) {
       if (!data) return;
       const status = data.status || {};
       const col = data.collateral || {};
 
-      // Execution & Strategy Running State
+      // Strategy Running State
       isRunning = Boolean(status.is_running);
       currentMode = status.mode || 'LIVE';
       const btn = document.getElementById('btn-toggle-trading');
       const btnText = document.getElementById('btn-trading-text');
       if (btn && btnText) {
         if (isRunning) {
-          btn.className = 'px-3 py-1 rounded-lg font-semibold text-xs uppercase tracking-wider transition flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow cursor-pointer';
+          btn.className = 'px-3.5 py-1.5 rounded-xl font-semibold text-xs uppercase tracking-wider transition flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow cursor-pointer';
           btnText.textContent = 'RUNNING';
         } else {
-          btn.className = 'px-3 py-1 rounded-lg font-semibold text-xs uppercase tracking-wider transition flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white shadow cursor-pointer';
+          btn.className = 'px-3.5 py-1.5 rounded-xl font-semibold text-xs uppercase tracking-wider transition flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white shadow cursor-pointer';
           btnText.textContent = 'PAUSED';
         }
       }
 
-      // API Key Status Badge
+      // Delta API Key Status
       const currTenant = data.current_tenant || {};
       const hasApiKey = Boolean(currTenant.has_api_key || currTenant.delta_api_key_masked);
       const keyBadge = document.getElementById('btn-api-key-status');
       const keyDot = document.getElementById('api-key-status-dot');
       const keyText = document.getElementById('api-key-status-text');
+      const apiBanner = document.getElementById('banner-api-keys-needed');
+
       if (keyBadge && keyDot && keyText) {
         if (hasApiKey) {
           keyBadge.className = 'text-xs px-2.5 py-1 rounded-lg font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 border border-emerald-500/40 bg-emerald-950/50 text-emerald-300 hover:bg-emerald-900/60 shadow-sm';
           keyDot.className = 'h-1.5 w-1.5 rounded-full bg-emerald-400';
-          keyText.textContent = 'API Connected';
+          keyText.textContent = 'Delta API Connected';
+          if (apiBanner) apiBanner.classList.add('hidden');
         } else {
           keyBadge.className = 'text-xs px-2.5 py-1 rounded-lg font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 border border-amber-500/40 bg-amber-950/50 text-amber-300 hover:bg-amber-900/60 shadow-sm animate-pulse';
           keyDot.className = 'h-1.5 w-1.5 rounded-full bg-amber-400';
           keyText.textContent = 'Keys Needed';
+          if (apiBanner && currentView === 'dashboard') apiBanner.classList.remove('hidden');
         }
       }
 
-      // Telemetry Header Values
-      const topUp = document.getElementById('top-uptime');
-      if (topUp) topUp.textContent = status.uptime_human || '--';
-      const topMem = document.getElementById('top-mem');
-      if (topMem) topMem.textContent = `${status.memory_mb || 0} MB`;
+      // Telemetry Values
       const topTf = document.getElementById('top-timeframe');
       if (topTf) topTf.textContent = status.timeframe || '1m';
 
@@ -1800,16 +1606,6 @@
       const ddElem = document.getElementById('top-maxdd');
       if (ddElem) ddElem.textContent = `${Number(col.max_drawdown_pct ?? 0).toFixed(2)}%`;
 
-      // Multi-Tenant Synchronizer
-      if (data.tenants && Array.isArray(data.tenants)) {
-        knownTenants = data.tenants;
-      }
-      if (data.current_tenant) {
-        currentTenantId = data.current_tenant.tenant_id || currentTenantId;
-        currentTenantName = data.current_tenant.name || currentTenantId;
-      }
-      renderTenantDropdown(knownTenants, currentTenantId);
-
       // Render Asset Cards, Tables, Logs
       renderAssetCards(data.tickers || {}, data.indicators || {});
       renderPositionsTable(data.positions || []);
@@ -1824,38 +1620,37 @@
     }
 
     // -------------------------------------------------------------------------
-    // Landing Page Live Tickers Renderer
+    // Landing Page Tickers
     // -------------------------------------------------------------------------
     function updateLandingTickers(tickers) {
       const grid = document.getElementById('landing-ticker-cards');
       if (!grid) return;
-      const safeTickers = tickers || {};
-      let symbols = Object.keys(safeTickers);
-      if (symbols.length === 0) {
-        symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
-      }
+      const targetSymbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
 
+      if (!tickers || Object.keys(tickers).length === 0) return;
       grid.replaceChildren();
-      symbols.forEach(sym => {
-        const t = safeTickers[sym] || { mark_price: 0, change_24h_pct: 0, change_24h_usd: 0, volume_24h: 0 };
+
+      targetSymbols.forEach(sym => {
+        const t = tickers[sym] || {};
+        const price = Number(t.mark_price || t.close || 0);
+        const chg = Number(t.change_24h || 0);
+        const isUp = chg >= 0;
+
         const card = document.createElement('div');
-        card.className = 'glass-card p-4 rounded-xl border border-white/10 hover:border-brand-500/40 transition cursor-pointer';
-        card.onclick = () => navigateTo('dashboard');
-
-        const mark = Number(t.mark_price || 0);
-        const chg = Number(t.change_24h_pct || 0);
-        const isPos = chg >= 0;
-
+        card.className = 'glass-card glass-card-hover p-4 rounded-xl border border-white/5 space-y-1.5';
         card.innerHTML = `
           <div class="flex items-center justify-between">
             <span class="font-display font-bold text-white text-sm">${sym}</span>
-            <span class="text-[10px] font-mono px-2 py-0.5 rounded ${isPos ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'} font-semibold">
-              ${isPos ? '+' : ''}${chg.toFixed(2)}%
+            <span class="text-[11px] font-mono px-2 py-0.5 rounded ${isUp ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800' : 'bg-rose-950/80 text-rose-300 border border-rose-800'}">
+              ${isUp ? '+' : ''}${chg.toFixed(2)}%
             </span>
           </div>
-          <div class="mt-2 flex items-baseline justify-between font-mono">
-            <span class="text-xl font-bold text-white">${mark > 0 ? '$' + mark.toLocaleString('en-US', {minimumFractionDigits: 2}) : '--'}</span>
-            <span class="text-[10px] text-slate-400">24h Vol: $${(Number(t.volume_24h || 0)/1000).toFixed(0)}k</span>
+          <div class="text-xl font-mono font-bold text-white tracking-tight">
+            $${price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 4})}
+          </div>
+          <div class="flex items-center justify-between text-[11px] font-mono text-slate-400 pt-1 border-t border-white/5">
+            <span>24h Range:</span>
+            <span class="text-slate-300">$${Number(t.low_24h || 0).toLocaleString()} - $${Number(t.high_24h || 0).toLocaleString()}</span>
           </div>
         `;
         grid.appendChild(card);
@@ -1863,129 +1658,70 @@
     }
 
     // -------------------------------------------------------------------------
-    // Asset Telemetry Cards (Dashboard View)
+    // Dashboard Asset Cards
     // -------------------------------------------------------------------------
     function renderAssetCards(tickers, indicators) {
-      const container = document.getElementById('asset-cards-grid');
-      if (!container) return;
-      container.replaceChildren();
+      const grid = document.getElementById('asset-cards-grid');
+      if (!grid) return;
+      const targetSymbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+      grid.replaceChildren();
 
-      const safeTickers = tickers || {};
-      const safeIndicators = indicators || {};
-      let symbols = Object.keys(safeTickers);
-      if (symbols.length === 0) {
-        symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
-      }
-
-      symbols.forEach(sym => {
-        const t = safeTickers[sym] || { trading_enabled: true, mark_price: 0, bid_price: 0, ask_price: 0, spread_bps: 0, change_24h_pct: 0, change_24h_usd: 0 };
-        const ind = safeIndicators[sym] || {};
+      targetSymbols.forEach(sym => {
+        const t = tickers[sym] || {};
+        const ind = indicators[sym] || {};
+        const mark = Number(t.mark_price || 0);
+        const chg = Number(t.change_24h || 0);
+        const isUp = chg >= 0;
+        const adx = Number(ind.adx || 0);
+        const atr = Number(ind.atr || 0);
+        const enabled = ind.enabled !== false;
 
         const card = document.createElement('div');
-        card.className = 'glass-card rounded-2xl p-4 shadow-sm border border-white/5 flex flex-col justify-between space-y-3';
+        card.className = `glass-card rounded-2xl p-4 border transition space-y-3 ${
+          enabled ? 'border-white/10 hover:border-brand-500/40' : 'border-white/5 opacity-50'
+        }`;
 
-        // Top Row: Symbol & Toggle Button
-        const topRow = document.createElement('div');
-        topRow.className = 'flex items-center justify-between border-b border-white/5 pb-2';
-        
-        const symCol = document.createElement('div');
-        symCol.className = 'flex items-center gap-1.5';
-        const symTitle = document.createElement('span');
-        symTitle.className = 'font-display font-bold text-sm text-white';
-        symTitle.textContent = sym;
-        const perpBadge = document.createElement('span');
-        perpBadge.className = 'text-[9px] font-mono px-1.5 py-0.5 rounded bg-obsidian-850 text-slate-400 border border-white/5';
-        perpBadge.textContent = 'PERP';
-        symCol.appendChild(symTitle);
-        symCol.appendChild(perpBadge);
+        card.innerHTML = `
+          <div class="flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+              <span class="h-2 w-2 rounded-full ${enabled ? 'bg-emerald-400' : 'bg-slate-600'}"></span>
+              <span class="font-display font-bold text-sm text-white">${sym}</span>
+            </div>
+            <button onclick="toggleSymbolTrading('${sym}', ${!enabled})" class="text-[10px] font-mono px-2 py-0.5 rounded transition cursor-pointer ${
+              enabled ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800' : 'bg-obsidian-850 text-slate-400 border border-white/5'
+            }">
+              ${enabled ? 'ACTIVE' : 'PAUSED'}
+            </button>
+          </div>
 
-        const toggleBtn = document.createElement('button');
-        toggleBtn.className = t.trading_enabled
-          ? 'px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30 transition cursor-pointer'
-          : 'px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-obsidian-850 text-slate-400 border border-white/10 hover:bg-obsidian-800 transition cursor-pointer';
-        toggleBtn.textContent = t.trading_enabled ? 'ACTIVE' : 'PAUSED';
-        toggleBtn.onclick = () => toggleSymbolTrading(sym, !t.trading_enabled);
+          <div class="flex items-baseline justify-between">
+            <span class="text-xl font-mono font-bold text-white">$${mark.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 4})}</span>
+            <span class="text-xs font-mono font-semibold ${isUp ? 'text-emerald-400' : 'text-rose-400'}">${isUp ? '+' : ''}${chg.toFixed(2)}%</span>
+          </div>
 
-        topRow.appendChild(symCol);
-        topRow.appendChild(toggleBtn);
-        card.appendChild(topRow);
-
-        // Price & 24h Change Row
-        const priceRow = document.createElement('div');
-        priceRow.className = 'flex items-baseline justify-between font-mono';
-        const markVal = Number(t.mark_price || 0);
-        const markElem = document.createElement('div');
-        markElem.className = 'text-xl font-extrabold text-white';
-        markElem.textContent = markVal > 0 ? `$${markVal.toLocaleString('en-US', {minimumFractionDigits: 2})}` : '--';
-
-        const chgPct = Number(t.change_24h_pct || 0);
-        const isPos = chgPct >= 0;
-        const chgElem = document.createElement('div');
-        chgElem.className = `text-xs font-semibold ${isPos ? 'text-emerald-400' : 'text-rose-400'}`;
-        chgElem.textContent = `${isPos ? '+' : ''}${chgPct.toFixed(2)}%`;
-
-        priceRow.appendChild(markElem);
-        priceRow.appendChild(chgElem);
-        card.appendChild(priceRow);
-
-        // Spread & Top of Book
-        const bookRow = document.createElement('div');
-        bookRow.className = 'flex items-center justify-between text-[11px] font-mono text-slate-400 bg-obsidian-950/70 p-2 rounded-xl border border-white/5';
-        const bidVal = Number(t.bid_price || 0);
-        const askVal = Number(t.ask_price || 0);
-        const spreadVal = Number(t.spread_bps || 0);
-        bookRow.innerHTML = `<span>Bid: <span class="text-slate-200">${bidVal > 0 ? '$' + bidVal.toFixed(2) : '--'}</span></span><span>Ask: <span class="text-slate-200">${askVal > 0 ? '$' + askVal.toFixed(2) : '--'}</span></span><span>Spread: <span class="text-cyan-400">${spreadVal.toFixed(1)} bps</span></span>`;
-        card.appendChild(bookRow);
-
-        // Technical Indicators Grid
-        const indGrid = document.createElement('div');
-        indGrid.className = 'grid grid-cols-2 gap-1.5 text-[11px] font-mono text-slate-400';
-        const emaVal = ind.ema_20 ? `$${Number(ind.ema_20).toFixed(2)}` : '--';
-        const vwapVal = ind.session_vwap ? `$${Number(ind.session_vwap).toFixed(2)}` : '--';
-        const pdhVal = ind.pdh ? `$${Number(ind.pdh).toFixed(2)}` : '--';
-        const pdlVal = ind.pdl ? `$${Number(ind.pdl).toFixed(2)}` : '--';
-        indGrid.innerHTML = `
-          <div class="flex justify-between"><span>EMA 20:</span><span class="text-slate-200">${emaVal}</span></div>
-          <div class="flex justify-between"><span>VWAP:</span><span class="text-slate-200">${vwapVal}</span></div>
-          <div class="flex justify-between"><span>PDH:</span><span class="text-amber-400/90">${pdhVal}</span></div>
-          <div class="flex justify-between"><span>PDL:</span><span class="text-amber-400/90">${pdlVal}</span></div>
+          <div class="grid grid-cols-2 gap-2 text-[11px] font-mono bg-obsidian-950/70 p-2.5 rounded-xl border border-white/5">
+            <div>
+              <span class="text-slate-400 block text-[10px]">ADX (14)</span>
+              <span class="${adx >= 20 ? 'text-emerald-400 font-bold' : 'text-slate-300'}">${adx.toFixed(1)} ${adx >= 20 ? '🔥' : '⏳'}</span>
+            </div>
+            <div>
+              <span class="text-slate-400 block text-[10px]">ATR</span>
+              <span class="text-cyan-300 font-semibold">$${atr.toFixed(2)}</span>
+            </div>
+          </div>
         `;
-        card.appendChild(indGrid);
-
-        // Breakout Status Gauge
-        const gaugeRow = document.createElement('div');
-        gaugeRow.className = 'pt-2 border-t border-white/5 flex items-center justify-between text-[11px] font-mono';
-        const adxVal = ind.adx_14 !== null && ind.adx_14 !== undefined ? Number(ind.adx_14).toFixed(1) : '--';
-        const isBreakout = ind.adx_14 >= 20;
-
-        const adxBadge = document.createElement('span');
-        adxBadge.className = isBreakout
-          ? 'px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-          : 'px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30';
-        adxBadge.textContent = isBreakout ? `ADX: ${adxVal} (TREND)` : `ADX: ${adxVal} (SQUEEZE)`;
-
-        const atrBadge = document.createElement('span');
-        atrBadge.className = ind.is_volatility_expanded
-          ? 'px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400'
-          : 'px-2 py-0.5 rounded text-[10px] text-slate-400 bg-obsidian-850';
-        atrBadge.textContent = ind.is_volatility_expanded ? 'ATR EXPANDED' : 'ATR NORMAL';
-
-        gaugeRow.appendChild(adxBadge);
-        gaugeRow.appendChild(atrBadge);
-        card.appendChild(gaugeRow);
-
-        container.appendChild(card);
+        grid.appendChild(card);
       });
     }
 
     // -------------------------------------------------------------------------
-    // Positions & Orders Renderers
+    // Positions & Orders Tables
     // -------------------------------------------------------------------------
     function createTd(content, className = '') {
       const td = document.createElement('td');
-      td.className = `px-3 py-2 ${className}`;
+      td.className = `px-3 py-2.5 whitespace-nowrap ${className}`;
       if (typeof content === 'string') {
-        td.textContent = content;
+        td.innerHTML = content;
       } else if (content instanceof HTMLElement) {
         td.appendChild(content);
       }
@@ -1994,57 +1730,47 @@
 
     function renderPositionsTable(positions) {
       const tbody = document.getElementById('positions-table-body');
-      const emptyMsg = document.getElementById('no-positions-msg');
-      const countBadge = document.getElementById('positions-count-badge');
-      const safePositions = positions || [];
-
-      if (countBadge) countBadge.textContent = safePositions.length;
+      const badge = document.getElementById('positions-count-badge');
+      const noMsg = document.getElementById('no-positions-msg');
       if (!tbody) return;
-      tbody.replaceChildren();
 
-      if (safePositions.length === 0) {
-        if (emptyMsg) emptyMsg.classList.remove('hidden');
+      tbody.replaceChildren();
+      const list = Array.isArray(positions) ? positions : [];
+      if (badge) badge.textContent = list.length;
+
+      if (list.length === 0) {
+        if (noMsg) noMsg.classList.remove('hidden');
         return;
       }
-      if (emptyMsg) emptyMsg.classList.add('hidden');
+      if (noMsg) noMsg.classList.add('hidden');
 
-      safePositions.forEach(pos => {
+      list.forEach(pos => {
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-white/5 transition';
 
-        tr.appendChild(createTd(pos.symbol, 'font-bold text-white'));
-        
-        const sideTd = document.createElement('td');
-        sideTd.className = 'px-3 py-2';
-        const sideBadge = document.createElement('span');
-        sideBadge.className = pos.side === 'BUY'
-          ? 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400'
-          : 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400';
-        sideBadge.textContent = pos.side === 'BUY' ? 'LONG' : 'SHORT';
-        sideTd.appendChild(sideBadge);
-        tr.appendChild(sideTd);
-
-        tr.appendChild(createTd(`${pos.size} lots`));
-        tr.appendChild(createTd(`$${Number(pos.entry_price || 0).toFixed(2)}`));
-        tr.appendChild(createTd(`$${Number(pos.mark_price || 0).toFixed(2)}`));
-
-        const pnlTd = document.createElement('td');
+        const isLong = (pos.side || '').toUpperCase() === 'BUY' || (pos.side || '').toUpperCase() === 'LONG';
         const upnl = Number(pos.unrealized_pnl || 0);
-        pnlTd.className = `px-3 py-2 font-bold ${upnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
-        pnlTd.textContent = `${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}`;
-        tr.appendChild(pnlTd);
 
-        const slTpText = `SL: ${pos.stop_loss_price ? '$' + Number(pos.stop_loss_price).toFixed(2) : '--'} | TP: ${pos.take_profit_price ? '$' + Number(pos.take_profit_price).toFixed(2) : '--'}`;
-        tr.appendChild(createTd(slTpText, 'text-slate-300'));
+        tr.appendChild(createTd(pos.symbol || '--', 'font-bold text-white'));
+        tr.appendChild(createTd(
+          `<span class="px-2 py-0.5 rounded text-[10px] font-bold ${isLong ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300 border border-rose-800'}">${isLong ? 'LONG' : 'SHORT'}</span>`
+        ));
+        tr.appendChild(createTd(String(pos.size || pos.quantity || '--'), 'text-slate-200'));
+        tr.appendChild(createTd(`$${Number(pos.entry_price || 0).toLocaleString()}`, 'text-slate-300'));
+        tr.appendChild(createTd(`$${Number(pos.mark_price || 0).toLocaleString()}`, 'text-slate-300'));
+        tr.appendChild(createTd(
+          `<span class="${upnl >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}">${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}</span>`
+        ));
+        tr.appendChild(createTd(
+          `<span class="text-slate-300">$${Number(pos.stop_loss || 0).toFixed(1)} / $${Number(pos.take_profit || 0).toFixed(1)}</span>`,
+          'text-slate-400'
+        ));
 
-        const actionTd = document.createElement('td');
-        actionTd.className = 'px-3 py-2 text-right';
         const closeBtn = document.createElement('button');
-        closeBtn.className = 'px-2 py-0.5 rounded bg-obsidian-850 hover:bg-rose-900/60 text-slate-300 hover:text-rose-300 text-[10px] font-semibold border border-white/10 transition cursor-pointer';
+        closeBtn.className = 'px-2 py-1 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 text-[10px] font-bold cursor-pointer transition';
         closeBtn.textContent = 'Close';
         closeBtn.onclick = () => closePosition(pos.product_id, pos.symbol);
-        actionTd.appendChild(closeBtn);
-        tr.appendChild(actionTd);
+        tr.appendChild(createTd(closeBtn, 'text-right'));
 
         tbody.appendChild(tr);
       });
@@ -2052,188 +1778,113 @@
 
     function renderOrdersTable(orders) {
       const tbody = document.getElementById('orders-table-body');
-      const emptyMsg = document.getElementById('no-orders-msg');
-      const countBadge = document.getElementById('orders-count-badge');
-      const safeOrders = orders || [];
-
-      if (countBadge) countBadge.textContent = safeOrders.length;
+      const badge = document.getElementById('orders-count-badge');
+      const noMsg = document.getElementById('no-orders-msg');
       if (!tbody) return;
-      tbody.replaceChildren();
 
-      if (safeOrders.length === 0) {
-        if (emptyMsg) emptyMsg.classList.remove('hidden');
+      tbody.replaceChildren();
+      const list = Array.isArray(orders) ? orders : [];
+      if (badge) badge.textContent = list.length;
+
+      if (list.length === 0) {
+        if (noMsg) noMsg.classList.remove('hidden');
         return;
       }
-      if (emptyMsg) emptyMsg.classList.add('hidden');
+      if (noMsg) noMsg.classList.add('hidden');
 
-      safeOrders.forEach(o => {
+      list.forEach(ord => {
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-white/5 transition';
 
-        tr.appendChild(createTd(`#${o.order_id}`, 'text-slate-400'));
-        tr.appendChild(createTd(o.symbol, 'font-bold text-white'));
-        
-        const sideTd = document.createElement('td');
-        sideTd.className = 'px-3 py-2';
-        const sideBadge = document.createElement('span');
-        sideBadge.className = o.side === 'BUY'
-          ? 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400'
-          : 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400';
-        sideBadge.textContent = o.side;
-        sideTd.appendChild(sideBadge);
-        tr.appendChild(sideTd);
+        const isBuy = (ord.side || '').toUpperCase() === 'BUY';
+        const orderIdShort = String(ord.id || ord.order_id || '--').slice(0, 8);
 
-        tr.appendChild(createTd(`$${Number(o.stop_price || 0).toFixed(2)}`, 'text-cyan-400 font-bold'));
+        tr.appendChild(createTd(`<span class="text-slate-400">${orderIdShort}</span>`));
+        tr.appendChild(createTd(ord.symbol || '--', 'font-bold text-white'));
+        tr.appendChild(createTd(
+          `<span class="px-2 py-0.5 rounded text-[10px] font-bold ${isBuy ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300 border border-rose-800'}">${ord.side}</span>`
+        ));
+        tr.appendChild(createTd(`$${Number(ord.stop_price || ord.trigger_price || ord.price || 0).toLocaleString()}`, 'text-amber-400 font-semibold'));
+        tr.appendChild(createTd(ord.ttl ? `${ord.ttl}s` : 'Active', 'text-slate-400'));
 
-        const ttlText = `${o.ttl_remaining || 0}/${o.ttl_bars || 3} bars left`;
-        tr.appendChild(createTd(ttlText, 'text-amber-400 font-semibold'));
-
-        const actionTd = document.createElement('td');
-        actionTd.className = 'px-3 py-2 text-right';
         const cancelBtn = document.createElement('button');
-        cancelBtn.className = 'px-2 py-0.5 rounded bg-obsidian-850 hover:bg-slate-700 text-slate-300 text-[10px] border border-white/10 transition cursor-pointer';
+        cancelBtn.className = 'px-2 py-1 rounded bg-obsidian-850 hover:bg-obsidian-800 text-slate-300 border border-white/10 text-[10px] font-bold cursor-pointer transition';
         cancelBtn.textContent = 'Cancel';
-        cancelBtn.onclick = () => cancelPendingOrder(o.order_id);
-        actionTd.appendChild(cancelBtn);
-        tr.appendChild(actionTd);
+        cancelBtn.onclick = () => cancelPendingOrder(ord.id || ord.order_id);
+        tr.appendChild(createTd(cancelBtn, 'text-right'));
 
         tbody.appendChild(tr);
       });
     }
 
     // -------------------------------------------------------------------------
-    // Console Logs Renderer
+    // Execution Feed / Logs
     // -------------------------------------------------------------------------
     function setLogFilter(filter) {
       activeLogFilter = filter;
       ['all', 'trade', 'info', 'error'].forEach(f => {
         const btn = document.getElementById(`filter-${f}`);
         if (btn) {
-          btn.className = (f === filter.toLowerCase())
-            ? 'px-2.5 py-1 rounded-lg bg-brand-600 text-white font-semibold transition cursor-pointer'
-            : 'px-2.5 py-1 rounded-lg bg-obsidian-850 text-slate-400 hover:text-white transition cursor-pointer';
-        }
-      });
-      renderConsoleLogs(bufferedLogs);
-    }
-
-    let bufferedLogs = [];
-    function renderConsoleLogs(logs) {
-      const safeLogs = logs || [];
-      bufferedLogs = safeLogs;
-      const consoleDiv = document.getElementById('console-logs');
-      if (!consoleDiv) return;
-      consoleDiv.replaceChildren();
-
-      const filtered = safeLogs.filter(e => {
-        if (activeLogFilter === 'ALL') return true;
-        if (activeLogFilter === 'TRADE') return (e.message || '').includes('Trade') || (e.message || '').includes('Order') || (e.message || '').includes('Breakout');
-        return e.level === activeLogFilter;
-      });
-
-      filtered.forEach(e => {
-        const line = document.createElement('div');
-        line.className = 'flex items-start space-x-2 text-[11px] leading-relaxed';
-
-        const ts = document.createElement('span');
-        ts.className = 'text-slate-500 shrink-0';
-        ts.textContent = e.timestamp ? e.timestamp.split('T')[1]?.slice(0, 8) || '' : '';
-
-        const lvl = document.createElement('span');
-        lvl.className = `font-bold shrink-0 ${
-          e.level === 'ERROR' ? 'text-rose-400' :
-          e.level === 'WARNING' ? 'text-amber-400' :
-          e.level === 'INFO' ? 'text-cyan-400' : 'text-slate-400'
-        }`;
-        lvl.textContent = `[${e.level}]`;
-
-        const msg = document.createElement('span');
-        msg.className = 'text-slate-300 break-all';
-        msg.textContent = e.message;
-
-        line.appendChild(ts);
-        line.appendChild(lvl);
-        line.appendChild(msg);
-        consoleDiv.appendChild(line);
-      });
-    }
-
-    // -------------------------------------------------------------------------
-    // Multi-Tenant UI & Dropdown Switching
-    // -------------------------------------------------------------------------
-    function toggleTenantDropdown() {
-      const menu = document.getElementById('tenant-dropdown-menu');
-      if (menu) menu.classList.toggle('hidden');
-    }
-
-    window.addEventListener('click', (e) => {
-      const container = document.getElementById('tenant-dropdown-container');
-      if (container && !container.contains(e.target)) {
-        const menu = document.getElementById('tenant-dropdown-menu');
-        if (menu && !menu.classList.contains('hidden')) {
-          menu.classList.add('hidden');
-        }
-      }
-    });
-
-    function renderTenantDropdown(tenants, activeId) {
-      const listEl = document.getElementById('tenant-dropdown-list');
-      const label = document.getElementById('current-tenant-label');
-      const badge = document.getElementById('tenant-count-badge');
-      if (!listEl) return;
-      listEl.replaceChildren();
-
-      if (tenants && Array.isArray(tenants)) {
-        if (badge) badge.textContent = `${tenants.length} active`;
-        tenants.forEach(t => {
-          const isSelected = t.tenant_id === activeId;
-          const item = document.createElement('div');
-          item.className = `px-3 py-2 text-xs flex items-center justify-between cursor-pointer transition ${
-            isSelected ? 'bg-brand-950/80 text-brand-300 font-semibold' : 'hover:bg-white/5 text-slate-300'
-          }`;
-          item.onclick = () => switchTenant(t.tenant_id);
-
-          const left = document.createElement('div');
-          left.className = 'truncate max-w-[170px]';
-          left.innerHTML = `<div>${t.name || t.tenant_id}</div><div class="text-[10px] text-slate-400 font-mono">${t.tenant_id}</div>`;
-
-          const right = document.createElement('div');
-          right.className = 'text-right font-mono text-[11px]';
-          right.innerHTML = `<div>$${(t.equity || 0).toLocaleString()}</div><div class="${(t.unrealized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${(t.unrealized_pnl || 0) >= 0 ? '+' : ''}$${(t.unrealized_pnl || 0).toFixed(2)}</div>`;
-
-          item.appendChild(left);
-          item.appendChild(right);
-          listEl.appendChild(item);
-
-          if (isSelected && label) {
-            label.textContent = `Desk: ${t.name || t.tenant_id}`;
+          if (f.toUpperCase() === filter) {
+            btn.className = 'px-2.5 py-1 rounded-lg bg-brand-600 text-white font-semibold transition cursor-pointer';
+          } else {
+            btn.className = 'px-2.5 py-1 rounded-lg bg-obsidian-850 text-slate-400 hover:text-white transition cursor-pointer';
           }
-        });
-      }
+        }
+      });
+      renderConsoleLogs(cachedLogs);
     }
 
-    function switchTenant(tenantId) {
-      if (currentTenantId === tenantId) {
-        const menu = document.getElementById('tenant-dropdown-menu');
-        if (menu) menu.classList.add('hidden');
+    function renderConsoleLogs(logs) {
+      const container = document.getElementById('console-logs');
+      if (!container) return;
+      if (Array.isArray(logs)) cachedLogs = logs;
+
+      const filtered = cachedLogs.filter(log => {
+        if (activeLogFilter === 'ALL') return true;
+        const msg = String(log.message || log.msg || log).toUpperCase();
+        if (activeLogFilter === 'TRADE') return msg.includes('ORDER') || msg.includes('FILL') || msg.includes('TRADE') || msg.includes('CLOSE');
+        if (activeLogFilter === 'INFO') return msg.includes('SIGNAL') || msg.includes('ADX') || msg.includes('BREAKOUT') || msg.includes('ATR');
+        if (activeLogFilter === 'ERROR') return msg.includes('ERR') || msg.includes('FAIL') || msg.includes('CIRCUIT') || msg.includes('HALT');
+        return true;
+      });
+
+      container.replaceChildren();
+      if (filtered.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'text-slate-500 py-4 text-center';
+        empty.textContent = 'No matching activity records.';
+        container.appendChild(empty);
         return;
       }
-      currentTenantId = tenantId;
-      localStorage.setItem('delta_bot_current_tenant', tenantId);
-      const menu = document.getElementById('tenant-dropdown-menu');
-      if (menu) menu.classList.add('hidden');
 
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ action: 'switch_tenant', tenant_id: tenantId }));
-      }
-      fetchLatestStatus();
+      filtered.slice(-80).forEach(log => {
+        const line = document.createElement('div');
+        line.className = 'leading-relaxed hover:bg-white/5 px-2 py-0.5 rounded';
+
+        const msgStr = typeof log === 'string' ? log : (log.message || log.msg || JSON.stringify(log));
+        const timeStr = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+
+        let color = 'text-slate-300';
+        if (msgStr.includes('TRADE') || msgStr.includes('FILL') || msgStr.includes('OPEN')) color = 'text-emerald-400 font-semibold';
+        else if (msgStr.includes('WARN') || msgStr.includes('BREAKOUT')) color = 'text-amber-400';
+        else if (msgStr.includes('ERROR') || msgStr.includes('HALT')) color = 'text-rose-400 font-bold';
+
+        line.innerHTML = `<span class="text-slate-500">[${timeStr}]</span> <span class="${color}">${escapeHtml(msgStr)}</span>`;
+        container.appendChild(line);
+      });
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     // -------------------------------------------------------------------------
-    // Execution Actions: Toggle Trading, Flatten, Cancel Order
+    // Execution Controls: Trading, Symbols, Flatten, Close
     // -------------------------------------------------------------------------
     async function toggleTrading() {
-      const action = isRunning ? 'stop' : 'start';
+      const action = isRunning ? 'pause' : 'start';
       try {
         const res = await fetch(getApiUrl(`/api/control/${action}`), {
           method: 'POST',
@@ -2326,7 +1977,7 @@
     }
 
     // -------------------------------------------------------------------------
-    // Modals: Config & Delta Credentials
+    // Config & Delta API Credentials Modal
     // -------------------------------------------------------------------------
     function openConfigModal() {
       document.getElementById('config-modal').classList.remove('hidden');
@@ -2370,7 +2021,7 @@
       if (baseUrl) payload.delta_base_url = baseUrl;
 
       try {
-        const url = currentTenantId !== 'default'
+        const url = (currentTenantId && currentTenantId !== 'default')
           ? `/api/tenants/${currentTenantId}/update`
           : '/api/control/config';
 
@@ -2385,7 +2036,7 @@
           return;
         }
         const data = await res.json();
-        alert(apiKey || apiSecret ? 'Delta Exchange API Keys and Strategy Settings updated & reloaded!' : data.message);
+        alert(apiKey || apiSecret ? 'Delta Exchange API Keys & Risk Settings successfully applied!' : data.message);
         document.getElementById('cfg-delta-key').value = '';
         document.getElementById('cfg-delta-secret').value = '';
         closeConfigModal();
@@ -2395,61 +2046,12 @@
       }
     }
 
-    // Fleet Modal
-    function openTenantFleetModal() {
-      renderFleetModal(knownTenants);
-      document.getElementById('fleet-modal').classList.remove('hidden');
-    }
-
-    function closeTenantFleetModal() {
-      document.getElementById('fleet-modal').classList.add('hidden');
-    }
-
-    function renderFleetModal(tenants) {
-      const grid = document.getElementById('fleet-tenants-grid');
-      if (!grid) return;
-      grid.replaceChildren();
-
-      tenants.forEach(t => {
-        const isSelected = t.tenant_id === currentTenantId;
-        const card = document.createElement('div');
-        card.className = `p-4 rounded-xl glass-card border ${
-          isSelected ? 'border-brand-500/60 bg-brand-950/40' : 'border-white/5'
-        } space-y-2 font-mono text-xs`;
-
-        card.innerHTML = `
-          <div class="flex items-center justify-between">
-            <span class="font-display font-bold text-white text-sm">${t.name || t.tenant_id}</span>
-            <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 font-semibold">${t.mode || 'LIVE'}</span>
-          </div>
-          <div class="text-[11px] text-slate-400">${t.tenant_id}</div>
-          <div class="grid grid-cols-2 gap-2 pt-2 border-t border-white/5">
-            <div><span class="text-slate-400">Equity:</span> <span class="text-white font-bold">$${(t.equity || 0).toLocaleString()}</span></div>
-            <div><span class="text-slate-400">PnL:</span> <span class="${(t.unrealized_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${(t.unrealized_pnl || 0) >= 0 ? '+' : ''}$${(t.unrealized_pnl || 0).toFixed(2)}</span></div>
-            <div><span class="text-slate-400">Leverage:</span> <span class="text-slate-200">${t.leverage || 5}x</span></div>
-            <div><span class="text-slate-400">API Key:</span> <span class="${t.has_api_key ? 'text-emerald-400' : 'text-amber-400'}">${t.has_api_key ? 'Connected' : 'Missing'}</span></div>
-          </div>
-          <div class="pt-2 flex gap-2">
-            <button onclick="switchTenant('${t.tenant_id}'); closeTenantFleetModal();" class="flex-1 py-1 rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-semibold transition cursor-pointer">
-              Switch to Desk
-            </button>
-          </div>
-        `;
-        grid.appendChild(card);
-      });
-    }
-
     // -------------------------------------------------------------------------
     // Initial Load & Route Dispatcher
     // -------------------------------------------------------------------------
     window.addEventListener('DOMContentLoaded', async () => {
-      if ((window.location.hostname.endsWith('.vercel.app') || window.location.hostname.endsWith('.now.sh')) && !localStorage.getItem('delta_bot_backend_url')) {
-        localStorage.setItem('delta_bot_backend_url', DEFAULT_RENDER_BACKEND);
-      }
-      
       await checkSupabaseSession();
       updateAuthUI();
-      updateBackendBadges();
 
       // Dispatch route based on URL hash
       const hash = window.location.hash.replace('#', '').trim();
@@ -2458,8 +2060,7 @@
       } else if (hash === 'auth' || hash === 'login') {
         navigateTo('auth');
       } else {
-        // If already logged in, navigate to dashboard, else show landing page
-        if (currentUser || localStorage.getItem('delta_bot_auth_token')) {
+        if (currentUser || getAuthToken()) {
           navigateTo('dashboard');
         } else {
           navigateTo('landing');
