@@ -101,7 +101,7 @@ class TradingBotOrchestrator:
         )
         self.risk_manager: RiskManager = risk_manager or RiskManager(
             config=risk_cfg,
-            initial_equity=0.0 if self.mode == ExecutionMode.LIVE else 10000.0,
+            initial_equity=0.0,
         )
 
         # Execution Engine based on Mode
@@ -122,7 +122,7 @@ class TradingBotOrchestrator:
             self.private_ws = private_ws  # Typically None in pure paper mode
             self.execution_manager = None
             self.paper_simulator = paper_simulator or PaperExchangeSimulator(
-                initial_balance=10000.0,
+                initial_balance=0.0,
                 state_manager=self.state_manager,
             )
             self.paper_simulator.set_state_manager(self.state_manager)
@@ -159,7 +159,7 @@ class TradingBotOrchestrator:
         init_bal = (
             self.paper_simulator.wallet.initial_balance
             if self.paper_simulator and hasattr(self.paper_simulator, "wallet")
-            else (0.0 if self.mode == ExecutionMode.LIVE else 10000.0)
+            else 0.0
         )
         default_cfg = TenantConfig(
             tenant_id="default",
@@ -242,7 +242,7 @@ class TradingBotOrchestrator:
         else:
             if self.paper_simulator is None:
                 self.paper_simulator = PaperExchangeSimulator(
-                    initial_balance=10000.0,
+                    initial_balance=0.0,
                     state_manager=self.state_manager,
                 )
                 self.paper_simulator.set_state_manager(self.state_manager)

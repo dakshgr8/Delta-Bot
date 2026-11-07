@@ -1299,6 +1299,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             if active_k:
                 try:
                     await updated.sync_live_metrics()
+                    if hasattr(orchestrator, "tenant_manager"):
+                        orchestrator.tenant_manager.sync_tenant_to_supabase(updated)
                 except Exception as sync_e:
                     logger.warning("[TENANT %s] Immediate live metrics sync error: %s", updated.config.tenant_id, sync_e)
 
@@ -2545,7 +2547,7 @@ async def _ws_broadcaster_worker(
                     t_inst = resolve_tenant(orchestrator, t_id) if hasattr(orchestrator, "tenant_manager") else None
                     if t_inst is None and u_id and hasattr(orchestrator, "tenant_manager"):
                         t_inst = orchestrator.tenant_manager.get_tenant_by_user_id(u_id)
-                    if t_inst and t_inst.mode == ExecutionMode.LIVE and t_inst.config.delta_api_key and t_inst.config.delta_api_secret:
+                    if t_inst and t_inst.config.get_active_api_key() and t_inst.config.get_active_api_secret():
                         if now_ts - t_inst.last_sync_time >= 5.0:
                             try:
                                 await t_inst.sync_live_metrics()

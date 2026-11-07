@@ -238,6 +238,7 @@ class TenantInstance:
         self.last_sync_time: float = 0.0
         self.last_sync_error: str | None = None
         self.order_to_base_id: dict[str, str] = {}
+        self.tenant_manager: Any | None = None
 
         # Active environment URLs and credentials
         active_k = config.get_active_api_key()
@@ -284,7 +285,7 @@ class TenantInstance:
         else:
             self.execution_manager = None
             self.paper_simulator = paper_simulator or PaperExchangeSimulator(
-                initial_balance=config.initial_balance if config.initial_balance > 0 else 10000.0,
+                initial_balance=config.initial_balance,
                 state_manager=self.state_manager,
             )
             if self.paper_simulator:
@@ -566,7 +567,7 @@ class TenantInstance:
             self.execution_manager = None
             if self.paper_simulator is None:
                 self.paper_simulator = PaperExchangeSimulator(
-                    initial_balance=self.config.initial_balance if self.config.initial_balance > 0 else 10000.0,
+                    initial_balance=self.config.initial_balance,
                     state_manager=self.state_manager,
                 )
                 self.paper_simulator.set_state_manager(self.state_manager)
@@ -585,6 +586,12 @@ class TenantInstance:
         active_k = self.config.get_active_api_key()
         active_s = self.config.get_active_api_secret()
         if not active_k or not active_s:
+            self.live_balance = 0.0
+            self.live_equity = 0.0
+            self.live_available_margin = 0.0
+            self.live_unrealized_pnl = 0.0
+            self.live_realized_pnl = 0.0
+            self.live_positions = []
             return
         try:
             balances = await self.rest_client.get_wallet_balances()
@@ -684,6 +691,12 @@ class TenantInstance:
                 len(self.live_positions),
             )
         except AuthenticationError as auth_err:
+            self.live_balance = 0.0
+            self.live_equity = 0.0
+            self.live_available_margin = 0.0
+            self.live_unrealized_pnl = 0.0
+            self.live_realized_pnl = 0.0
+            self.live_positions = []
             err_code = getattr(auth_err, "error_code", "")
             resp_body = getattr(auth_err, "response_body", {}) or {}
             client_ip = (resp_body.get("context") or {}).get("client_ip")
@@ -710,6 +723,12 @@ class TenantInstance:
                 self.config.tenant_id,
                 e,
             )
+        finally:
+            if hasattr(self, "tenant_manager") and self.tenant_manager is not None:
+                try:
+                    self.tenant_manager.sync_tenant_to_supabase(self)
+                except Exception as sync_e:
+                    logger.debug("Background auto-sync to Supabase failed: %s", sync_e)
 
     async def emergency_flatten(self) -> dict[str, Any]:
         """Emergency market-closes all active positions and cancels resting orders for this tenant."""
@@ -924,6 +943,7 @@ class TenantManager:
             is_active=True,
         )
         instance = TenantInstance(config=cfg, contract_specs=contract_specs or {})
+        instance.tenant_manager = self
         self.tenants[slug] = instance
         self.save_to_disk()
         self.sync_tenant_to_supabase(instance)
@@ -1057,6 +1077,7 @@ class TenantManager:
                 created_at=r_row.get("created_at") or d_row.get("created_at") or datetime.now(timezone.utc).isoformat(),
             )
             inst = TenantInstance(config=cfg, contract_specs=contract_specs or {})
+            inst.tenant_manager = self
             self.tenants[t_id] = inst
             self.save_to_disk()
             logger.info("[USER TENANT LOADED FROM SUPABASE] Linked user %s to canonical tenant '%s' from separated tables", clean_uid, t_id)
@@ -1104,6 +1125,7 @@ class TenantManager:
             raise ValueError(f"Tenant with ID '{clean_id}' already exists.")
 
         instance = TenantInstance(config=config, contract_specs=contract_specs)
+        instance.tenant_manager = self
         self.tenants[clean_id] = instance
         self.save_to_disk()
         self.sync_tenant_to_supabase(instance)
@@ -1277,6 +1299,7 @@ class TenantManager:
                     c_copy["demo_api_secret"] = decrypt_secret(c_copy["demo_api_secret"])
                 cfg = TenantConfig(**c_copy)
                 instance = TenantInstance(config=cfg, contract_specs=contract_specs)
+                instance.tenant_manager = self
                 self.tenants[t_id] = instance
                 loaded += 1
             logger.info("Loaded %d custom tenants from %s", loaded, self.storage_path)
@@ -1419,6 +1442,7 @@ class TenantManager:
                     created_at=r_row.get("created_at") or d_row.get("created_at") or datetime.now(timezone.utc).isoformat(),
                 )
                 inst = TenantInstance(config=cfg, contract_specs=contract_specs)
+                inst.tenant_manager = self
                 self.tenants[t_id] = inst
                 loaded += 1
 
@@ -1615,18 +1639,7 @@ class TenantManager:
             }
             base_url = self.supabase_url.rstrip("/")
 
-            if instance.mode == ExecutionMode.PAPER and instance.paper_simulator:
-                paper_bal = instance.paper_simulator.wallet.balance
-                paper_eq = instance.paper_simulator.wallet.equity
-                paper_upnl = instance.paper_simulator.wallet.unrealized_pnl
-                paper_rpnl = instance.paper_simulator.wallet.realized_pnl
-            else:
-                paper_bal = 0.0
-                paper_eq = 0.0
-                paper_upnl = 0.0
-                paper_rpnl = 0.0
-
-            live_bal = instance.live_balance if instance.last_sync_time > 0 else instance.config.initial_balance
+            live_bal = instance.live_balance if instance.last_sync_time > 0 else 0.0
             live_eq = instance.live_equity if instance.last_sync_time > 0 else live_bal
             live_upnl = instance.live_unrealized_pnl
             live_rpnl = instance.live_realized_pnl
@@ -1645,6 +1658,7 @@ class TenantManager:
                 "api_secret": enc_real_secret,
                 "base_url": instance.config.delta_base_url or "https://api.india.delta.exchange",
                 "ws_url": instance.config.delta_ws_url or "wss://socket.india.delta.exchange",
+                "initial_balance": 0.0,
                 "leverage": int(instance.config.leverage),
                 "risk_pct": float(instance.config.risk_pct),
                 "timeframe": instance.config.timeframe,
@@ -1669,6 +1683,7 @@ class TenantManager:
                 "api_secret": enc_demo_secret,
                 "base_url": instance.config.demo_base_url or "https://cdn-ind.testnet.deltaex.org",
                 "ws_url": instance.config.demo_ws_url or "wss://socket-ind.testnet.deltaex.org",
+                "initial_balance": 0.0,
                 "leverage": int(instance.config.leverage),
                 "risk_pct": float(instance.config.risk_pct),
                 "timeframe": instance.config.timeframe,
@@ -1678,12 +1693,7 @@ class TenantManager:
                 "is_active": instance.config.is_active,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
-            if instance.mode == ExecutionMode.PAPER and instance.paper_simulator:
-                demo_payload["balance"] = round(float(paper_bal), 4)
-                demo_payload["equity"] = round(float(paper_eq), 4)
-                demo_payload["realized_pnl"] = round(float(paper_rpnl), 4)
-                demo_payload["unrealized_pnl"] = round(float(paper_upnl), 4)
-            elif instance.mode == ExecutionMode.DEMO:
+            if instance.mode in (ExecutionMode.DEMO, ExecutionMode.PAPER):
                 demo_payload["balance"] = round(float(live_bal), 4)
                 demo_payload["equity"] = round(float(live_eq), 4)
                 demo_payload["realized_pnl"] = round(float(live_rpnl), 4)

@@ -400,6 +400,8 @@ async def test_orchestrator_session_rollover_resets_risk() -> None:
         config=BotConfig(execution_mode="paper", target_symbols_str="SOLUSDT"),
         mode=ExecutionMode.PAPER,
     )
+    if orch.paper_simulator:
+        orch.paper_simulator.wallet.balance = 10000.0
 
     # Simulate equity drawdown and trip circuit breaker
     orch.risk_manager.circuit_breaker.trip("Simulated max drawdown breach")

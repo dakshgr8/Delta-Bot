@@ -42,12 +42,12 @@ class VirtualWallet(BaseModel):
 
     model_config = ConfigDict(frozen=False)
 
-    initial_balance: float = Field(default=10000.0, description="Starting USD collateral")
-    balance: float = Field(default=10000.0, description="Realized cash balance")
+    initial_balance: float = Field(default=0.0, description="Starting USD collateral")
+    balance: float = Field(default=0.0, description="Realized cash balance")
     blocked_margin: float = Field(default=0.0, description="Margin allocated to open positions & orders")
     realized_pnl: float = Field(default=0.0, description="Cumulative realized PnL")
     unrealized_pnl: float = Field(default=0.0, description="Floating floating PnL")
-    peak_equity: float = Field(default=10000.0, description="High-watermark equity")
+    peak_equity: float = Field(default=0.0, description="High-watermark equity")
     max_drawdown_pct: float = Field(default=0.0, description="Maximum peak-to-trough drawdown %")
     total_trades: int = Field(default=0, description="Total completed round-trip trades")
     winning_trades: int = Field(default=0, description="Trades closed with positive PnL")
@@ -153,7 +153,7 @@ class PaperExchangeSimulator:
 
     def __init__(
         self,
-        initial_balance: float = 10000.0,
+        initial_balance: float = 0.0,
         default_slippage_bps: float = 1.0,
         state_manager: Any | None = None,
     ) -> None:
