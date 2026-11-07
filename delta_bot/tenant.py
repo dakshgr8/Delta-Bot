@@ -879,18 +879,36 @@ class TenantManager:
         contract_specs: dict[str, ContractSpec] | None = None,
     ) -> TenantInstance:
         """Retrieves existing tenant for user or provisions a new isolated one."""
-        existing = self.get_tenant_by_user_id(user_id)
+        clean_uid = str(user_id).strip()
+        existing = self.get_tenant_by_user_id(clean_uid)
         if existing:
             return existing
 
+        # Check in memory by email handle
+        email_handle = self.sanitize_tenant_id(email.split("@")[0].lower()) if email else ""
+        if email_handle and email_handle in self.tenants:
+            t = self.tenants[email_handle]
+            t.config.user_id = clean_uid
+            self.save_to_disk()
+            self.sync_tenant_to_supabase(t)
+            return t
+
+        # Check Supabase database to avoid duplicate provisioning
+        if self.supabase_url and self.supabase_secret_key:
+            sb_inst = self.fetch_user_tenant_from_supabase(
+                user_id=clean_uid, email=email, contract_specs=contract_specs
+            )
+            if sb_inst:
+                return sb_inst
+
         name_part = email.split("@")[0].replace(".", " ").title() if email else "User Desk"
-        slug = f"user-{user_id[:8]}"
+        slug = f"user-{clean_uid[:8]}"
         if slug in self.tenants:
-            slug = f"user-{user_id[:12]}"
+            slug = f"user-{clean_uid[:12]}"
 
         cfg = TenantConfig(
             tenant_id=slug,
-            user_id=user_id,
+            user_id=clean_uid,
             name=f"{name_part}'s Trading Desk",
             mode="live",
             initial_balance=0.0,
@@ -910,6 +928,95 @@ class TenantManager:
         logger.info("[USER TENANT PROVISIONED] Created isolated desk '%s' for user %s", slug, email)
         return instance
 
+    def fetch_user_tenant_from_supabase(
+        self,
+        user_id: str,
+        email: str | None = None,
+        contract_specs: dict[str, ContractSpec] | None = None,
+    ) -> TenantInstance | None:
+        """Fetches and bootstraps a user's canonical tenant from Supabase PostgreSQL."""
+        if not self.supabase_url or not self.supabase_secret_key:
+            return None
+
+        clean_uid = str(user_id).strip()
+        email_handle = self.sanitize_tenant_id(email.split("@")[0].lower()) if email else ""
+
+        try:
+            import httpx
+            headers = {
+                "apikey": self.supabase_secret_key,
+                "Authorization": f"Bearer {self.supabase_secret_key}",
+            }
+            url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants?user_id=eq.{clean_uid}&select=*"
+            with httpx.Client(timeout=8.0) as client:
+                res = client.get(url, headers=headers)
+                data = res.json() if res.status_code == 200 else []
+
+                if not data and email_handle:
+                    url_email = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants?tenant_id=eq.{email_handle}&select=*"
+                    res_email = client.get(url_email, headers=headers)
+                    if res_email.status_code == 200:
+                        data = res_email.json()
+
+            if not data or not isinstance(data, list):
+                return None
+
+            # Deduplicate if multiple rows found in Supabase
+            if len(data) > 1:
+                def rank(r):
+                    has_key = 1 if decrypt_secret(r.get("delta_api_key") or "") else 0
+                    is_named = 1 if not str(r.get("tenant_id", "")).startswith("user-") else 0
+                    has_bal = 1 if float(r.get("balance", 0.0) or 0.0) > 0 else 0
+                    return (has_key, is_named, has_bal)
+                data.sort(key=rank, reverse=True)
+                for dup in data[1:]:
+                    dup_id = dup.get("tenant_id")
+                    if dup_id:
+                        self.delete_tenant_from_supabase(dup_id)
+                        if dup_id in self.tenants:
+                            del self.tenants[dup_id]
+
+            row = data[0]
+            t_id = row.get("tenant_id")
+            if not t_id or t_id == "default":
+                return None
+
+            if t_id in self.tenants:
+                inst = self.tenants[t_id]
+                inst.config.user_id = clean_uid
+                return inst
+
+            raw_k = decrypt_secret(row.get("delta_api_key") or "")
+            raw_s = decrypt_secret(row.get("delta_api_secret") or "")
+            cfg = TenantConfig(
+                tenant_id=t_id,
+                user_id=clean_uid,
+                name=row.get("name", t_id),
+                mode=row.get("mode", "live"),
+                initial_balance=float(row.get("initial_balance", 0.0)),
+                delta_api_key=raw_k,
+                delta_api_secret=raw_s,
+                delta_base_url=row.get("delta_base_url") or "https://api.india.delta.exchange",
+                delta_ws_url=row.get("delta_ws_url") or "wss://socket.india.delta.exchange",
+                risk_pct=float(row.get("risk_pct", 1.0)),
+                leverage=int(row.get("leverage", 5)),
+                timeframe=row.get("timeframe", "1m"),
+                max_drawdown_pct=float(row.get("max_drawdown_pct", 4.0)),
+                symbols=row.get("symbols") or ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"],
+                is_active=bool(row.get("is_active", True)),
+                created_at=row.get("created_at") or datetime.now(timezone.utc).isoformat(),
+            )
+            inst = TenantInstance(config=cfg, contract_specs=contract_specs or {})
+            if inst.paper_simulator and "balance" in row:
+                inst.paper_simulator.wallet.balance = float(row["balance"])
+            self.tenants[t_id] = inst
+            self.save_to_disk()
+            logger.info("[USER TENANT LOADED FROM SUPABASE] Linked user %s to canonical tenant '%s'", clean_uid, t_id)
+            return inst
+        except Exception as e:
+            logger.error("Error fetching user tenant from Supabase: %s", e)
+            return None
+
     def list_tenants(self) -> list[dict[str, Any]]:
         """Returns a list of status summaries across all registered tenants."""
         return [t.get_summary() for t in self.tenants.values()]
@@ -926,7 +1033,15 @@ class TenantManager:
             user_tenants = [
                 t.get_summary() for t in self.tenants.values() if t.config.tenant_id in (clean_uid, prefix)
             ]
-        return user_tenants
+        # Deduplicate to guarantee exactly one summary per tenant_id
+        seen: set[str] = set()
+        deduped: list[dict[str, Any]] = []
+        for ut in user_tenants:
+            tid = ut.get("tenant_id")
+            if tid and tid not in seen:
+                seen.add(tid)
+                deduped.append(ut)
+        return deduped
 
     def create_tenant(
         self,
@@ -1135,6 +1250,40 @@ class TenantManager:
                 return 0
 
             data = res.json()
+            if not isinstance(data, list):
+                return 0
+
+            # Deduplicate any multiple rows for the same user_id in Supabase
+            by_user: dict[str, list[dict[str, Any]]] = {}
+            for row in data:
+                uid = row.get("user_id")
+                if uid:
+                    by_user.setdefault(str(uid), []).append(row)
+
+            for uid, user_rows in by_user.items():
+                if len(user_rows) > 1:
+                    def rank(r):
+                        has_key = 1 if decrypt_secret(r.get("delta_api_key") or "") else 0
+                        is_named = 1 if not str(r.get("tenant_id", "")).startswith("user-") else 0
+                        has_bal = 1 if float(r.get("balance", 0.0) or 0.0) > 0 else 0
+                        return (has_key, is_named, has_bal)
+
+                    user_rows.sort(key=rank, reverse=True)
+                    canonical = user_rows[0]
+                    for dup in user_rows[1:]:
+                        dup_id = dup.get("tenant_id")
+                        if dup_id:
+                            logger.warning(
+                                "[SUPABASE DEDUPLICATION] Deleting duplicate tenant '%s' for user '%s', keeping canonical '%s'",
+                                dup_id,
+                                uid,
+                                canonical.get("tenant_id"),
+                            )
+                            self.delete_tenant_from_supabase(dup_id)
+                            if dup_id in self.tenants:
+                                del self.tenants[dup_id]
+                            data = [r for r in data if r.get("tenant_id") != dup_id]
+
             loaded = 0
             for row in data:
                 t_id = row.get("tenant_id")

@@ -13,6 +13,7 @@ Covers:
 """
 
 import pytest
+from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 from delta_bot.config import BotConfig
@@ -890,6 +891,118 @@ async def test_unfunded_live_tenant_safely_skips_trading_without_circuit_breaker
     # Equity query must return 0.0
     eq = await tenant.get_account_equity()
     assert eq == 0.0
+
+
+def test_tenant_deduplication_and_email_slug_reuse(tmp_path: Any) -> None:
+    """Verifies that get_or_create_user_tenant reuses email-based tenants without duplicate generation."""
+    mgr = TenantManager(storage_path=str(tmp_path / "tenants.json"))
+
+    # 1. Pre-register a tenant with tenant_id matching email handle
+    mgr.create_tenant(TenantConfig(tenant_id="nitinyadavtss", name="nitinyadavtss's Trading Desk"))
+    assert "nitinyadavtss" in mgr.tenants
+    assert mgr.tenants["nitinyadavtss"].config.user_id is None
+
+    # 2. User registers/logs in with user_id and email "nitinyadavtss@gmail.com"
+    user_id = "0141fe76-7dcd-4298-9448-901119010545"
+    inst = mgr.get_or_create_user_tenant(user_id=user_id, email="nitinyadavtss@gmail.com")
+
+    # Must reuse the existing "nitinyadavtss" tenant rather than creating "user-0141fe76"
+    assert inst.config.tenant_id == "nitinyadavtss"
+    assert inst.config.user_id == user_id
+    assert "user-0141fe76" not in mgr.tenants
+    assert len(mgr.tenants) == 1
+
+    # 3. Subsequent calls return the same canonical tenant
+    inst2 = mgr.get_or_create_user_tenant(user_id=user_id, email="nitinyadavtss@gmail.com")
+    assert inst2 is inst
+    assert len(mgr.tenants) == 1
+
+    # 4. list_tenants_for_user returns exactly one entry
+    user_tenants = mgr.list_tenants_for_user(user_id)
+    assert len(user_tenants) == 1
+    assert user_tenants[0]["tenant_id"] == "nitinyadavtss"
+
+
+def test_fetch_user_tenant_from_supabase_deduplication(tmp_path: Any) -> None:
+    """Verifies that fetch_user_tenant_from_supabase cleans up duplicates and retains canonical tenant."""
+    mgr = TenantManager(
+        storage_path=str(tmp_path / "tenants.json"),
+        supabase_url="https://fake.supabase.co",
+        supabase_secret_key="fake_key",
+    )
+
+    user_id = "0141fe76-7dcd-4298-9448-901119010545"
+    mock_supabase_rows = [
+        {
+            "tenant_id": "user-0141fe76",
+            "user_id": user_id,
+            "name": "Nitinyadavtss's Trading Desk",
+            "mode": "live",
+            "delta_api_key": None,
+        },
+        {
+            "tenant_id": "nitinyadavtss",
+            "user_id": user_id,
+            "name": "nitinyadavtss's Trading Desk",
+            "mode": "live",
+            "delta_api_key": None,
+        },
+    ]
+
+    with patch("httpx.Client.get") as mock_get, patch.object(mgr, "delete_tenant_from_supabase") as mock_del:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = mock_supabase_rows
+        mock_get.return_value = mock_resp
+
+        inst = mgr.fetch_user_tenant_from_supabase(user_id=user_id, email="nitinyadavtss@gmail.com")
+
+        assert inst is not None
+        assert inst.config.tenant_id == "nitinyadavtss"
+        assert "nitinyadavtss" in mgr.tenants
+        assert "user-0141fe76" not in mgr.tenants
+        # Must have deleted the duplicate "user-0141fe76" from Supabase
+        mock_del.assert_called_once_with("user-0141fe76")
+
+
+def test_load_from_supabase_deduplicates_duplicate_user_rows(tmp_path: Any) -> None:
+    """Verifies that load_from_supabase purges duplicate tenant rows for the same user."""
+    mgr = TenantManager(
+        storage_path=str(tmp_path / "tenants.json"),
+        supabase_url="https://fake.supabase.co",
+        supabase_secret_key="fake_key",
+    )
+
+    user_id = "0141fe76-7dcd-4298-9448-901119010545"
+    mock_supabase_data = [
+        {
+            "tenant_id": "user-0141fe76",
+            "user_id": user_id,
+            "name": "Ghost Duplicate",
+            "mode": "live",
+            "delta_api_key": None,
+        },
+        {
+            "tenant_id": "nitinyadavtss",
+            "user_id": user_id,
+            "name": "Canonical Account",
+            "mode": "live",
+            "delta_api_key": None,
+        },
+    ]
+
+    with patch("httpx.Client.get") as mock_get, patch.object(mgr, "delete_tenant_from_supabase") as mock_del:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = mock_supabase_data
+        mock_get.return_value = mock_resp
+
+        loaded = mgr.load_from_supabase(contract_specs={})
+        assert loaded == 1
+        assert "nitinyadavtss" in mgr.tenants
+        assert "user-0141fe76" not in mgr.tenants
+        mock_del.assert_called_once_with("user-0141fe76")
+
 
 
 

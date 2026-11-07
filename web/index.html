@@ -924,9 +924,9 @@
         supabaseClient.auth.onAuthStateChange(async (event, session) => {
           if (session && session.access_token) {
             currentUser = session.user;
-            currentTenantId = session.user.id;
+            const savedTid = localStorage.getItem('tenant_id');
+            currentTenantId = (savedTid && savedTid !== 'default') ? savedTid : 'default';
             localStorage.setItem('token', session.access_token);
-            localStorage.setItem('tenant_id', currentTenantId);
             updateNavUser();
           } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
             currentUser = null;
@@ -1118,9 +1118,9 @@
     function setSession(session) {
       if (session) {
         currentUser = session.user;
-        currentTenantId = session.user.id;
+        const savedTid = localStorage.getItem('tenant_id');
+        currentTenantId = (savedTid && savedTid !== 'default') ? savedTid : 'default';
         localStorage.setItem('token', session.access_token);
-        localStorage.setItem('tenant_id', currentTenantId);
         updateNavUser();
         initWs();
         forceFetchStatus();
@@ -1233,7 +1233,8 @@
             localStorage.setItem('token', token);
             if (session.user) {
               currentUser = session.user;
-              currentTenantId = session.user.id;
+              const savedTid = localStorage.getItem('tenant_id');
+              currentTenantId = (savedTid && savedTid !== 'default') ? savedTid : 'default';
             }
           } else {
             localStorage.removeItem('token');
@@ -1366,8 +1367,9 @@
       const col = data.collateral || {};
       const tenant = data.current_tenant || {};
 
-      if (tenant.tenant_id && (!currentTenantId || currentTenantId === 'default')) {
+      if (tenant.tenant_id) {
         currentTenantId = tenant.tenant_id;
+        localStorage.setItem('tenant_id', currentTenantId);
       }
 
       // Engine Running State
