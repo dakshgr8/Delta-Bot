@@ -34,6 +34,7 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import AliasChoices, BaseModel, Field
@@ -224,6 +225,7 @@ class RingBufferLogHandler(logging.Handler):
         super().__init__()
         self.capacity: int = capacity
         self.buffer: deque[dict[str, Any]] = deque(maxlen=capacity)
+        self.version: int = 0
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -238,6 +240,7 @@ class RingBufferLogHandler(logging.Handler):
                 "message": msg,
             }
             self.buffer.append(entry)
+            self.version += 1
         except Exception as err:
             logger.debug("Failed to record log in RingBufferLogHandler: %s", err)
 
@@ -274,6 +277,7 @@ class WebSocketManager:
         self.active_connections: set[WebSocket] = set()
         self.connection_tenants: dict[WebSocket, str] = {}
         self.connection_users: dict[WebSocket, str | None] = {}
+        self.connection_paused: dict[WebSocket, bool] = {}
         self._lock: asyncio.Lock = asyncio.Lock()
 
     async def connect(
@@ -298,6 +302,7 @@ class WebSocketManager:
             self.active_connections.discard(websocket)
             self.connection_tenants.pop(websocket, None)
             self.connection_users.pop(websocket, None)
+            self.connection_paused.pop(websocket, None)
         logger.debug("WebSocket client disconnected. Active: %d", len(self.active_connections))
 
     async def broadcast(self, payload: dict[str, Any]) -> None:
@@ -623,6 +628,7 @@ def get_full_state_packet(
     orchestrator: TradingBotOrchestrator,
     tenant_id: str | None = None,
     user_id: str | None = None,
+    include_logs: bool = True,
 ) -> dict[str, Any]:
     """Generates the unified 500ms broadcast state packet for clients."""
     tenant = resolve_tenant(orchestrator, tenant_id)
@@ -777,10 +783,12 @@ def get_full_state_packet(
         "positions": positions,
         "orders": orders,
         "indicators": indicators,
-        "logs": log_handler.get_logs(limit=25),
         "tenants": tenants_list,
         "current_tenant": current_tenant_dict,
     }
+    if include_logs:
+        packet["logs"] = log_handler.get_logs(limit=25)
+    return packet
 
 
 # -----------------------------------------------------------------------------
@@ -825,6 +833,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Bandwidth optimization: GZip compress all HTTP responses >= 500 bytes
+    app.add_middleware(GZipMiddleware, minimum_size=500)
 
     # -------------------------------------------------------------------------
     # Authentication Dependency (Phase 8 Guard & Supabase Multi-Tenant)
@@ -907,9 +917,10 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
     async def get_dashboard() -> Any:
         """Serves the single-page quantitative dashboard UI."""
         index_file = os.path.join(STATIC_DIR, "index.html")
+        cache_headers = {"Cache-Control": "public, max-age=300"}
         if os.path.isfile(index_file):
-            return FileResponse(index_file, media_type="text/html")
-        return HTMLResponse(content=get_embedded_dashboard_html(), status_code=status.HTTP_200_OK)
+            return FileResponse(index_file, media_type="text/html", headers=cache_headers)
+        return HTMLResponse(content=get_embedded_dashboard_html(), status_code=status.HTTP_200_OK, headers=cache_headers)
 
     @app.get("/api/auth/me")
     async def get_auth_me(auth: AuthIdentity = Depends(get_current_auth)) -> JSONResponse:
@@ -1923,6 +1934,16 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                                 ws_manager.connection_tenants[websocket] = new_t
                             curr_pkt = get_full_state_packet(orchestrator, tenant_id=new_t, user_id=user_id)
                             await websocket.send_text(json.dumps(curr_pkt, default=str))
+                        elif msg.get("action") == "pause":
+                            async with ws_manager._lock:
+                                ws_manager.connection_paused[websocket] = True
+                        elif msg.get("action") == "resume":
+                            async with ws_manager._lock:
+                                ws_manager.connection_paused.pop(websocket, None)
+                            curr_pkt = get_full_state_packet(
+                                orchestrator, tenant_id=target_tenant, user_id=user_id, include_logs=True
+                            )
+                            await websocket.send_text(json.dumps(curr_pkt, default=str))
                     except Exception:
                         pass
         except WebSocketDisconnect:
@@ -1945,25 +1966,40 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
 async def _ws_broadcaster_worker(
     orchestrator: TradingBotOrchestrator, ws_manager: WebSocketManager
 ) -> None:
-    """Dispatches full state packets to active WebSocket subscribers every 500ms."""
+    """Dispatches state packets to active WebSocket subscribers at configured interval."""
+    last_log_version = -1
     while True:
         try:
-            await asyncio.sleep(0.5)
+            interval = getattr(orchestrator.config, "ws_broadcast_interval_sec", 2.0)
+            await asyncio.sleep(interval)
             if ws_manager.active_connections:
                 async with ws_manager._lock:
                     connections = list(ws_manager.active_connections)
                     tenant_map = dict(ws_manager.connection_tenants)
                     user_map = dict(ws_manager.connection_users)
+                    paused_map = dict(ws_manager.connection_paused)
+
+                live_connections = [ws for ws in connections if not paused_map.get(ws, False)]
+                if not live_connections:
+                    continue
+
+                curr_log_version = getattr(log_handler, "version", 0)
+                logs_changed = curr_log_version != last_log_version
 
                 packet_cache: dict[tuple[str, str | None], str] = {}
                 dead_connections = []
 
-                for ws in connections:
+                for ws in live_connections:
                     t_id = tenant_map.get(ws, "default")
                     u_id = user_map.get(ws)
                     cache_key = (t_id, u_id)
                     if cache_key not in packet_cache:
-                        packet = get_full_state_packet(orchestrator, tenant_id=t_id, user_id=u_id)
+                        packet = get_full_state_packet(
+                            orchestrator,
+                            tenant_id=t_id,
+                            user_id=u_id,
+                            include_logs=logs_changed,
+                        )
                         packet_cache[cache_key] = json.dumps(packet, default=str)
 
                     try:
@@ -1971,12 +2007,16 @@ async def _ws_broadcaster_worker(
                     except Exception:
                         dead_connections.append(ws)
 
+                if logs_changed and live_connections:
+                    last_log_version = curr_log_version
+
                 if dead_connections:
                     async with ws_manager._lock:
                         for dead in dead_connections:
                             ws_manager.active_connections.discard(dead)
                             ws_manager.connection_tenants.pop(dead, None)
                             ws_manager.connection_users.pop(dead, None)
+                            ws_manager.connection_paused.pop(dead, None)
         except asyncio.CancelledError:
             break
         except Exception as b_err:

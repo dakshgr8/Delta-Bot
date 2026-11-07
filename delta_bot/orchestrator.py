@@ -822,7 +822,10 @@ class TradingBotOrchestrator:
             resolutions=[self.timeframe],
         )
         await self.public_ws.subscribe_tickers(symbols=self.target_symbols)
-        await self.public_ws.subscribe_orderbook(symbols=self.target_symbols)
+        if getattr(self.config, "enable_orderbook_stream", True):
+            await self.public_ws.subscribe_orderbook(symbols=self.target_symbols)
+        else:
+            logger.info("Orderbook streaming disabled via ENABLE_ORDERBOOK_STREAM=false (conserving bandwidth)")
 
         # 6. Initialize Live Subsystems (Tasks 2 & 4)
         if self.mode == ExecutionMode.LIVE and self.private_ws is not None:

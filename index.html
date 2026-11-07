@@ -1048,6 +1048,10 @@
     // Backend API & Data Polling
     // -------------------------------------------------------------------------
     async function fetchStatus() {
+      // Bandwidth optimization: if WebSocket is actively streaming, skip redundant HTTP poll
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        return;
+      }
       try {
         const res = await fetch(`${BACKEND_URL}/api/status`, { headers: getAuthHeaders() });
         if (res.ok) {
@@ -1066,6 +1070,12 @@
       const qs = token ? `?token=${token}&tenant_id=${currentTenantId}` : '';
       try {
         ws = new WebSocket(`${WS_BASE}/ws/live${qs}`);
+        ws.onopen = () => {
+          console.debug('WS connected');
+          if (document.hidden && ws.readyState === WebSocket.OPEN) {
+            try { ws.send(JSON.stringify({ action: 'pause' })); } catch (_) {}
+          }
+        };
         ws.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data);
@@ -1073,8 +1083,32 @@
             if (data.tickers) renderLandingTickers(data.tickers);
           } catch (_) {}
         };
+        ws.onclose = () => {
+          console.debug('WS closed, fallback to polling');
+          setTimeout(initWs, 5000);
+        };
       } catch (_) {}
     }
+
+    // Bandwidth optimization: pause streaming when tab is minimized / backgrounded
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try { ws.send(JSON.stringify({ action: 'pause' })); } catch (_) {}
+        }
+        if (pollInterval) clearInterval(pollInterval);
+        pollInterval = setInterval(fetchStatus, 60000); // 60s fallback poll while tab hidden
+      } else {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try { ws.send(JSON.stringify({ action: 'resume' })); } catch (_) {}
+        } else {
+          initWs();
+        }
+        if (pollInterval) clearInterval(pollInterval);
+        pollInterval = setInterval(fetchStatus, 5000);
+        fetchStatus();
+      }
+    });
 
     // -------------------------------------------------------------------------
     // Render Functions
@@ -1461,7 +1495,7 @@
       handleHashRouting();
 
       await fetchStatus();
-      pollInterval = setInterval(fetchStatus, 2500);
+      pollInterval = setInterval(fetchStatus, 5000); // 5s fallback poll when WS is disconnected
       initWs();
     });
   </script>

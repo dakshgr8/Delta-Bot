@@ -93,6 +93,18 @@ class BotConfig(BaseSettings):
         validation_alias=AliasChoices("STRICT_ORDERBOOK_SEQUENCE_CHECK", "strict_orderbook_sequence_check"),
         description="Whether to enforce strict consecutive sequence numbers on throttled L2 orderbook feeds",
     )
+    enable_orderbook_stream: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("ENABLE_ORDERBOOK_STREAM", "enable_orderbook_stream"),
+        description="Whether to subscribe to continuous L2 orderbook feeds (consumes ~15GB/month)",
+    )
+    ws_broadcast_interval_sec: float = Field(
+        default=2.0,
+        validation_alias=AliasChoices("WS_BROADCAST_INTERVAL_SEC", "ws_broadcast_interval_sec"),
+        ge=0.5,
+        le=10.0,
+        description="WebSocket live dashboard state broadcast frequency in seconds",
+    )
 
     # HTTP Client timeouts & reliability
     request_timeout_sec: float = Field(
