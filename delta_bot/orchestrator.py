@@ -382,7 +382,11 @@ class TradingBotOrchestrator:
                 e,
                 exc_info=True,
             )
-            return
+            order_intent = None
+
+        # Dispatch confirmed candle close to all registered custom tenants for lifecycle management
+        if hasattr(self, "tenant_manager"):
+            await self._dispatch_candle_to_custom_tenants(clean_symbol, candle, spec)
 
         if order_intent is None:
             return
@@ -395,6 +399,14 @@ class TradingBotOrchestrator:
             order_intent.contract_lots,
             order_intent.capital_at_risk_usd,
         )
+
+        # Dispatch breakout signal fan-out to all active tenants
+        if hasattr(self, "tenant_manager"):
+            base_sig_id = f"SIG_{clean_symbol}_{int(candle.timestamp)}"
+            try:
+                await self.tenant_manager.fanout_order_intent(base_sig_id, order_intent, spec)
+            except Exception as fan_err:
+                logger.error("[FANOUT ERROR] Failed to fan out signal %s: %s", base_sig_id, fan_err)
 
         # Pre-trade Risk Limit Verification
         active_pos_count = self.get_active_positions_count()
@@ -479,10 +491,6 @@ class TradingBotOrchestrator:
                     exc_info=True,
                 )
 
-        # Dispatch confirmed candle close to all registered custom tenants
-        if hasattr(self, "tenant_manager"):
-            await self._dispatch_candle_to_custom_tenants(clean_symbol, candle, spec)
-
     async def _dispatch_candle_to_custom_tenants(
         self, clean_symbol: str, candle: Candle, spec: ContractSpec
     ) -> None:
@@ -503,11 +511,13 @@ class TradingBotOrchestrator:
 
             tenant.register_contract_spec(spec)
             try:
+                t_equity = await tenant.get_account_equity()
                 t_intent = await t_strat.on_candle_close(
                     candle=candle,
-                    bar_cache=bar_cache,
                     session_anchor=session_anchor,
-                    latest_ticker=latest_ticker,
+                    contract_spec=spec,
+                    bar_cache=bar_cache,
+                    account_equity=t_equity,
                 )
                 if t_intent is not None:
                     await self._execute_tenant_intent(tenant, clean_symbol, spec, t_intent)

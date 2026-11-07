@@ -1226,6 +1226,8 @@ class TenantManager:
         base_signal_id = f"SIG_{clean_symbol}_{int(candle.timestamp)}"
 
         for tenant in list(self.tenants.values()):
+            if tenant.config.tenant_id == "default":
+                continue  # Default tenant order is executed directly by the master orchestrator
             if not tenant.is_running or clean_symbol not in tenant.enabled_symbols:
                 continue
 
@@ -1364,6 +1366,8 @@ class TenantManager:
         self._inflight_signals[base_signal_id] = now_ts
 
         for tenant in list(self.tenants.values()):
+            if tenant.config.tenant_id == "default":
+                continue  # Default tenant order is executed directly by the master orchestrator
             if not tenant.is_running or clean_symbol not in tenant.enabled_symbols:
                 continue
 

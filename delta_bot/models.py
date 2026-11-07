@@ -480,6 +480,11 @@ class Candle(BaseModel):
         return self.candle_start_time_usec / 1_000_000.0
 
     @property
+    def timestamp(self) -> float:
+        """Alias for candle start timestamp in epoch seconds."""
+        return self.candle_start_time_usec / 1_000_000.0
+
+    @property
     def hl2(self) -> float:
         """Median price: (High + Low) / 2."""
         return (self.high + self.low) / 2.0
