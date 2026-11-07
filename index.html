@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Delta-Bot | Institutional Quantitative Terminal & Algorithmic Trading</title>
+  <title>DELTA-BOT | Quantitative Terminal</title>
   
-  <!-- Modern Typography: Plus Jakarta Sans, Space Grotesk, JetBrains Mono -->
+  <!-- Fonts: Plus Jakarta Sans & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   
   <!-- Tailwind CSS & Supabase JS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -22,29 +22,19 @@
           colors: {
             obsidian: {
               950: '#07090e',
-              900: '#0b0f19',
-              850: '#111726',
-              800: '#172033',
-              750: '#1e2942',
-              700: '#253352'
+              900: '#0c1017',
+              850: '#121824',
+              800: '#1a2233',
+              700: '#26334d'
             },
             brand: {
-              50: '#f0fdfa',
-              100: '#ccfbf1',
-              200: '#99f6e4',
-              300: '#5eead4',
-              400: '#2dd4bf',
-              500: '#14b8a6',
-              600: '#0d9488',
-              700: '#0f766e',
-              800: '#115e59',
-              900: '#134e4a',
-              950: '#042f2e'
+              400: '#34d399',
+              500: '#10b981',
+              600: '#059669'
             }
           },
           fontFamily: {
-            sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
-            display: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
+            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
             mono: ['"JetBrains Mono"', 'monospace']
           }
         }
@@ -53,561 +43,246 @@
   </script>
 
   <style>
-    /* Premium Glassmorphism & Custom Accents */
-    .glass-card {
-      background: rgba(15, 23, 42, 0.65);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 255, 255, 0.07);
+    .card {
+      background: rgba(18, 24, 36, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(12px);
     }
-    .glass-card-hover {
-      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    .glass-card-hover:hover {
-      border-color: rgba(45, 212, 191, 0.35);
-      box-shadow: 0 10px 30px -10px rgba(13, 148, 136, 0.25);
-      transform: translateY(-2px);
-    }
-    .bg-radial-glow {
-      background: radial-gradient(circle at 50% 0%, rgba(13, 148, 136, 0.18) 0%, rgba(7, 9, 14, 0) 70%);
-    }
-    .bg-grid-pattern {
-      background-size: 32px 32px;
-      background-image: 
-        linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-        linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-    }
-    /* Custom Scrollbar */
-    ::-webkit-scrollbar {
-      width: 6px;
-      height: 6px;
-    }
-    ::-webkit-scrollbar-track {
-      background: #07090e;
-    }
-    ::-webkit-scrollbar-thumb {
-      background: #1e2942;
-      border-radius: 4px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: #2dd4bf;
-    }
-    .view-container {
+    .view-page {
       display: none;
     }
-    .view-container.active {
+    .view-page.active {
       display: block;
     }
   </style>
 </head>
-<body class="bg-obsidian-950 text-slate-100 font-sans antialiased selection:bg-brand-500/30 selection:text-brand-300 min-h-screen flex flex-col">
+<body class="bg-obsidian-950 text-slate-100 font-sans antialiased min-h-screen flex flex-col selection:bg-brand-500/30">
 
   <!-- ========================================================================= -->
-  <!-- GLOBAL CLIENT NAVIGATION BAR -->
+  <!-- NAVIGATION BAR -->
   <!-- ========================================================================= -->
-  <nav id="global-nav" class="sticky top-0 z-50 backdrop-blur-xl bg-obsidian-950/85 border-b border-white/5 transition-all duration-200">
+  <nav class="sticky top-0 z-50 bg-obsidian-950/90 border-b border-white/10 backdrop-blur-md">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
       
       <!-- Brand Logo -->
-      <div class="flex items-center space-x-3 cursor-pointer" onclick="navigateToHome()">
-        <div class="h-9 w-9 rounded-xl bg-gradient-to-tr from-brand-600 via-cyan-500 to-emerald-400 p-[1px] shadow-lg shadow-cyan-950/50">
-          <div class="h-full w-full bg-obsidian-950 rounded-[11px] flex items-center justify-center font-display font-bold text-transparent bg-clip-text bg-gradient-to-tr from-brand-400 to-emerald-300 text-lg">
-            Δ
-          </div>
+      <a href="#landing" onclick="navTo('landing'); return false;" class="flex items-center space-x-2.5 cursor-pointer">
+        <div class="h-8 w-8 rounded-lg bg-emerald-500 flex items-center justify-center font-bold text-obsidian-950 text-lg shadow-lg shadow-emerald-950">
+          Δ
         </div>
         <div>
-          <div class="flex items-center gap-2">
-            <span class="font-display font-bold tracking-tight text-white text-base">DELTA<span class="text-brand-400">BOT</span></span>
-            <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-brand-950/80 text-brand-300 border border-brand-800/60 font-semibold tracking-wider">PRO</span>
-          </div>
-          <p class="text-[10px] text-slate-400 font-mono tracking-wide hidden sm:block">Autonomous Perpetual Engine</p>
+          <span class="font-extrabold text-white tracking-tight text-base">DELTA-BOT</span>
+          <span class="text-[10px] text-emerald-400 font-mono ml-1 font-semibold">TERMINAL</span>
         </div>
+      </a>
+
+      <!-- Center Links (Landing Only) -->
+      <div id="nav-landing-links" class="hidden md:flex items-center space-x-6 text-xs font-semibold text-slate-300">
+        <a href="#features" class="hover:text-emerald-400 transition">Features</a>
+        <a href="#markets" class="hover:text-emerald-400 transition">Markets</a>
+        <a href="#pricing" class="hover:text-emerald-400 transition">Pricing</a>
       </div>
 
-      <!-- Landing Navigation Links (Smooth Scroll) -->
-      <div id="nav-landing-links" class="hidden md:flex items-center space-x-8 text-xs font-semibold tracking-wide text-slate-300">
-        <a href="#features" class="hover:text-brand-400 transition-colors">Features</a>
-        <a href="#markets" class="hover:text-brand-400 transition-colors">Live Markets</a>
-        <a href="#safeguards" class="hover:text-brand-400 transition-colors">Risk Controls</a>
-        <a href="#pricing" class="hover:text-brand-400 transition-colors">Pricing</a>
-        <a href="#faq" class="hover:text-brand-400 transition-colors">FAQ</a>
-      </div>
-
-      <!-- Action Buttons -->
+      <!-- Right Action Buttons -->
       <div class="flex items-center space-x-3">
-        
-        <!-- Unauthenticated State: Sign In & Deploy Desk -->
-        <div id="nav-guest-actions" class="flex items-center space-x-2">
-          <button onclick="navigateTo('auth')" class="text-xs font-semibold px-3.5 py-2 rounded-xl text-slate-300 hover:text-white hover:bg-white/5 transition cursor-pointer">
+        <!-- Logged Out State -->
+        <div id="nav-auth-buttons" class="flex items-center space-x-2">
+          <button onclick="navTo('login')" class="text-xs font-semibold px-3 py-1.5 rounded-lg text-slate-300 hover:text-white transition cursor-pointer">
             Sign In
           </button>
-          <button onclick="navigateTo('auth')" class="text-xs font-semibold px-4 py-2 rounded-xl bg-gradient-to-r from-brand-600 via-cyan-500 to-emerald-500 hover:from-brand-500 hover:to-emerald-400 text-white shadow-lg shadow-cyan-950/60 transition cursor-pointer flex items-center gap-1.5">
-            <span>Get Started</span>
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+          <button onclick="navTo('login'); switchAuthTab('signup');" class="text-xs font-semibold px-4 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-obsidian-950 font-bold transition shadow-md shadow-emerald-950 cursor-pointer">
+            Get Started
           </button>
         </div>
 
-        <!-- Authenticated State: Active Profile & Terminal Shortcut -->
-        <div id="nav-user-actions" class="hidden relative inline-block text-left">
-          <div class="flex items-center space-x-2">
-            <button onclick="navigateTo('dashboard')" class="text-xs font-semibold px-3.5 py-1.5 rounded-xl bg-brand-950/70 border border-brand-500/40 text-brand-300 hover:bg-brand-900/50 transition flex items-center gap-1.5 cursor-pointer">
-              <span class="h-1.5 w-1.5 rounded-full bg-brand-400 animate-pulse"></span>
-              <span>Trading Desk</span>
-            </button>
-            <button onclick="toggleUserMenu()" class="h-8 px-2.5 rounded-xl bg-obsidian-900 border border-white/10 hover:border-brand-500/50 text-slate-200 text-xs font-mono flex items-center gap-2 cursor-pointer transition">
-              <div class="h-5 w-5 rounded-full bg-gradient-to-tr from-brand-500 to-emerald-400 text-[10px] font-bold text-obsidian-950 flex items-center justify-center font-sans" id="nav-user-avatar">
-                U
-              </div>
-              <span id="nav-user-email-display" class="max-w-[120px] truncate text-slate-300 font-sans font-medium">user@domain.com</span>
-              <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-            </button>
-          </div>
-
-          <!-- Profile Dropdown Menu -->
-          <div id="nav-user-menu" class="hidden absolute right-0 mt-2 w-64 rounded-xl glass-card shadow-2xl z-50 p-2 divide-y divide-white/5 text-xs font-sans">
-            <div class="px-3 py-2">
-              <div class="text-[10px] uppercase font-semibold text-slate-400 font-mono">Connected Desk</div>
-              <div class="font-semibold text-white truncate mt-0.5" id="menu-user-email">--</div>
-            </div>
-            <div class="py-1">
-              <button onclick="openConfigModal(); toggleUserMenu();" class="w-full text-left px-3 py-2 rounded-lg hover:bg-white/5 text-slate-300 hover:text-white transition cursor-pointer flex items-center justify-between">
-                <span>Delta API Keys & Risk</span>
-                <span class="text-[10px] font-mono text-brand-400">SETTINGS</span>
-              </button>
-            </div>
-            <div class="pt-1">
-              <button onclick="signOutSupabase(); toggleUserMenu();" class="w-full text-left px-3 py-2 rounded-lg text-rose-400 hover:bg-rose-950/40 hover:text-rose-300 transition cursor-pointer flex items-center justify-between">
-                <span>Sign Out</span>
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
-              </button>
-            </div>
-          </div>
+        <!-- Logged In State -->
+        <div id="nav-user-buttons" class="hidden flex items-center space-x-3">
+          <button onclick="navTo('dashboard')" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-obsidian-850 border border-white/10 text-slate-200 hover:text-white transition cursor-pointer flex items-center gap-1.5">
+            <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>Dashboard</span>
+          </button>
+          <span id="nav-user-email" class="text-xs font-mono text-slate-400 hidden sm:inline">user@domain.com</span>
+          <button onclick="signOut()" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-rose-950/50 border border-rose-800/60 text-rose-300 hover:bg-rose-900/60 transition cursor-pointer">
+            Sign Out
+          </button>
         </div>
-
       </div>
+
     </div>
   </nav>
 
 
   <!-- ========================================================================= -->
-  <!-- 1. VIEW: INSTITUTIONAL LANDING PAGE (SALES & PRODUCT SHOWCASE) -->
+  <!-- 1. LANDING PAGE -->
   <!-- ========================================================================= -->
-  <div id="view-landing" class="view-container active">
-
-    <!-- HERO SECTION -->
-    <header class="relative overflow-hidden pt-20 pb-28 md:pt-32 md:pb-40 border-b border-white/5 bg-radial-glow">
-      <div class="absolute inset-0 bg-grid-pattern [mask-image:linear-gradient(to_bottom,white_30%,transparent_90%)] pointer-events-none opacity-40"></div>
-
-      <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-        
-        <!-- Live Engine Announcement Pill -->
-        <div class="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-brand-950/70 border border-brand-500/30 text-brand-300 text-xs font-mono mb-8 backdrop-blur-md shadow-inner shadow-brand-500/10">
-          <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>LIVE QUANTITATIVE EXECUTION</span>
-          <span class="text-white/30">•</span>
-          <span class="text-slate-300 font-sans">Delta Exchange Perpetuals</span>
-        </div>
-
-        <!-- Big Display Headline -->
-        <h1 class="text-4xl sm:text-6xl lg:text-7xl font-display font-extrabold tracking-tight text-white max-w-5xl mx-auto leading-[1.08]">
-          Autonomous Volatility Breakouts for <span class="text-transparent bg-clip-text bg-gradient-to-r from-brand-400 via-cyan-300 to-emerald-400">Delta Exchange</span>
-        </h1>
-
-        <!-- Subheading -->
-        <p class="mt-6 text-base sm:text-lg lg:text-xl text-slate-300 max-w-3xl mx-auto leading-relaxed font-normal">
-          High-frequency algorithmic breakout engine across BTC, ETH, SOL, and XRP perpetuals.
-          Strict ADX trend filters, automated trailing ATR stop brackets, and 100% non-custodial API execution.
-        </p>
-
-        <!-- Primary CTA Buttons -->
-        <div class="mt-10 flex flex-wrap items-center justify-center gap-4">
-          <button onclick="handlePrimaryCTA()" class="px-8 py-4 rounded-xl bg-gradient-to-r from-brand-600 via-cyan-500 to-emerald-500 hover:from-brand-500 hover:to-emerald-400 text-white font-semibold text-sm shadow-xl shadow-cyan-950/80 transition-all duration-300 cursor-pointer flex items-center gap-2 group">
-            <span id="hero-cta-label">Deploy Trading Desk</span>
-            <svg class="w-4 h-4 transition-transform group-hover:translate-x-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
-          </button>
-          
-          <a href="#pricing" class="px-7 py-4 rounded-xl bg-obsidian-900/90 hover:bg-obsidian-850 text-slate-200 border border-white/10 hover:border-brand-500/40 font-semibold text-sm transition-all duration-200 cursor-pointer flex items-center gap-2">
-            <span>Explore Pricing & Plans</span>
-          </a>
-        </div>
-
-        <!-- Value Metric Badges -->
-        <div class="mt-16 pt-10 border-t border-white/5 grid grid-cols-2 sm:grid-cols-4 gap-6 max-w-4xl mx-auto text-left">
-          <div class="glass-card p-4 rounded-xl">
-            <span class="text-xs text-slate-400 font-mono uppercase tracking-wider block">Security Model</span>
-            <span class="text-lg font-bold font-mono text-emerald-400 mt-1 block">100% Non-Custodial</span>
-            <span class="text-[11px] text-slate-400 mt-0.5 block">Capital never leaves Delta</span>
-          </div>
-          <div class="glass-card p-4 rounded-xl">
-            <span class="text-xs text-slate-400 font-mono uppercase tracking-wider block">Real Order Routing</span>
-            <span class="text-lg font-bold font-mono text-cyan-400 mt-1 block">Live Perpetuals</span>
-            <span class="text-[11px] text-slate-400 mt-0.5 block">Direct HMAC-SHA256 API</span>
-          </div>
-          <div class="glass-card p-4 rounded-xl">
-            <span class="text-xs text-slate-400 font-mono uppercase tracking-wider block">Trailing Protection</span>
-            <span class="text-lg font-bold font-mono text-brand-300 mt-1 block">ATR Dynamic SL/TP</span>
-            <span class="text-[11px] text-slate-400 mt-0.5 block">Automated profit ratcheting</span>
-          </div>
-          <div class="glass-card p-4 rounded-xl">
-            <span class="text-xs text-slate-400 font-mono uppercase tracking-wider block">Capital Safeguard</span>
-            <span class="text-lg font-bold font-mono text-rose-400 mt-1 block">Circuit Breaker</span>
-            <span class="text-[11px] text-slate-400 mt-0.5 block">Automated daily drawdown halt</span>
-          </div>
-        </div>
-
+  <div id="page-landing" class="view-page active">
+    
+    <!-- Hero Section -->
+    <section class="py-20 md:py-28 max-w-5xl mx-auto px-4 text-center">
+      <div class="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 text-xs font-mono mb-6">
+        <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span>Quantitative Terminal &bull; Automated Delta Exchange Perpetuals</span>
       </div>
-    </header>
 
+      <h1 class="text-4xl sm:text-6xl font-extrabold tracking-tight text-white leading-tight">
+        Automate Your Trading on <br><span class="text-emerald-400">Delta Exchange</span>
+      </h1>
 
-    <!-- LIVE MARKET MARQUEE -->
-    <section id="markets" class="py-12 bg-obsidian-900 border-b border-white/5 relative">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="flex items-center justify-between mb-6">
-          <div class="flex items-center space-x-2">
-            <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <h2 class="text-xs font-mono font-bold tracking-wider uppercase text-slate-300">Live Delta Exchange Perpetual Feeds</h2>
-          </div>
-          <span class="text-xs font-mono text-brand-400">Real-Time Data Feed</span>
+      <p class="mt-6 text-base sm:text-lg text-slate-300 max-w-2xl mx-auto leading-relaxed">
+        High-probability volatility breakouts across BTC, ETH, SOL, and XRP perpetuals. 
+        Automated trailing stop-loss, risk management, and 100% non-custodial execution.
+      </p>
+
+      <div class="mt-8 flex flex-wrap justify-center gap-3">
+        <button onclick="navTo('login'); switchAuthTab('signup');" class="px-7 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-obsidian-950 font-bold text-sm shadow-xl shadow-emerald-950/60 transition cursor-pointer">
+          Start Live Trading
+        </button>
+        <button onclick="navTo('login'); switchAuthTab('signin');" class="px-7 py-3 rounded-xl card hover:border-emerald-500/40 text-slate-200 font-semibold text-sm transition cursor-pointer">
+          Client Login
+        </button>
+      </div>
+
+      <!-- Trust Features -->
+      <div class="mt-14 pt-8 border-t border-white/10 grid grid-cols-2 md:grid-cols-4 gap-4 text-left font-mono text-xs">
+        <div class="card p-4 rounded-xl">
+          <span class="text-slate-400 block text-[10px] uppercase">Security</span>
+          <span class="text-emerald-400 font-bold mt-1 block">Non-Custodial</span>
+          <span class="text-slate-400 text-[11px]">Funds stay on Delta</span>
         </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="landing-ticker-cards">
-          <!-- Populated dynamically via JS -->
-          <div class="glass-card p-4 rounded-xl animate-pulse space-y-2">
-            <div class="h-4 bg-slate-800 rounded w-1/3"></div>
-            <div class="h-7 bg-slate-800 rounded w-1/2"></div>
-            <div class="h-3 bg-slate-800 rounded w-full"></div>
-          </div>
-          <div class="glass-card p-4 rounded-xl animate-pulse space-y-2">
-            <div class="h-4 bg-slate-800 rounded w-1/3"></div>
-            <div class="h-7 bg-slate-800 rounded w-1/2"></div>
-            <div class="h-3 bg-slate-800 rounded w-full"></div>
-          </div>
-          <div class="glass-card p-4 rounded-xl animate-pulse space-y-2">
-            <div class="h-4 bg-slate-800 rounded w-1/3"></div>
-            <div class="h-7 bg-slate-800 rounded w-1/2"></div>
-            <div class="h-3 bg-slate-800 rounded w-full"></div>
-          </div>
-          <div class="glass-card p-4 rounded-xl animate-pulse space-y-2">
-            <div class="h-4 bg-slate-800 rounded w-1/3"></div>
-            <div class="h-7 bg-slate-800 rounded w-1/2"></div>
-            <div class="h-3 bg-slate-800 rounded w-full"></div>
-          </div>
+        <div class="card p-4 rounded-xl">
+          <span class="text-slate-400 block text-[10px] uppercase">Execution</span>
+          <span class="text-emerald-400 font-bold mt-1 block">Direct API</span>
+          <span class="text-slate-400 text-[11px]">HMAC-SHA256 authenticated</span>
+        </div>
+        <div class="card p-4 rounded-xl">
+          <span class="text-slate-400 block text-[10px] uppercase">Protection</span>
+          <span class="text-emerald-400 font-bold mt-1 block">Trailing ATR Stop</span>
+          <span class="text-slate-400 text-[11px]">Locks profit automatically</span>
+        </div>
+        <div class="card p-4 rounded-xl">
+          <span class="text-slate-400 block text-[10px] uppercase">Safety</span>
+          <span class="text-emerald-400 font-bold mt-1 block">Circuit Breaker</span>
+          <span class="text-slate-400 text-[11px]">Daily max drawdown limit</span>
         </div>
       </div>
     </section>
 
+    <!-- Live Market Tickers -->
+    <section id="markets" class="py-12 bg-obsidian-900 border-y border-white/5">
+      <div class="max-w-6xl mx-auto px-4">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xs font-mono font-bold uppercase text-slate-300">Live Delta Exchange Markets</h2>
+          <span class="text-[11px] font-mono text-emerald-400">Live Feed</span>
+        </div>
+        <div id="landing-tickers" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <!-- Populated by JS -->
+          <div class="card p-4 rounded-xl animate-pulse text-xs font-mono text-slate-400">Loading BTCUSDT...</div>
+          <div class="card p-4 rounded-xl animate-pulse text-xs font-mono text-slate-400">Loading ETHUSDT...</div>
+          <div class="card p-4 rounded-xl animate-pulse text-xs font-mono text-slate-400">Loading SOLUSDT...</div>
+          <div class="card p-4 rounded-xl animate-pulse text-xs font-mono text-slate-400">Loading XRPUSDT...</div>
+        </div>
+      </div>
+    </section>
 
-    <!-- BENTO GRID FEATURES -->
-    <section id="features" class="py-24 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="text-center max-w-3xl mx-auto mb-16">
-        <h2 class="text-xs font-mono text-brand-400 uppercase tracking-widest font-bold">Algorithmic Edge</h2>
-        <p class="mt-2 text-3xl sm:text-4xl font-display font-extrabold text-white tracking-tight">
-          Engineered for Quantitative Precision & Capital Preservation
-        </p>
-        <p class="mt-4 text-sm sm:text-base text-slate-400 leading-relaxed">
-          The engine operates 24/7 scanning consolidation zones, eliminating emotional decision-making, and executing mathematically verified volatility breakouts.
-        </p>
+    <!-- 3 Simple Features -->
+    <section id="features" class="py-20 max-w-5xl mx-auto px-4">
+      <div class="text-center mb-12">
+        <h2 class="text-2xl font-bold text-white">How It Works</h2>
+        <p class="text-xs text-slate-400 mt-1">Simple 3-step automated quantitative trading</p>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-        
-        <!-- Bento 1: Breakout Detection -->
-        <div class="md:col-span-2 glass-card glass-card-hover p-8 rounded-2xl flex flex-col justify-between">
-          <div>
-            <div class="h-12 w-12 rounded-xl bg-brand-500/10 border border-brand-500/30 flex items-center justify-center text-brand-400 mb-6">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
-            </div>
-            <h3 class="text-xl font-display font-bold text-white">Sub-Second Volatility Breakout Detection</h3>
-            <p class="text-slate-300 text-sm mt-3 leading-relaxed">
-              Continuous 1-minute candle analysis. The engine enforces an ADX &ge; 20 trend-strength filter coupled with dynamic ATR expansion confirmation before staging resting breakout orders. Sideways whipsaws and false breaks are discarded automatically.
-            </p>
-          </div>
-          <div class="mt-6 pt-6 border-t border-white/5 flex flex-wrap items-center gap-3 font-mono text-xs text-slate-400">
-            <span class="px-2.5 py-1 rounded-md bg-obsidian-900 border border-white/5 text-emerald-400 font-semibold">ADX Trend Filter</span>
-            <span class="px-2.5 py-1 rounded-md bg-obsidian-900 border border-white/5 text-cyan-400 font-semibold">Session VWAP Anchor</span>
-            <span class="px-2.5 py-1 rounded-md bg-obsidian-900 border border-white/5 text-slate-300">Previous High/Low Consolidation</span>
-          </div>
+        <div class="card p-6 rounded-2xl space-y-3">
+          <div class="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">1</div>
+          <h3 class="font-bold text-white text-base">Connect Your API Keys</h3>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            Generate Trading-only API keys on Delta Exchange. Your funds stay safe in your account—withdrawals are never permitted.
+          </p>
         </div>
 
-        <!-- Bento 2: Trailing Risk Brackets -->
-        <div class="glass-card glass-card-hover p-8 rounded-2xl flex flex-col justify-between">
-          <div>
-            <div class="h-12 w-12 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mb-6">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-            </div>
-            <h3 class="text-xl font-display font-bold text-white">Automated Trailing Risk Brackets</h3>
-            <p class="text-slate-300 text-sm mt-3 leading-relaxed">
-              Every position is fortified instantly upon fill with hard Stop-Loss and Take-Profit orders. Dynamic ATR trailing stops ratchet higher during momentum runs to lock in profits.
-            </p>
-          </div>
-          <div class="mt-6 pt-6 border-t border-white/5 font-mono text-xs text-emerald-400 font-semibold">
-            <span>Dynamic SL / TP Order Injection</span>
-          </div>
+        <div class="card p-6 rounded-2xl space-y-3">
+          <div class="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">2</div>
+          <h3 class="font-bold text-white text-base">Automated Breakouts</h3>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            The bot monitors 1m candles for dynamic volatility expansion (ADX &ge; 20). Orders are placed automatically with immediate Stop-Loss & Take-Profit brackets.
+          </p>
         </div>
 
-        <!-- Bento 3: Isolated Non-Custodial Vaults -->
-        <div class="glass-card glass-card-hover p-8 rounded-2xl flex flex-col justify-between">
-          <div>
-            <div class="h-12 w-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-6">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
-            </div>
-            <h3 class="text-xl font-display font-bold text-white">Private Non-Custodial Keys</h3>
-            <p class="text-slate-300 text-sm mt-3 leading-relaxed">
-              You provide your personal Delta Exchange API credentials with Trading-only permissions. We never hold your deposits or request withdrawal rights.
-            </p>
-          </div>
-          <div class="mt-6 pt-6 border-t border-white/5 font-mono text-xs text-amber-300">
-            <span>Encrypted Tenant Isolation</span>
-          </div>
+        <div class="card p-6 rounded-2xl space-y-3">
+          <div class="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">3</div>
+          <h3 class="font-bold text-white text-base">Capital Protection</h3>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            ATR trailing stops protect accumulated gains. If market conditions cross your daily drawdown limit (e.g. 4%), the bot halts automatically.
+          </p>
         </div>
-
-        <!-- Bento 4: Circuit Breakers & Kill Switch -->
-        <div id="safeguards" class="md:col-span-2 glass-card glass-card-hover p-8 rounded-2xl flex flex-col justify-between">
-          <div>
-            <div class="h-12 w-12 rounded-xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 mb-6">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-            </div>
-            <h3 class="text-xl font-display font-bold text-white">Daily Drawdown Governor & Emergency Kill Switch</h3>
-            <p class="text-slate-300 text-sm mt-3 leading-relaxed">
-              An institutional risk manager tracks your daily high-water mark. If account drawdown approaches the risk limit (default 4.0%), all pending resting orders are instantly revoked and the engine halts. One-click Kill Switch closes all open positions on demand.
-            </p>
-          </div>
-          <div class="mt-6 pt-6 border-t border-white/5 flex flex-wrap items-center gap-4 font-mono text-xs text-slate-400">
-            <span class="text-rose-400 font-semibold">Instant Execution Flatten</span>
-            <span>•</span>
-            <span class="text-slate-300">High-Water Mark Governor</span>
-            <span>•</span>
-            <span class="text-cyan-400">Per-Trade Margin Limits</span>
-          </div>
-        </div>
-
       </div>
     </section>
 
+    <!-- Pricing Section -->
+    <section id="pricing" class="py-20 bg-obsidian-900 border-t border-white/5">
+      <div class="max-w-4xl mx-auto px-4 text-center">
+        <h2 class="text-2xl font-bold text-white">Plans & Pricing</h2>
+        <p class="text-xs text-slate-400 mt-1">Start free, upgrade as your trading scales</p>
 
-    <!-- PRICING & MEMBERSHIP TIERS (COMMERCIAL SECTION) -->
-    <section id="pricing" class="py-24 bg-obsidian-900/60 border-y border-white/5">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
-        <div class="text-center max-w-3xl mx-auto mb-16">
-          <h2 class="text-xs font-mono text-brand-400 uppercase tracking-widest font-bold">Transparent Plans</h2>
-          <p class="mt-2 text-3xl sm:text-4xl font-display font-extrabold text-white tracking-tight">
-            Simple, Institutional-Grade Pricing
-          </p>
-          <p class="mt-4 text-sm sm:text-base text-slate-400 leading-relaxed">
-            Deploy your automated desk in 60 seconds. Connect your Delta Exchange account and trade perpetuals 24/7 with zero revenue sharing.
-          </p>
-        </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 items-stretch">
-          
-          <!-- Tier 1: Starter -->
-          <div class="glass-card rounded-2xl p-8 flex flex-col justify-between border border-white/10 hover:border-white/20 transition">
+        <div class="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
+          <div class="card p-6 rounded-2xl flex flex-col justify-between">
             <div>
-              <div class="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">Starter Desk</div>
-              <div class="mt-4 flex items-baseline">
-                <span class="text-4xl font-display font-extrabold text-white">$0</span>
-                <span class="ml-2 text-xs font-mono text-slate-400">/ trial</span>
-              </div>
-              <p class="mt-3 text-xs text-slate-300 leading-relaxed">
-                Ideal for testing algorithmic breakouts on BTC with conservative leverage.
-              </p>
-
-              <div class="mt-6 space-y-3 font-sans text-xs text-slate-300 border-t border-white/5 pt-6">
-                <div class="flex items-center gap-2">
-                  <span class="text-brand-400">✓</span> <span>1 Active Contract (BTCUSDT)</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-brand-400">✓</span> <span>Up to 5x Leverage</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-brand-400">✓</span> <span>Automated ATR Trailing Stops</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-brand-400">✓</span> <span>Web Terminal Access</span>
-                </div>
-              </div>
+              <div class="text-xs font-mono font-bold text-slate-400 uppercase">Starter</div>
+              <div class="text-3xl font-extrabold text-white mt-2">$0 <span class="text-xs font-normal text-slate-400">/ trial</span></div>
+              <ul class="mt-4 space-y-2 text-xs text-slate-300 border-t border-white/5 pt-4">
+                <li>✓ 1 Active Coin (BTC)</li>
+                <li>✓ Up to 5x Leverage</li>
+                <li>✓ Automated Trailing Stops</li>
+              </ul>
             </div>
-
-            <button onclick="navigateTo('auth')" class="mt-8 w-full py-3 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 text-white font-semibold text-xs border border-white/10 transition cursor-pointer">
-              Deploy Free Trial
+            <button onclick="navTo('login'); switchAuthTab('signup');" class="mt-6 w-full py-2.5 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 border border-white/10 text-xs font-semibold text-white transition cursor-pointer">
+              Deploy Free
             </button>
           </div>
 
-          <!-- Tier 2: Pro Quant (Featured) -->
-          <div class="glass-card rounded-2xl p-8 flex flex-col justify-between border-2 border-brand-500/60 bg-gradient-to-b from-brand-950/40 via-obsidian-900 to-obsidian-950 relative shadow-2xl shadow-cyan-950/50">
-            <div class="absolute -top-3.5 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-gradient-to-r from-brand-500 to-cyan-400 text-obsidian-950 text-[10px] font-mono font-extrabold uppercase tracking-widest shadow">
-              Most Popular
-            </div>
-
+          <div class="card p-6 rounded-2xl flex flex-col justify-between border-2 border-emerald-500/60 bg-emerald-950/20 relative shadow-xl shadow-emerald-950/40">
+            <span class="absolute -top-3 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-emerald-500 text-obsidian-950 text-[10px] font-bold font-mono uppercase">Popular</span>
             <div>
-              <div class="text-xs font-mono font-bold uppercase tracking-wider text-brand-300">Pro Quant Desk</div>
-              <div class="mt-4 flex items-baseline">
-                <span class="text-4xl font-display font-extrabold text-white">$99</span>
-                <span class="ml-2 text-xs font-mono text-slate-400">/ month</span>
-              </div>
-              <p class="mt-3 text-xs text-slate-300 leading-relaxed">
-                Full-scale autonomous trading across all major perpetuals with priority order routing.
-              </p>
-
-              <div class="mt-6 space-y-3 font-sans text-xs text-slate-200 border-t border-white/10 pt-6">
-                <div class="flex items-center gap-2">
-                  <span class="text-emerald-400 font-bold">✓</span> <span>All 4 Assets (BTC, ETH, SOL, XRP)</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-emerald-400 font-bold">✓</span> <span>Up to 20x Configurable Leverage</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-emerald-400 font-bold">✓</span> <span>Sub-second Priority Execution</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-emerald-400 font-bold">✓</span> <span>Dynamic Multi-bracket ATR Trailing</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-emerald-400 font-bold">✓</span> <span>24/7 Dedicated Cloud Daemon</span>
-                </div>
-              </div>
+              <div class="text-xs font-mono font-bold text-emerald-400 uppercase">Pro Quant</div>
+              <div class="text-3xl font-extrabold text-white mt-2">$99 <span class="text-xs font-normal text-slate-400">/ month</span></div>
+              <ul class="mt-4 space-y-2 text-xs text-slate-200 border-t border-white/10 pt-4">
+                <li>✓ All 4 Coins (BTC, ETH, SOL, XRP)</li>
+                <li>✓ Up to 20x Leverage</li>
+                <li>✓ Dynamic Multi-Bracket Trailing</li>
+                <li>✓ 24/7 Cloud Execution</li>
+              </ul>
             </div>
-
-            <button onclick="navigateTo('auth')" class="mt-8 w-full py-3.5 rounded-xl bg-gradient-to-r from-brand-500 to-cyan-400 hover:from-brand-400 hover:to-cyan-300 text-obsidian-950 font-bold text-xs shadow-lg shadow-cyan-950/70 transition cursor-pointer">
-              Launch Pro Quant Desk
+            <button onclick="navTo('login'); switchAuthTab('signup');" class="mt-6 w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 font-bold text-xs text-obsidian-950 transition cursor-pointer shadow-md shadow-emerald-950">
+              Get Pro Desk
             </button>
           </div>
 
-          <!-- Tier 3: Institutional VIP -->
-          <div class="glass-card rounded-2xl p-8 flex flex-col justify-between border border-white/10 hover:border-white/20 transition">
+          <div class="card p-6 rounded-2xl flex flex-col justify-between">
             <div>
-              <div class="text-xs font-mono font-bold uppercase tracking-wider text-slate-400">Institutional VIP</div>
-              <div class="mt-4 flex items-baseline">
-                <span class="text-4xl font-display font-extrabold text-white">$299</span>
-                <span class="ml-2 text-xs font-mono text-slate-400">/ month</span>
-              </div>
-              <p class="mt-3 text-xs text-slate-300 leading-relaxed">
-                For prop traders & funds requiring bespoke leverage, API webhooks, and private instances.
-              </p>
-
-              <div class="mt-6 space-y-3 font-sans text-xs text-slate-300 border-t border-white/5 pt-6">
-                <div class="flex items-center gap-2">
-                  <span class="text-brand-400">✓</span> <span>Unlimited Custom Perpetual Assets</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-brand-400">✓</span> <span>Dedicated Execution Instance (VPS)</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-brand-400">✓</span> <span>Custom Risk Governor & Webhooks</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <span class="text-brand-400">✓</span> <span>1-on-1 Dedicated Quant Support</span>
-                </div>
-              </div>
+              <div class="text-xs font-mono font-bold text-slate-400 uppercase">Institutional</div>
+              <div class="text-3xl font-extrabold text-white mt-2">$299 <span class="text-xs font-normal text-slate-400">/ month</span></div>
+              <ul class="mt-4 space-y-2 text-xs text-slate-300 border-t border-white/5 pt-4">
+                <li>✓ Custom Pairs & Webhooks</li>
+                <li>✓ Dedicated Execution Instance</li>
+                <li>✓ Priority 1-on-1 Support</li>
+              </ul>
             </div>
-
-            <button onclick="navigateTo('auth')" class="mt-8 w-full py-3 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 text-white font-semibold text-xs border border-white/10 transition cursor-pointer">
-              Contact Institutional Sales
+            <button onclick="navTo('login'); switchAuthTab('signup');" class="mt-6 w-full py-2.5 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 border border-white/10 text-xs font-semibold text-white transition cursor-pointer">
+              Deploy VIP Desk
             </button>
           </div>
-
-        </div>
-
-      </div>
-    </section>
-
-
-    <!-- FAQ SECTION -->
-    <section id="faq" class="py-24 max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div class="text-center mb-16">
-        <h2 class="text-xs font-mono text-brand-400 uppercase tracking-widest font-bold">Frequently Asked Questions</h2>
-        <p class="mt-2 text-3xl font-display font-extrabold text-white tracking-tight">
-          Everything You Need to Know
-        </p>
-      </div>
-
-      <div class="space-y-4 text-xs font-sans">
-        
-        <!-- FAQ 1 -->
-        <div class="glass-card rounded-xl p-5 border border-white/5 space-y-2">
-          <h3 class="font-display font-bold text-sm text-white flex items-center justify-between">
-            <span>Can Delta-Bot withdraw funds from my Delta Exchange account?</span>
-            <span class="text-brand-400">01</span>
-          </h3>
-          <p class="text-slate-300 leading-relaxed">
-            <strong>Absolutely not.</strong> You supply Delta Exchange API credentials created with Trading-only permissions. Withdrawal permissions should remain disabled. Your capital stays 100% in your custody on Delta Exchange.
-          </p>
-        </div>
-
-        <!-- FAQ 2 -->
-        <div class="glass-card rounded-xl p-5 border border-white/5 space-y-2">
-          <h3 class="font-display font-bold text-sm text-white flex items-center justify-between">
-            <span>Which markets does the bot trade?</span>
-            <span class="text-brand-400">02</span>
-          </h3>
-          <p class="text-slate-300 leading-relaxed">
-            The bot trades USD and USDT perpetual futures contracts on Delta Exchange (BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT) using real limit and stop-market orders.
-          </p>
-        </div>
-
-        <!-- FAQ 3 -->
-        <div class="glass-card rounded-xl p-5 border border-white/5 space-y-2">
-          <h3 class="font-display font-bold text-sm text-white flex items-center justify-between">
-            <span>Do I need to leave my computer or browser open?</span>
-            <span class="text-brand-400">03</span>
-          </h3>
-          <p class="text-slate-300 leading-relaxed">
-            No. The execution engine runs 24/7 on dedicated cloud infrastructure. The web terminal is simply your live monitoring and control desk—you can close your tab anytime and your orders will execute normally.
-          </p>
-        </div>
-
-        <!-- FAQ 4 -->
-        <div class="glass-card rounded-xl p-5 border border-white/5 space-y-2">
-          <h3 class="font-display font-bold text-sm text-white flex items-center justify-between">
-            <span>How does the Trailing Stop-Loss protect my capital?</span>
-            <span class="text-brand-400">04</span>
-          </h3>
-          <p class="text-slate-300 leading-relaxed">
-            Every trade is immediately assigned a dynamic Stop-Loss bracket based on market volatility (ATR). As price moves in your favor, the trailing stop ratchets upwards, locking in profits and eliminating downside risk.
-          </p>
-        </div>
-
-      </div>
-    </section>
-
-
-    <!-- BOTTOM CTA SECTION -->
-    <section class="py-24 relative overflow-hidden bg-radial-glow border-t border-white/5">
-      <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
-        <h2 class="text-3xl sm:text-5xl font-display font-extrabold text-white tracking-tight">
-          Ready to Automate Your Delta Trading?
-        </h2>
-        <p class="mt-4 text-base text-slate-300 max-w-2xl mx-auto leading-relaxed">
-          Create an isolated trading desk in 60 seconds. Connect your Delta Exchange keys and let the breakout engine manage positions 24/7.
-        </p>
-
-        <div class="mt-8 flex flex-wrap items-center justify-center gap-4">
-          <button onclick="handlePrimaryCTA()" class="px-8 py-4 rounded-xl bg-gradient-to-r from-brand-600 via-cyan-500 to-emerald-500 hover:from-brand-500 hover:to-emerald-400 text-white font-semibold text-sm shadow-xl shadow-cyan-950/90 transition cursor-pointer flex items-center gap-2">
-            <span>Get Started Now</span>
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
-          </button>
         </div>
       </div>
     </section>
 
-    <!-- FOOTER -->
-    <footer class="py-12 bg-obsidian-950 border-t border-white/5 text-xs text-slate-400">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div class="flex items-center space-x-2">
-          <span class="font-display font-bold text-white tracking-tight">DELTA-BOT</span>
-          <span>•</span>
-          <span>Autonomous Perpetual Breakout Engine</span>
+    <!-- Footer -->
+    <footer class="py-10 bg-obsidian-950 border-t border-white/5 text-xs text-slate-400 text-center">
+      <div class="max-w-5xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div>
+          <span class="font-bold text-white">DELTA-BOT</span> &bull; Quantitative Terminal
         </div>
-        <div class="flex items-center space-x-6">
-          <a href="#features" class="hover:text-white transition">Features</a>
-          <a href="#pricing" class="hover:text-white transition">Pricing</a>
-          <a href="#faq" class="hover:text-white transition">FAQ</a>
-          <a href="#global-nav" class="hover:text-white transition">Back to Top ↑</a>
+        <div>
+          Non-custodial trading engine for Delta Exchange.
         </div>
-      </div>
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4 pt-4 border-t border-white/5 text-[11px] text-slate-500 text-center sm:text-left">
-        Disclaimer: Cryptocurrency and perpetual futures trading carries financial risk. Algorithmic execution tools do not guarantee profits. Non-custodial API execution engine.
       </div>
     </footer>
 
@@ -615,85 +290,67 @@
 
 
   <!-- ========================================================================= -->
-  <!-- 2. VIEW: CLIENT AUTH DESK (FRICTIONLESS SIGN IN / REGISTRATION) -->
+  <!-- 2. LOGIN & SIGNUP PAGE -->
   <!-- ========================================================================= -->
-  <div id="view-auth" class="view-container">
-    <div class="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4 sm:p-6 relative bg-radial-glow">
-      <div class="absolute inset-0 bg-grid-pattern [mask-image:radial-gradient(ellipse_at_center,transparent_20%,black)] pointer-events-none opacity-40"></div>
-
-      <div class="max-w-md w-full glass-card rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 border border-white/10 space-y-6">
+  <div id="page-login" class="view-page">
+    <div class="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4">
+      <div class="max-w-md w-full card rounded-2xl p-6 sm:p-8 space-y-5 border border-white/10 shadow-2xl">
         
-        <!-- Header -->
-        <div class="text-center space-y-2">
-          <div class="inline-flex h-12 w-12 rounded-2xl bg-gradient-to-tr from-brand-600 via-cyan-500 to-emerald-400 p-[1px] shadow-lg shadow-cyan-950/60 mb-1">
-            <div class="h-full w-full bg-obsidian-950 rounded-[15px] flex items-center justify-center font-display font-bold text-transparent bg-clip-text bg-gradient-to-tr from-brand-400 to-emerald-300 text-xl">
-              Δ
-            </div>
+        <div class="text-center space-y-1">
+          <div class="h-10 w-10 mx-auto rounded-xl bg-emerald-500 flex items-center justify-center text-obsidian-950 font-bold text-xl mb-2">
+            Δ
           </div>
-          <h2 class="font-display font-bold text-2xl text-white tracking-tight">Client Trading Desk</h2>
-          <p class="text-xs text-slate-400 leading-normal">
-            Access your private algorithmic execution terminal.
-          </p>
+          <h2 class="text-xl font-bold text-white">Client Portal</h2>
+          <p class="text-xs text-slate-400">Sign in to manage your Delta Exchange trading desk</p>
         </div>
 
-        <!-- Tab Switcher -->
-        <div class="flex rounded-xl bg-obsidian-950 p-1 border border-white/5 font-mono text-xs">
-          <button id="auth-tab-signin" onclick="switchAuthTab('signin')" class="flex-1 py-2 rounded-lg font-semibold transition cursor-pointer text-white bg-brand-600 shadow-sm">
+        <!-- Auth Tabs -->
+        <div class="flex rounded-xl bg-obsidian-950 p-1 border border-white/10 font-mono text-xs">
+          <button id="auth-btn-tab-signin" onclick="switchAuthTab('signin')" class="flex-1 py-1.5 rounded-lg font-bold bg-emerald-500 text-obsidian-950 transition cursor-pointer">
             Sign In
           </button>
-          <button id="auth-tab-signup" onclick="switchAuthTab('signup')" class="flex-1 py-2 rounded-lg font-semibold transition cursor-pointer text-slate-400 hover:text-white">
+          <button id="auth-btn-tab-signup" onclick="switchAuthTab('signup')" class="flex-1 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition cursor-pointer">
             Create Account
           </button>
         </div>
 
-        <!-- Auth Feedback Alert Box -->
-        <div id="auth-feedback" class="hidden p-3 rounded-xl text-xs font-mono border"></div>
+        <!-- Auth Error / Status Feedback -->
+        <div id="auth-status-box" class="hidden p-3 rounded-xl text-xs font-mono"></div>
 
-        <!-- TAB 1: SIGN IN FORM -->
-        <div id="auth-panel-signin" class="space-y-4">
+        <!-- Form: Sign In -->
+        <div id="auth-form-signin" class="space-y-4">
           <div>
-            <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono mb-1.5">Email Address</label>
-            <input type="email" id="login-email" placeholder="trader@domain.com" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition font-sans">
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Email</label>
+            <input type="email" id="input-login-email" placeholder="you@domain.com" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
           </div>
-
           <div>
-            <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono mb-1.5">Password</label>
-            <input type="password" id="login-password" placeholder="••••••••••••" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition font-sans">
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Password</label>
+            <input type="password" id="input-login-password" placeholder="••••••••••••" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
           </div>
-
-          <button id="btn-submit-signin" onclick="loginWithSupabase()" class="w-full py-3 rounded-xl bg-gradient-to-r from-brand-600 to-cyan-500 hover:from-brand-500 hover:to-cyan-400 text-white font-semibold text-sm shadow-lg shadow-cyan-950/80 transition cursor-pointer flex items-center justify-center gap-2">
-            <span>Sign In to Trading Desk</span>
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+          <button id="btn-submit-signin" onclick="handleSignIn()" class="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 font-bold text-xs text-obsidian-950 transition cursor-pointer shadow-md shadow-emerald-950">
+            Sign In to Dashboard
           </button>
         </div>
 
-        <!-- TAB 2: SIGN UP FORM -->
-        <div id="auth-panel-signup" class="space-y-4 hidden">
+        <!-- Form: Sign Up -->
+        <div id="auth-form-signup" class="space-y-4 hidden">
           <div>
-            <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono mb-1.5">Email Address</label>
-            <input type="email" id="signup-email" placeholder="trader@domain.com" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition font-sans">
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Email</label>
+            <input type="email" id="input-signup-email" placeholder="you@domain.com" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
           </div>
-
           <div>
-            <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono mb-1.5">Password (Min 6 Characters)</label>
-            <input type="password" id="signup-password" placeholder="Create secure password..." class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition font-sans">
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Password (Min 6 Characters)</label>
+            <input type="password" id="input-signup-password" placeholder="Create strong password..." class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500">
           </div>
-
-          <div>
-            <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider font-mono mb-1.5">Trading Desk Name (Optional)</label>
-            <input type="text" id="signup-name" placeholder="e.g. Apex Alpha Desk" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-brand-500 transition font-sans">
-          </div>
-
-          <button id="btn-submit-signup" onclick="signupWithSupabase()" class="w-full py-3 rounded-xl bg-gradient-to-r from-brand-600 to-cyan-500 hover:from-brand-500 hover:to-cyan-400 text-white font-semibold text-sm shadow-lg shadow-cyan-950/80 transition cursor-pointer flex items-center justify-center gap-2">
-            <span>Create Trading Desk</span>
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+          <button id="btn-submit-signup" onclick="handleSignUp()" class="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 font-bold text-xs text-obsidian-950 transition cursor-pointer shadow-md shadow-emerald-950">
+            Create Trading Desk
           </button>
         </div>
 
         <div class="text-center pt-2 border-t border-white/5">
-          <button onclick="navigateTo('landing')" class="text-xs text-slate-400 hover:text-slate-200 transition font-mono">
-            ← Back to Product Overview
-          </button>
+          <a href="#landing" onclick="navTo('landing'); return false;" class="text-xs text-slate-400 hover:text-white transition">
+            ← Back to Home
+          </a>
         </div>
 
       </div>
@@ -702,318 +359,278 @@
 
 
   <!-- ========================================================================= -->
-  <!-- 3. VIEW: CLIENT QUANT TERMINAL / DASHBOARD -->
+  <!-- 3. SIMPLE DASHBOARD -->
   <!-- ========================================================================= -->
-  <div id="view-dashboard" class="view-container">
-
-    <!-- Top Command Strip -->
-    <div class="bg-obsidian-900 border-b border-white/5 px-4 sm:px-6 lg:px-8 py-3">
-      <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+  <div id="page-dashboard" class="view-page">
+    
+    <!-- Dashboard Top Bar -->
+    <div class="bg-obsidian-900 border-b border-white/5 px-4 sm:px-6 lg:px-8 py-3.5">
+      <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
         
-        <!-- Left: Status & API Connection Badge -->
-        <div class="flex items-center gap-2.5 flex-wrap">
-          <div class="text-xs px-2.5 py-1 rounded-lg font-mono font-semibold flex items-center gap-1.5 border border-emerald-500/40 bg-emerald-950/60 text-emerald-300 shadow-sm" title="Live Real Order Routing Active">
+        <!-- Left: Status Indicator -->
+        <div class="flex items-center space-x-3">
+          <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs font-mono font-semibold">
             <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
             <span>LIVE TRADING</span>
           </div>
-
-          <!-- Delta API Key Status Button -->
-          <button id="btn-api-key-status" onclick="openConfigModal()" class="text-xs px-2.5 py-1 rounded-lg font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 border border-amber-500/40 bg-amber-950/50 text-amber-300 hover:bg-amber-900/60 shadow-sm" title="Configure your Delta Exchange API credentials">
-            <span class="h-1.5 w-1.5 rounded-full bg-amber-400" id="api-key-status-dot"></span>
-            <span id="api-key-status-text">Keys Needed</span>
+          <button id="btn-api-badge" onclick="openSettingsModal()" class="text-xs px-2.5 py-1 rounded-lg font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 border border-amber-500/40 bg-amber-950/50 text-amber-300">
+            <span class="h-1.5 w-1.5 rounded-full bg-amber-400"></span>
+            <span id="api-badge-text">Keys Needed</span>
           </button>
-
-          <span class="text-xs text-slate-400 font-mono hidden sm:inline" id="client-desk-label">Desk: Apex Alpha</span>
         </div>
 
-        <!-- Center: Quick Portfolio Metrics Strip -->
+        <!-- Center: Quick Metric Pill -->
         <div class="flex items-center space-x-6 text-xs font-mono">
           <div>
             <span class="text-[10px] text-slate-400 block uppercase">Equity</span>
-            <span class="font-bold text-emerald-400 text-sm" id="top-equity">$10,000.00</span>
+            <span id="dash-equity" class="text-emerald-400 font-bold text-sm">$10,000.00</span>
           </div>
           <div>
             <span class="text-[10px] text-slate-400 block uppercase">Unrealized PnL</span>
-            <span class="font-bold text-sm text-emerald-400" id="top-upnl">+$0.00</span>
+            <span id="dash-upnl" class="text-emerald-400 font-bold text-sm">+$0.00</span>
           </div>
           <div>
             <span class="text-[10px] text-slate-400 block uppercase">Realized PnL</span>
-            <span class="font-bold text-sm text-slate-200" id="top-rpnl">+$0.00</span>
-          </div>
-          <div class="hidden md:block">
-            <span class="text-[10px] text-slate-400 block uppercase">Win Rate</span>
-            <span class="font-semibold text-slate-200" id="top-winrate">0.0% (0/0)</span>
-          </div>
-          <div class="hidden md:block">
-            <span class="text-[10px] text-slate-400 block uppercase">Max DD</span>
-            <span class="font-semibold text-rose-400" id="top-maxdd">0.00%</span>
+            <span id="dash-rpnl" class="text-slate-200 font-bold text-sm">+$0.00</span>
           </div>
         </div>
 
-        <!-- Right: Engine Controls -->
+        <!-- Right: Controls -->
         <div class="flex items-center space-x-2">
-          <!-- Strategy Start/Pause -->
-          <button id="btn-toggle-trading" onclick="toggleTrading()" class="px-3.5 py-1.5 rounded-xl font-semibold text-xs uppercase tracking-wider transition flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow cursor-pointer">
+          <!-- Start / Pause Toggle -->
+          <button id="btn-toggle-engine" onclick="toggleEngine()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase font-mono transition cursor-pointer flex items-center gap-1.5">
             <span class="h-2 w-2 rounded-full bg-white animate-pulse"></span>
-            <span id="btn-trading-text">RUNNING</span>
+            <span id="btn-engine-label">RUNNING</span>
           </button>
 
           <!-- Emergency Kill Switch -->
-          <button onclick="triggerEmergencyFlatten()" class="px-3 py-1.5 rounded-xl font-semibold text-xs uppercase tracking-wider transition bg-rose-700 hover:bg-rose-600 text-white shadow flex items-center gap-1 cursor-pointer" title="Emergency Flatten: Close all positions and cancel all resting orders">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+          <button onclick="emergencyFlatten()" class="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs uppercase font-mono transition cursor-pointer flex items-center gap-1" title="Close all positions & cancel all orders immediately">
             <span>KILL SWITCH</span>
           </button>
 
-          <!-- Config Settings Modal -->
-          <button onclick="openConfigModal()" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-obsidian-850 hover:bg-obsidian-800 text-slate-200 border border-white/10 transition flex items-center gap-1 cursor-pointer" title="Strategy & Exchange Settings">
-            <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-            <span>SETTINGS</span>
+          <!-- Settings Button -->
+          <button onclick="openSettingsModal()" class="px-3 py-1.5 rounded-lg bg-obsidian-850 hover:bg-obsidian-800 border border-white/10 text-xs font-semibold text-slate-200 transition cursor-pointer flex items-center gap-1">
+            <span>⚙ Keys & Risk</span>
           </button>
         </div>
 
       </div>
-
-      <!-- Real-Time Telemetry Bar -->
-      <div class="max-w-7xl mx-auto flex items-center justify-between text-[11px] font-mono text-slate-400 pt-2 mt-2 border-t border-white/5">
-        <div class="flex items-center space-x-4">
-          <span class="flex items-center gap-1.5">
-            <span class="h-2 w-2 rounded-full bg-emerald-500" id="ws-dot"></span>
-            <span id="ws-latency-indicator" class="text-emerald-400">WebSocket: Connected (500ms)</span>
-          </span>
-          <span>Ping: <span id="ws-ping-badge" class="text-slate-200">-- ms</span></span>
-          <span>Timeframe: <span id="top-timeframe" class="text-cyan-400 font-semibold">1m</span></span>
-        </div>
-        <div class="flex items-center space-x-4">
-          <span>Circuit Breaker: <span id="top-cb-status" class="text-emerald-400 font-semibold">NORMAL</span></span>
-        </div>
-      </div>
     </div>
 
+    <!-- Main Dashboard Body -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 
-    <!-- MAIN DASHBOARD VIEWPORT -->
-    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
-
-      <!-- BANNER: API KEYS NEEDED (Visible only when API keys are not yet configured) -->
-      <div id="banner-api-keys-needed" class="hidden glass-card rounded-2xl p-5 border border-amber-500/40 bg-gradient-to-r from-amber-950/60 via-obsidian-900 to-amber-950/60 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
-        <div class="flex items-center space-x-4">
-          <div class="h-11 w-11 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0 text-xl">
-            🔑
-          </div>
+      <!-- Action Required Banner: API Keys Missing -->
+      <div id="banner-api-needed" class="hidden card rounded-2xl p-4 border border-amber-500/40 bg-amber-950/20 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div class="flex items-center space-x-3">
+          <span class="text-2xl">🔑</span>
           <div>
-            <div class="flex items-center gap-2">
-              <h3 class="font-display font-bold text-sm text-white">Connect Your Delta Exchange Account</h3>
-              <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800 font-semibold">ACTION REQUIRED</span>
-            </div>
-            <p class="text-xs text-slate-300 mt-0.5 leading-normal">
-              Enter your personal Delta Exchange API Key & Secret to enable automated order execution. Your funds remain 100% in your custody on Delta Exchange.
-            </p>
+            <h3 class="font-bold text-sm text-white">Connect Your Delta Exchange Account</h3>
+            <p class="text-xs text-slate-300 mt-0.5">Enter your Delta API Key & Secret to allow the bot to manage breakout orders. Funds stay 100% on Delta.</p>
           </div>
         </div>
-        <button onclick="openConfigModal()" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-obsidian-950 font-bold text-xs shadow-lg shadow-amber-950/50 transition cursor-pointer shrink-0">
-          Enter Delta API Keys
+        <button onclick="openSettingsModal()" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-obsidian-950 font-bold text-xs transition cursor-pointer shrink-0">
+          Enter API Keys
         </button>
       </div>
 
+      <!-- 1. Stats Summary Bar -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="card p-4 rounded-xl">
+          <span class="text-[10px] text-slate-400 font-mono uppercase block">Total Equity</span>
+          <span id="card-equity" class="text-xl font-bold font-mono text-white mt-1 block">$10,000.00</span>
+          <span class="text-[11px] text-slate-400">Delta USD Balance</span>
+        </div>
+        <div class="card p-4 rounded-xl">
+          <span class="text-[10px] text-slate-400 font-mono uppercase block">Unrealized PnL</span>
+          <span id="card-upnl" class="text-xl font-bold font-mono text-emerald-400 mt-1 block">+$0.00</span>
+          <span class="text-[11px] text-slate-400">Open positions</span>
+        </div>
+        <div class="card p-4 rounded-xl">
+          <span class="text-[10px] text-slate-400 font-mono uppercase block">Win Rate</span>
+          <span id="card-winrate" class="text-xl font-bold font-mono text-slate-200 mt-1 block">0.0%</span>
+          <span id="card-trades" class="text-[11px] text-slate-400">0 trades today</span>
+        </div>
+        <div class="card p-4 rounded-xl">
+          <span class="text-[10px] text-slate-400 font-mono uppercase block">Max Drawdown</span>
+          <span id="card-maxdd" class="text-xl font-bold font-mono text-rose-400 mt-1 block">0.00%</span>
+          <span class="text-[11px] text-slate-400">Limit: 4.0%</span>
+        </div>
+      </div>
 
-      <!-- 1. ASSET TELEMETRY & BREAKOUT GAUGES (4 Primary Perpetuals) -->
-      <section>
+      <!-- 2. Target Markets (BTC, ETH, SOL, XRP) -->
+      <div>
         <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center space-x-2">
-            <span class="h-2 w-2 rounded-full bg-brand-500"></span>
-            <h2 class="font-display font-bold text-sm text-slate-200 tracking-wide uppercase">
-              Target Asset Telemetry & Breakout Gauges
-            </h2>
-            <span class="text-[11px] text-slate-400 font-mono hidden sm:inline">(BTC, ETH, SOL, XRP Perpetuals)</span>
-          </div>
-          <span class="text-xs text-slate-400 font-mono">Filter: ADX &ge; 20 &bull; ATR Expansion</span>
+          <h3 class="text-xs font-mono font-bold text-slate-300 uppercase">Perpetual Markets & Breakout Watch</h3>
+          <span class="text-[11px] font-mono text-slate-400">ADX Trend & ATR Volatility</span>
         </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4" id="asset-cards-grid">
-          <!-- Populated dynamically via renderAssetCards() -->
+        <div id="dash-market-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <!-- Populated by JS -->
         </div>
-      </section>
+      </div>
 
-
-      <!-- 2. TRADING DESK: POSITIONS & RESTING ORDERS -->
+      <!-- 3. Active Positions & Resting Orders -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-        <!-- OPEN POSITIONS TABLE -->
-        <section class="glass-card rounded-2xl border border-white/5 overflow-hidden shadow-sm flex flex-col">
-          <div class="px-5 py-3 border-b border-white/5 flex items-center justify-between bg-obsidian-900/60">
+        
+        <!-- Positions -->
+        <div class="card rounded-2xl overflow-hidden flex flex-col">
+          <div class="px-4 py-3 border-b border-white/5 bg-obsidian-900/60 flex items-center justify-between">
             <div class="flex items-center space-x-2">
               <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
-              <h3 class="font-display font-semibold text-sm text-white">Active Positions</h3>
-              <span class="text-xs px-2 py-0.5 rounded-full bg-obsidian-850 text-slate-300 font-mono" id="positions-count-badge">0</span>
+              <h4 class="font-bold text-xs text-white uppercase">Active Positions</h4>
+              <span id="badge-positions-count" class="text-[10px] font-mono px-2 py-0.5 rounded bg-obsidian-850 text-slate-300">0</span>
             </div>
-            <span class="text-xs text-slate-400 font-mono">Dynamic ATR Stops Active</span>
+            <span class="text-[11px] font-mono text-slate-400">Trailing Stop Protected</span>
           </div>
 
-          <div class="overflow-x-auto flex-1 min-h-[160px]">
+          <div class="p-3 overflow-x-auto min-h-[140px]">
             <table class="w-full text-left text-xs font-mono">
-              <thead class="bg-obsidian-950/60 text-slate-400 uppercase text-[10px] tracking-wider border-b border-white/5">
+              <thead class="text-[10px] text-slate-400 uppercase border-b border-white/5">
                 <tr>
-                  <th class="px-3 py-2">Symbol</th>
-                  <th class="px-3 py-2">Side</th>
-                  <th class="px-3 py-2">Size</th>
-                  <th class="px-3 py-2">Entry</th>
-                  <th class="px-3 py-2">Mark</th>
-                  <th class="px-3 py-2">Unrealized PnL</th>
-                  <th class="px-3 py-2">SL / TP</th>
-                  <th class="px-3 py-2 text-right">Action</th>
+                  <th class="pb-2">Symbol</th>
+                  <th class="pb-2">Side</th>
+                  <th class="pb-2">Size</th>
+                  <th class="pb-2">Entry</th>
+                  <th class="pb-2">Mark</th>
+                  <th class="pb-2">PnL</th>
+                  <th class="pb-2 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody id="positions-table-body" class="divide-y divide-white/5">
-                <!-- Dynamically rendered -->
+              <tbody id="dash-positions-body" class="divide-y divide-white/5">
+                <!-- Rendered dynamically -->
               </tbody>
             </table>
-            <div id="no-positions-msg" class="text-center py-10 text-slate-500 font-mono text-xs flex flex-col items-center justify-center space-y-1">
-              <span class="text-slate-600 text-lg">📊</span>
-              <span>No active positions currently open.</span>
-              <span class="text-[10px] text-slate-600">Resting orders will trigger automatically when breakout conditions are met.</span>
+            <div id="msg-no-positions" class="text-center py-8 text-slate-500 font-mono text-xs">
+              No open positions. Bot is scanning for momentum breakouts.
             </div>
           </div>
-        </section>
+        </div>
 
-
-        <!-- RESTING BREAKOUT ORDERS TABLE -->
-        <section class="glass-card rounded-2xl border border-white/5 overflow-hidden shadow-sm flex flex-col">
-          <div class="px-5 py-3 border-b border-white/5 flex items-center justify-between bg-obsidian-900/60">
+        <!-- Orders -->
+        <div class="card rounded-2xl overflow-hidden flex flex-col">
+          <div class="px-4 py-3 border-b border-white/5 bg-obsidian-900/60 flex items-center justify-between">
             <div class="flex items-center space-x-2">
               <span class="h-2 w-2 rounded-full bg-cyan-400"></span>
-              <h3 class="font-display font-semibold text-sm text-white">Resting Breakout Orders</h3>
-              <span class="text-xs px-2 py-0.5 rounded-full bg-obsidian-850 text-slate-300 font-mono" id="orders-count-badge">0</span>
+              <h4 class="font-bold text-xs text-white uppercase">Resting Breakout Orders</h4>
+              <span id="badge-orders-count" class="text-[10px] font-mono px-2 py-0.5 rounded bg-obsidian-850 text-slate-300">0</span>
             </div>
-            <span class="text-xs text-slate-400 font-mono">Stop-Trigger Orders</span>
+            <span class="text-[11px] font-mono text-slate-400">Stop-Trigger Orders</span>
           </div>
 
-          <div class="overflow-x-auto flex-1 min-h-[160px]">
+          <div class="p-3 overflow-x-auto min-h-[140px]">
             <table class="w-full text-left text-xs font-mono">
-              <thead class="bg-obsidian-950/60 text-slate-400 uppercase text-[10px] tracking-wider border-b border-white/5">
+              <thead class="text-[10px] text-slate-400 uppercase border-b border-white/5">
                 <tr>
-                  <th class="px-3 py-2">Order ID</th>
-                  <th class="px-3 py-2">Symbol</th>
-                  <th class="px-3 py-2">Side</th>
-                  <th class="px-3 py-2">Stop Trigger</th>
-                  <th class="px-3 py-2">TTL Remaining</th>
-                  <th class="px-3 py-2 text-right">Action</th>
+                  <th class="pb-2">Symbol</th>
+                  <th class="pb-2">Side</th>
+                  <th class="pb-2">Trigger Price</th>
+                  <th class="pb-2">TTL</th>
+                  <th class="pb-2 text-right">Action</th>
                 </tr>
               </thead>
-              <tbody id="orders-table-body" class="divide-y divide-white/5">
-                <!-- Dynamically rendered -->
+              <tbody id="dash-orders-body" class="divide-y divide-white/5">
+                <!-- Rendered dynamically -->
               </tbody>
             </table>
-            <div id="no-orders-msg" class="text-center py-10 text-slate-500 font-mono text-xs flex flex-col items-center justify-center space-y-1">
-              <span class="text-slate-600 text-lg">⏳</span>
-              <span>No pending breakout orders resting.</span>
-              <span class="text-[10px] text-slate-600">Scanning 1m candles for dynamic resistance/support penetrations.</span>
+            <div id="msg-no-orders" class="text-center py-8 text-slate-500 font-mono text-xs">
+              No pending orders.
             </div>
           </div>
-        </section>
+        </div>
 
       </div>
 
-
-      <!-- 3. STRATEGY EXECUTION FEED -->
-      <section class="glass-card rounded-2xl border border-white/5 overflow-hidden shadow-sm">
-        <div class="px-5 py-3 border-b border-white/5 flex flex-wrap items-center justify-between bg-obsidian-900/60 gap-2">
+      <!-- 4. Execution Activity Feed -->
+      <div class="card rounded-2xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-white/5 bg-obsidian-900/60 flex items-center justify-between">
           <div class="flex items-center space-x-2">
             <span class="h-2 w-2 rounded-full bg-brand-400"></span>
-            <h3 class="font-display font-semibold text-sm text-white">Execution Feed & Strategy Audit</h3>
-            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-obsidian-850 text-slate-400">Live Stream</span>
+            <h4 class="font-bold text-xs text-white uppercase">Strategy Execution Feed</h4>
           </div>
-          <div class="flex items-center space-x-2 text-xs font-mono">
-            <button onclick="setLogFilter('ALL')" id="filter-all" class="px-2.5 py-1 rounded-lg bg-brand-600 text-white font-semibold transition cursor-pointer">ALL</button>
-            <button onclick="setLogFilter('TRADE')" id="filter-trade" class="px-2.5 py-1 rounded-lg bg-obsidian-850 text-slate-400 hover:text-white transition cursor-pointer">TRADES</button>
-            <button onclick="setLogFilter('INFO')" id="filter-info" class="px-2.5 py-1 rounded-lg bg-obsidian-850 text-slate-400 hover:text-white transition cursor-pointer">SIGNALS</button>
-            <button onclick="setLogFilter('ERROR')" id="filter-error" class="px-2.5 py-1 rounded-lg bg-obsidian-850 text-slate-400 hover:text-white transition cursor-pointer">ALERTS</button>
-          </div>
+          <span class="text-[10px] font-mono text-slate-400">Live Activity</span>
         </div>
-
-        <div id="console-logs" class="p-4 h-48 overflow-y-auto space-y-1 bg-obsidian-950 font-mono text-xs select-text">
-          <!-- Injected via renderConsoleLogs() -->
+        <div id="dash-logs-feed" class="p-4 h-40 overflow-y-auto font-mono text-xs space-y-1 bg-obsidian-950">
+          <div class="text-slate-500">Connecting to execution stream...</div>
         </div>
-      </section>
+      </div>
 
     </main>
   </div>
 
 
   <!-- ========================================================================= -->
-  <!-- MODAL: STRATEGY & DELTA API CREDENTIALS CONFIGURATION -->
+  <!-- SETTINGS MODAL (DELTA API KEYS & RISK) -->
   <!-- ========================================================================= -->
-  <div id="config-modal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center hidden">
-    <div class="glass-card rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 border border-white/10 max-h-[90vh] overflow-y-auto">
+  <div id="modal-settings" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="card rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-white/10">
       
-      <div class="flex items-center justify-between border-b border-white/5 pb-3">
+      <div class="flex items-center justify-between border-b border-white/10 pb-3">
         <div class="flex items-center space-x-2">
-          <div class="h-7 w-7 rounded-lg bg-brand-600/30 border border-brand-500/40 flex items-center justify-center text-brand-400 text-xs font-bold">⚙</div>
-          <h3 class="font-display font-bold text-white text-base">Desk Settings & Delta API Keys</h3>
+          <span class="text-emerald-400 font-bold text-lg">⚙</span>
+          <h3 class="font-bold text-white text-sm">Trading Desk Settings</h3>
         </div>
-        <button onclick="closeConfigModal()" class="text-slate-400 hover:text-white text-lg cursor-pointer">&times;</button>
+        <button onclick="closeSettingsModal()" class="text-slate-400 hover:text-white text-lg cursor-pointer">&times;</button>
       </div>
 
-      <!-- DELTA API CREDENTIALS FORM -->
-      <div class="p-4 rounded-xl bg-obsidian-950/90 border border-brand-500/30 space-y-3">
+      <!-- Delta Exchange API Keys -->
+      <div class="p-3.5 rounded-xl bg-obsidian-950 border border-emerald-500/30 space-y-3">
         <div class="flex items-center justify-between">
-          <span class="text-xs font-bold font-mono text-brand-300 uppercase">🔑 Delta Exchange API Credentials</span>
-          <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800">REAL ORDERS</span>
+          <span class="text-xs font-bold font-mono text-emerald-400 uppercase">Delta API Credentials</span>
+          <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">Non-Custodial</span>
         </div>
-        <p class="text-[11px] text-slate-400 leading-normal">
-          Provide your Delta Exchange API credentials with Trading-only permissions. Credentials are saved encrypted into your isolated tenant vault.
-        </p>
-
+        
         <div>
           <label class="block text-[11px] font-mono text-slate-300 uppercase mb-1">Delta API Key</label>
-          <input type="text" id="cfg-delta-key" placeholder="Enter Delta API Key..." class="w-full bg-obsidian-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 font-mono">
+          <input type="text" id="cfg-api-key" placeholder="Enter API Key..." class="w-full bg-obsidian-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 font-mono">
         </div>
 
         <div>
           <label class="block text-[11px] font-mono text-slate-300 uppercase mb-1">Delta API Secret</label>
-          <input type="password" id="cfg-delta-secret" placeholder="Enter Delta API Secret..." class="w-full bg-obsidian-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-brand-500 font-mono">
+          <input type="password" id="cfg-api-secret" placeholder="Enter API Secret..." class="w-full bg-obsidian-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 font-mono">
         </div>
 
         <div>
-          <label class="block text-[11px] font-mono text-slate-300 uppercase mb-1">Exchange Regional Endpoint</label>
-          <select id="cfg-delta-url" class="w-full bg-obsidian-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500 font-mono">
+          <label class="block text-[11px] font-mono text-slate-300 uppercase mb-1">Regional Endpoint</label>
+          <select id="cfg-api-url" class="w-full bg-obsidian-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono">
             <option value="https://api.delta.exchange">Delta Global (api.delta.exchange)</option>
             <option value="https://cdn.india.delta.exchange">Delta India (cdn.india.delta.exchange)</option>
           </select>
         </div>
       </div>
 
-      <!-- STRATEGY RISK CONTROLS -->
-      <div class="space-y-3 font-mono text-xs">
+      <!-- Risk Controls -->
+      <div class="space-y-3 text-xs font-mono">
         <div>
           <div class="flex justify-between text-slate-300 mb-1">
-            <span>Risk Per Trade (% Margin):</span>
-            <span class="text-brand-400 font-bold" id="val-risk-pct">1.0%</span>
+            <span>Risk Per Trade:</span>
+            <span id="label-risk" class="text-emerald-400 font-bold">1.0%</span>
           </div>
-          <input type="range" id="input-risk-pct" min="0.5" max="5.0" step="0.5" value="1.0" class="w-full accent-cyan-500" oninput="document.getElementById('val-risk-pct').textContent = this.value + '%'">
+          <input type="range" id="input-risk" min="0.5" max="5.0" step="0.5" value="1.0" class="w-full accent-emerald-500" oninput="document.getElementById('label-risk').textContent = this.value + '%'">
         </div>
 
         <div>
           <div class="flex justify-between text-slate-300 mb-1">
             <span>Default Leverage:</span>
-            <span class="text-brand-400 font-bold" id="val-leverage">5x</span>
+            <span id="label-leverage" class="text-emerald-400 font-bold">5x</span>
           </div>
-          <input type="range" id="input-leverage" min="1" max="20" step="1" value="5" class="w-full accent-cyan-500" oninput="document.getElementById('val-leverage').textContent = this.value + 'x'">
+          <input type="range" id="input-leverage" min="1" max="20" step="1" value="5" class="w-full accent-emerald-500" oninput="document.getElementById('label-leverage').textContent = this.value + 'x'">
         </div>
 
         <div>
           <div class="flex justify-between text-slate-300 mb-1">
-            <span>Daily Max Drawdown Limit:</span>
-            <span class="text-rose-400 font-bold" id="val-max-dd">4.0%</span>
+            <span>Daily Max Drawdown:</span>
+            <span id="label-maxdd" class="text-rose-400 font-bold">4.0%</span>
           </div>
-          <input type="range" id="input-max-dd" min="1.0" max="10.0" step="0.5" value="4.0" class="w-full accent-rose-500" oninput="document.getElementById('val-max-dd').textContent = this.value + '%'">
+          <input type="range" id="input-maxdd" min="1.0" max="10.0" step="0.5" value="4.0" class="w-full accent-rose-500" oninput="document.getElementById('label-maxdd').textContent = this.value + '%'">
         </div>
       </div>
 
-      <!-- Actions -->
+      <!-- Action Buttons -->
       <div class="flex gap-2 pt-2">
-        <button onclick="saveConfig()" class="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-brand-600 to-cyan-500 hover:from-brand-500 hover:to-cyan-400 text-white font-semibold text-xs transition cursor-pointer shadow-lg shadow-cyan-950">
+        <button onclick="saveSettings()" class="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-obsidian-950 font-bold text-xs transition cursor-pointer">
           Save Settings & Activate Keys
         </button>
-        <button onclick="closeConfigModal()" class="px-4 py-2.5 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 text-slate-300 text-xs font-semibold transition cursor-pointer">
+        <button onclick="closeSettingsModal()" class="px-4 py-2 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 text-slate-300 text-xs font-semibold transition cursor-pointer">
           Cancel
         </button>
       </div>
@@ -1023,854 +640,443 @@
 
 
   <!-- ========================================================================= -->
-  <!-- JAVASCRIPT APPLICATION CORE -->
+  <!-- CORE CLIENT LOGIC -->
   <!-- ========================================================================= -->
   <script>
-    // -------------------------------------------------------------------------
-    // 1. Core Config & Multi-Tenant State
-    // -------------------------------------------------------------------------
-    const DEFAULT_RENDER_BACKEND = 'https://delta-bot-07e2.onrender.com';
+    const BACKEND_URL = 'https://delta-bot-07e2.onrender.com';
     const SUPABASE_URL = 'https://clkkzwgpumbnbtvsxkmw.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsa2t6d2dwdW1ibmJ0dnN4a213Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5NTM5NTgsImV4cCI6MjA4ODUyOTk1OH0.3c6e5f15d2fbdfa070e176df9fc9d5d5b783adfc48b263914a21e428c04ec567';
 
-    let supabaseClient = null;
+    let supabase = null;
     try {
-      if (typeof window.supabase !== 'undefined' && window.supabase.createClient) {
-        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      if (window.supabase) {
+        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
       }
     } catch (e) {
-      console.warn('Supabase initialization fallback:', e);
+      console.warn('Supabase init:', e);
     }
 
-    let ws = null;
-    let wsHeartbeatTimer = null;
-    let restPollingTimer = null;
-    let isRunning = false;
-    let currentMode = 'LIVE';
-    let currentTenantId = 'default';
-    let currentTenantName = 'Default Desk';
     let currentUser = null;
-    let currentView = 'landing';
-    let activeLogFilter = 'ALL';
-    let cachedLogs = [];
-    let pingStartTime = 0;
+    let currentTenantId = 'default';
+    let isRunning = false;
+    let ws = null;
+    let pollInterval = null;
 
     // -------------------------------------------------------------------------
-    // 2. View Router & Navigation
+    // View Routing
     // -------------------------------------------------------------------------
-    function navigateTo(viewName) {
-      // Guard: Require login for dashboard
-      if (viewName === 'dashboard') {
-        const hasSession = Boolean(currentUser || getAuthToken());
-        if (!hasSession) {
-          showAuthFeedback('Please sign in or create an account to access the quant terminal.', false);
-          viewName = 'auth';
-        }
+    function navTo(view) {
+      if (view === 'dashboard' && !currentUser && !localStorage.getItem('token')) {
+        view = 'login';
       }
 
-      currentView = viewName;
-      ['landing', 'auth', 'dashboard'].forEach(v => {
-        const elem = document.getElementById(`view-${v}`);
-        if (elem) {
-          if (v === viewName) {
-            elem.classList.add('active');
-          } else {
-            elem.classList.remove('active');
-          }
-        }
+      ['landing', 'login', 'dashboard'].forEach(v => {
+        const el = document.getElementById(`page-${v}`);
+        if (el) el.classList.toggle('active', v === view);
       });
 
-      // Update URL hash
-      if (window.location.hash !== `#${viewName}`) {
-        window.history.replaceState(null, '', `#${viewName}`);
-      }
+      const navLandingLinks = document.getElementById('nav-landing-links');
+      if (navLandingLinks) navLandingLinks.style.display = view === 'landing' ? 'flex' : 'none';
 
-      // Smooth scroll to top on view change
+      window.history.replaceState(null, '', `#${view}`);
       window.scrollTo({ top: 0, behavior: 'smooth' });
 
-      // If entering dashboard, immediately fetch latest data
-      if (viewName === 'dashboard') {
-        fetchLatestStatus();
-      }
-    }
-
-    function navigateToHome() {
-      if (currentUser || getAuthToken()) {
-        navigateTo('dashboard');
-      } else {
-        navigateTo('landing');
-      }
-    }
-
-    function handlePrimaryCTA() {
-      if (currentUser || getAuthToken()) {
-        navigateTo('dashboard');
-      } else {
-        navigateTo('auth');
+      if (view === 'dashboard') {
+        fetchStatus();
       }
     }
 
     // -------------------------------------------------------------------------
-    // 3. Authentication Handlers (Supabase Auth)
+    // Auth Management
     // -------------------------------------------------------------------------
-    function getAuthToken() {
-      return localStorage.getItem('delta_bot_auth_token') || '';
-    }
-
-    function setAuthToken(token) {
-      if (token && token.trim()) {
-        localStorage.setItem('delta_bot_auth_token', token.trim());
-      } else {
-        localStorage.removeItem('delta_bot_auth_token');
-      }
-      updateAuthUI();
-    }
-
-    function setSupabaseUserSession(session) {
-      if (session && session.access_token) {
-        currentUser = session.user;
-        setAuthToken(session.access_token);
-        if (session.user && session.user.id) {
-          currentTenantId = session.user.id;
-          localStorage.setItem('delta_bot_current_tenant', currentTenantId);
-        }
-      } else {
-        clearSupabaseUserSession();
-      }
-    }
-
-    function clearSupabaseUserSession() {
-      currentUser = null;
-      setAuthToken('');
-      currentTenantId = 'default';
-      localStorage.removeItem('delta_bot_current_tenant');
-      updateAuthUI();
-    }
-
-    function updateAuthUI() {
-      const guestActions = document.getElementById('nav-guest-actions');
-      const userActions = document.getElementById('nav-user-actions');
-      const heroCta = document.getElementById('hero-cta-label');
-
-      if (currentUser || getAuthToken()) {
-        if (guestActions) guestActions.classList.add('hidden');
-        if (userActions) userActions.classList.remove('hidden');
-        if (heroCta) heroCta.textContent = 'Open Trading Desk';
-
-        const displayEmail = currentUser ? currentUser.email : 'Authenticated Desk';
-        const deskLabel = document.getElementById('client-desk-label');
-        if (deskLabel) deskLabel.textContent = `Desk: ${displayEmail.split('@')[0]}`;
-
-        const menuEmail = document.getElementById('menu-user-email');
-        if (menuEmail) menuEmail.textContent = displayEmail;
-
-        const navEmail = document.getElementById('nav-user-email-display');
-        if (navEmail) navEmail.textContent = displayEmail;
-
-        const avatar = document.getElementById('nav-user-avatar');
-        if (avatar && displayEmail) {
-          avatar.textContent = displayEmail.charAt(0).toUpperCase();
-        }
-      } else {
-        if (guestActions) guestActions.classList.remove('hidden');
-        if (userActions) userActions.classList.add('hidden');
-        if (heroCta) heroCta.textContent = 'Deploy Trading Desk';
-      }
-    }
-
-    function toggleUserMenu() {
-      const menu = document.getElementById('nav-user-menu');
-      if (menu) menu.classList.toggle('hidden');
-    }
-
     function switchAuthTab(tab) {
-      const tabSignIn = document.getElementById('auth-tab-signin');
-      const tabSignUp = document.getElementById('auth-tab-signup');
-      const panelSignIn = document.getElementById('auth-panel-signin');
-      const panelSignUp = document.getElementById('auth-panel-signup');
-      const feedback = document.getElementById('auth-feedback');
-      if (feedback) feedback.classList.add('hidden');
+      const btnIn = document.getElementById('auth-btn-tab-signin');
+      const btnUp = document.getElementById('auth-btn-tab-signup');
+      const formIn = document.getElementById('auth-form-signin');
+      const formUp = document.getElementById('auth-form-signup');
+      const statusBox = document.getElementById('auth-status-box');
+      if (statusBox) statusBox.classList.add('hidden');
 
       if (tab === 'signin') {
-        tabSignIn.className = 'flex-1 py-2 rounded-lg font-semibold transition cursor-pointer text-white bg-brand-600 shadow-sm';
-        tabSignUp.className = 'flex-1 py-2 rounded-lg font-semibold transition cursor-pointer text-slate-400 hover:text-white';
-        panelSignIn.classList.remove('hidden');
-        panelSignUp.classList.add('hidden');
+        btnIn.className = 'flex-1 py-1.5 rounded-lg font-bold bg-emerald-500 text-obsidian-950 transition cursor-pointer';
+        btnUp.className = 'flex-1 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition cursor-pointer';
+        formIn.classList.remove('hidden');
+        formUp.classList.add('hidden');
       } else {
-        tabSignUp.className = 'flex-1 py-2 rounded-lg font-semibold transition cursor-pointer text-white bg-brand-600 shadow-sm';
-        tabSignIn.className = 'flex-1 py-2 rounded-lg font-semibold transition cursor-pointer text-slate-400 hover:text-white';
-        panelSignUp.classList.remove('hidden');
-        panelSignIn.classList.add('hidden');
+        btnUp.className = 'flex-1 py-1.5 rounded-lg font-bold bg-emerald-500 text-obsidian-950 transition cursor-pointer';
+        btnIn.className = 'flex-1 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition cursor-pointer';
+        formUp.classList.remove('hidden');
+        formIn.classList.add('hidden');
       }
     }
 
-    function showAuthFeedback(msg, isError) {
-      const fb = document.getElementById('auth-feedback');
-      if (!fb) return;
-      fb.classList.remove('hidden');
-      if (isError) {
-        fb.className = 'p-3 rounded-xl text-xs font-mono border bg-rose-950/60 border-rose-800 text-rose-300';
-      } else {
-        fb.className = 'p-3 rounded-xl text-xs font-mono border bg-emerald-950/60 border-emerald-800 text-emerald-300';
-      }
-      fb.textContent = msg;
+    function showAuthStatus(msg, isErr = false) {
+      const box = document.getElementById('auth-status-box');
+      if (!box) return;
+      box.classList.remove('hidden');
+      box.className = isErr 
+        ? 'p-3 rounded-xl text-xs font-mono border bg-rose-950/60 border-rose-800 text-rose-300'
+        : 'p-3 rounded-xl text-xs font-mono border bg-emerald-950/60 border-emerald-800 text-emerald-300';
+      box.textContent = msg;
     }
 
-    async function loginWithSupabase() {
-      if (!supabaseClient) {
-        showAuthFeedback('Authentication client initializing. Please refresh.', true);
-        return;
-      }
-      const email = document.getElementById('login-email').value.trim();
-      const password = document.getElementById('login-password').value.trim();
+    async function handleSignIn() {
+      const email = document.getElementById('input-login-email').value.trim();
+      const password = document.getElementById('input-login-password').value.trim();
       if (!email || !password) {
-        showAuthFeedback('Please enter both email and password.', true);
+        showAuthStatus('Please enter email and password.', true);
         return;
-      }
-      const btn = document.getElementById('btn-submit-signin');
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Authenticating...';
       }
       try {
-        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
-          showAuthFeedback(error.message, true);
-          return;
-        }
-        if (data && data.session) {
-          setSupabaseUserSession(data.session);
-          await fetchAuthMe();
-          navigateTo('dashboard');
-          if (ws) { try { ws.close(); } catch (_) {} }
-          initWebSocket();
-        }
-      } catch (err) {
-        showAuthFeedback('Sign in error: ' + (err.message || err), true);
-      } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = 'Sign In to Trading Desk';
-        }
-      }
-    }
-
-    async function signupWithSupabase() {
-      if (!supabaseClient) {
-        showAuthFeedback('Authentication client initializing.', true);
-        return;
-      }
-      const email = document.getElementById('signup-email').value.trim();
-      const password = document.getElementById('signup-password').value.trim();
-      const deskName = document.getElementById('signup-name').value.trim();
-      
-      if (!email || !password) {
-        showAuthFeedback('Please provide both email and password.', true);
-        return;
-      }
-      if (password.length < 6) {
-        showAuthFeedback('Password must be at least 6 characters.', true);
-        return;
-      }
-      const btn = document.getElementById('btn-submit-signup');
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = 'Provisioning Trading Desk...';
-      }
-      try {
-        const { data, error } = await supabaseClient.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              desk_name: deskName || (email.split('@')[0] + "'s Trading Desk")
-            }
-          }
-        });
-        if (error) {
-          showAuthFeedback(error.message, true);
+          showAuthStatus(error.message, true);
           return;
         }
         if (data.session) {
-          setSupabaseUserSession(data.session);
-          await fetchAuthMe();
-          navigateTo('dashboard');
-          if (ws) { try { ws.close(); } catch (_) {} }
-          initWebSocket();
+          setSession(data.session);
+          navTo('dashboard');
+        }
+      } catch (err) {
+        showAuthStatus(err.message || 'Login error', true);
+      }
+    }
+
+    async function handleSignUp() {
+      const email = document.getElementById('input-signup-email').value.trim();
+      const password = document.getElementById('input-signup-password').value.trim();
+      if (!email || !password) {
+        showAuthStatus('Please enter email and password.', true);
+        return;
+      }
+      if (password.length < 6) {
+        showAuthStatus('Password must be at least 6 characters.', true);
+        return;
+      }
+      try {
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) {
+          showAuthStatus(error.message, true);
+          return;
+        }
+        if (data.session) {
+          setSession(data.session);
+          navTo('dashboard');
         } else {
-          // Automatic login fallback
-          const loginRes = await supabaseClient.auth.signInWithPassword({ email, password });
-          if (loginRes.data && loginRes.data.session) {
-            setSupabaseUserSession(loginRes.data.session);
-            await fetchAuthMe();
-            navigateTo('dashboard');
-            if (ws) { try { ws.close(); } catch (_) {} }
-            initWebSocket();
+          // Auto sign in
+          const login = await supabase.auth.signInWithPassword({ email, password });
+          if (login.data && login.data.session) {
+            setSession(login.data.session);
+            navTo('dashboard');
           } else {
-            showAuthFeedback('Trading desk provisioned. Please sign in.', false);
+            showAuthStatus('Account created! Please Sign In.', false);
             switchAuthTab('signin');
           }
         }
       } catch (err) {
-        showAuthFeedback('Registration error: ' + (err.message || err), true);
-      } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.textContent = 'Create Trading Desk';
-        }
+        showAuthStatus(err.message || 'Signup error', true);
       }
     }
 
-    async function signOutSupabase() {
-      if (supabaseClient) {
-        try { await supabaseClient.auth.signOut(); } catch (_) {}
-      }
-      clearSupabaseUserSession();
-      navigateTo('landing');
-      if (ws) { try { ws.close(); } catch (_) {} }
-      initWebSocket();
-    }
-
-    async function fetchAuthMe() {
-      try {
-        const res = await fetch(getApiUrl('/api/auth/me'), {
-          headers: getAuthHeaders()
-        });
-        if (res.ok) {
-          const authData = await res.json();
-          if (authData.authenticated && authData.tenant_id) {
-            currentTenantId = authData.tenant_id;
-            localStorage.setItem('delta_bot_current_tenant', currentTenantId);
-            if (authData.email && (!currentUser || !currentUser.email)) {
-              currentUser = { email: authData.email, id: authData.user_id };
-            }
-            updateAuthUI();
-          }
-        }
-      } catch (e) {
-        console.debug('Failed to fetch /api/auth/me:', e);
+    function setSession(session) {
+      if (session) {
+        currentUser = session.user;
+        currentTenantId = session.user.id;
+        localStorage.setItem('token', session.access_token);
+        localStorage.setItem('tenant_id', currentTenantId);
+        updateNavUser();
+        initWs();
+      } else {
+        currentUser = null;
+        currentTenantId = 'default';
+        localStorage.removeItem('token');
+        localStorage.removeItem('tenant_id');
+        updateNavUser();
       }
     }
 
-    async function checkSupabaseSession() {
-      if (!supabaseClient) return;
-      try {
-        const { data: { session } } = await supabaseClient.auth.getSession();
-        if (session && session.user) {
-          setSupabaseUserSession(session);
-          await fetchAuthMe();
-        } else {
-          clearSupabaseUserSession();
-        }
-      } catch (err) {
-        console.debug('Supabase session check error:', err);
+    async function signOut() {
+      if (supabase) {
+        try { await supabase.auth.signOut(); } catch (_) {}
+      }
+      setSession(null);
+      navTo('landing');
+    }
+
+    function updateNavUser() {
+      const guestDiv = document.getElementById('nav-auth-buttons');
+      const userDiv = document.getElementById('nav-user-buttons');
+      const emailSpan = document.getElementById('nav-user-email');
+
+      if (currentUser || localStorage.getItem('token')) {
+        if (guestDiv) guestDiv.classList.add('hidden');
+        if (userDiv) userDiv.classList.remove('hidden');
+        if (emailSpan) emailSpan.textContent = currentUser ? currentUser.email : 'Active Trader';
+      } else {
+        if (guestDiv) guestDiv.classList.remove('hidden');
+        if (userDiv) userDiv.classList.add('hidden');
       }
     }
 
     function getAuthHeaders() {
       const headers = { 'Content-Type': 'application/json' };
-      const token = getAuthToken();
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+      const token = localStorage.getItem('token');
+      if (token) headers['Authorization'] = `Bearer ${token}`;
       return headers;
     }
 
-    async function handleAuthError(res) {
-      if (res.status === 401) {
-        showAuthFeedback('Your session has expired. Please sign in again.', true);
-        clearSupabaseUserSession();
-        navigateTo('auth');
-      }
-    }
-
     // -------------------------------------------------------------------------
-    // 4. Backend Communication (Transparent & Automatic)
+    // Backend API & Data Polling
     // -------------------------------------------------------------------------
-    function getBackendUrl() {
-      if (
-        window.location.hostname.endsWith('.vercel.app') ||
-        window.location.hostname.endsWith('.now.sh') ||
-        (window.location.hostname === 'localhost' && window.location.port === '3000') ||
-        window.location.protocol === 'file:' ||
-        !window.location.origin ||
-        window.location.origin === 'null'
-      ) {
-        return DEFAULT_RENDER_BACKEND;
-      }
-      return window.location.origin;
-    }
-
-    function getApiUrl(endpoint) {
-      const base = getBackendUrl();
-      const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
-      return `${base}${cleanEndpoint}`;
-    }
-
-    function getWsUrl() {
-      const backend = getBackendUrl();
-      const token = getAuthToken();
-      const params = new URLSearchParams();
-      if (token) params.set('token', token);
-      if (currentTenantId && currentTenantId !== 'default') params.set('tenant_id', currentTenantId);
-      const qs = params.toString() ? `?${params.toString()}` : '';
+    async function fetchStatus() {
       try {
-        const u = new URL(backend);
-        const wsProto = u.protocol === 'https:' ? 'wss:' : 'ws:';
-        return `${wsProto}//${u.host}/ws/live${qs}`;
-      } catch (_) {
-        return `wss://delta-bot-07e2.onrender.com/ws/live${qs}`;
-      }
-    }
-
-    // -------------------------------------------------------------------------
-    // 5. REST Polling & WebSocket Lifecycle
-    // -------------------------------------------------------------------------
-    async function fetchLatestStatus() {
-      try {
-        const res = await fetch(getApiUrl('/api/status'), {
-          headers: getAuthHeaders()
-        });
-        if (res.status === 401) {
-          await handleAuthError(res);
-          return;
-        }
+        const res = await fetch(`${BACKEND_URL}/api/status`, { headers: getAuthHeaders() });
         if (res.ok) {
           const data = await res.json();
-          updateDashboard(data);
-          if (data.tickers) {
-            updateLandingTickers(data.tickers);
-          }
+          renderDashboard(data);
+          if (data.tickers) renderLandingTickers(data.tickers);
         }
-      } catch (err) {
-        console.debug('REST snapshot poll fallback error:', err);
+      } catch (e) {
+        console.debug('Status fetch:', e);
       }
     }
 
-    function startRestPolling() {
-      stopRestPolling();
-      restPollingTimer = setInterval(fetchLatestStatus, 3000);
-    }
-
-    function stopRestPolling() {
-      if (restPollingTimer) {
-        clearInterval(restPollingTimer);
-        restPollingTimer = null;
-      }
-    }
-
-    function initWebSocket() {
-      const wsUrl = getWsUrl();
-      const wsDot = document.getElementById('ws-dot');
-      const wsLatency = document.getElementById('ws-latency-indicator');
-      const wsPingBadge = document.getElementById('ws-ping-badge');
-
+    function initWs() {
+      if (ws) { try { ws.close(); } catch (_) {} }
+      const token = localStorage.getItem('token') || '';
+      const qs = token ? `?token=${token}&tenant_id=${currentTenantId}` : '';
       try {
-        if (ws) {
-          try { ws.close(); } catch (_) {}
-        }
-        ws = new WebSocket(wsUrl);
-
-        ws.onopen = () => {
-          if (wsDot) {
-            wsDot.className = 'h-2 w-2 rounded-full bg-emerald-400 animate-pulse';
-          }
-          if (wsLatency) {
-            wsLatency.textContent = 'WebSocket: Connected (500ms)';
-            wsLatency.className = 'text-emerald-400';
-          }
-          pingStartTime = Date.now();
-          try { ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() })); } catch (_) {}
-        };
-
-        ws.onmessage = (event) => {
+        ws = new WebSocket(`wss://delta-bot-07e2.onrender.com/ws/live${qs}`);
+        ws.onmessage = (e) => {
           try {
-            const data = JSON.parse(event.data);
-            if (data.type === 'pong' || data.pong) {
-              const rtt = Date.now() - pingStartTime;
-              if (wsPingBadge) wsPingBadge.textContent = `${rtt} ms`;
-              return;
-            }
-            updateDashboard(data);
-            if (data.tickers) {
-              updateLandingTickers(data.tickers);
-            }
-          } catch (e) {
-            console.error('Failed to parse WebSocket message:', e);
-          }
+            const data = JSON.parse(e.data);
+            renderDashboard(data);
+            if (data.tickers) renderLandingTickers(data.tickers);
+          } catch (_) {}
         };
-
-        ws.onclose = () => {
-          if (wsDot) wsDot.className = 'h-2 w-2 rounded-full bg-amber-400';
-          if (wsLatency) {
-            wsLatency.textContent = 'Live Feed: Syncing via REST';
-            wsLatency.className = 'text-amber-400';
-          }
-          setTimeout(() => {
-            if (document.visibilityState !== 'hidden') {
-              initWebSocket();
-            }
-          }, 4000);
-        };
-
-        ws.onerror = () => {
-          if (wsDot) wsDot.className = 'h-2 w-2 rounded-full bg-rose-500';
-        };
-
-      } catch (err) {
-        console.warn('WebSocket connection attempt failed:', err);
-      }
+      } catch (_) {}
     }
 
     // -------------------------------------------------------------------------
-    // 6. UI Renderers: Dashboard & Landing
+    // Render Functions
     // -------------------------------------------------------------------------
-    function updateDashboard(data) {
-      if (!data) return;
-      const status = data.status || {};
-      const col = data.collateral || {};
+    function renderLandingTickers(tickers) {
+      const container = document.getElementById('landing-tickers');
+      if (!container) return;
+      const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+      container.replaceChildren();
 
-      // Strategy Running State
-      isRunning = Boolean(status.is_running);
-      currentMode = status.mode || 'LIVE';
-      const btn = document.getElementById('btn-toggle-trading');
-      const btnText = document.getElementById('btn-trading-text');
-      if (btn && btnText) {
-        if (isRunning) {
-          btn.className = 'px-3.5 py-1.5 rounded-xl font-semibold text-xs uppercase tracking-wider transition flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white shadow cursor-pointer';
-          btnText.textContent = 'RUNNING';
-        } else {
-          btn.className = 'px-3.5 py-1.5 rounded-xl font-semibold text-xs uppercase tracking-wider transition flex items-center gap-1.5 bg-amber-600 hover:bg-amber-500 text-white shadow cursor-pointer';
-          btnText.textContent = 'PAUSED';
-        }
-      }
-
-      // Delta API Key Status
-      const currTenant = data.current_tenant || {};
-      const hasApiKey = Boolean(currTenant.has_api_key || currTenant.delta_api_key_masked);
-      const keyBadge = document.getElementById('btn-api-key-status');
-      const keyDot = document.getElementById('api-key-status-dot');
-      const keyText = document.getElementById('api-key-status-text');
-      const apiBanner = document.getElementById('banner-api-keys-needed');
-
-      if (keyBadge && keyDot && keyText) {
-        if (hasApiKey) {
-          keyBadge.className = 'text-xs px-2.5 py-1 rounded-lg font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 border border-emerald-500/40 bg-emerald-950/50 text-emerald-300 hover:bg-emerald-900/60 shadow-sm';
-          keyDot.className = 'h-1.5 w-1.5 rounded-full bg-emerald-400';
-          keyText.textContent = 'Delta API Connected';
-          if (apiBanner) apiBanner.classList.add('hidden');
-        } else {
-          keyBadge.className = 'text-xs px-2.5 py-1 rounded-lg font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 border border-amber-500/40 bg-amber-950/50 text-amber-300 hover:bg-amber-900/60 shadow-sm animate-pulse';
-          keyDot.className = 'h-1.5 w-1.5 rounded-full bg-amber-400';
-          keyText.textContent = 'Keys Needed';
-          if (apiBanner && currentView === 'dashboard') apiBanner.classList.remove('hidden');
-        }
-      }
-
-      // Telemetry Values
-      const topTf = document.getElementById('top-timeframe');
-      if (topTf) topTf.textContent = status.timeframe || '1m';
-
-      const cbElem = document.getElementById('top-cb-status');
-      if (cbElem) {
-        if (status.circuit_breaker_tripped) {
-          cbElem.textContent = 'TRIPPED (HALTED)';
-          cbElem.className = 'text-rose-400 font-bold';
-        } else {
-          cbElem.textContent = 'NORMAL';
-          cbElem.className = 'text-emerald-400 font-semibold';
-        }
-      }
-
-      // Collateral & PnL
-      const eqVal = Number(col.equity ?? col.balance ?? 10000);
-      const eqElem = document.getElementById('top-equity');
-      if (eqElem) eqElem.textContent = `$${eqVal.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
-
-      const upnl = Number(col.unrealized_pnl ?? 0);
-      const upnlElem = document.getElementById('top-upnl');
-      if (upnlElem) {
-        upnlElem.textContent = `${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}`;
-        upnlElem.className = upnl >= 0 ? 'font-bold text-sm text-emerald-400' : 'font-bold text-sm text-rose-400';
-      }
-
-      const rpnl = Number(col.realized_pnl ?? 0);
-      const rpnlElem = document.getElementById('top-rpnl');
-      if (rpnlElem) {
-        rpnlElem.textContent = `${rpnl >= 0 ? '+' : ''}$${rpnl.toFixed(2)}`;
-        rpnlElem.className = rpnl >= 0 ? 'font-bold text-sm text-emerald-400' : 'font-bold text-sm text-rose-400';
-      }
-
-      const wrElem = document.getElementById('top-winrate');
-      if (wrElem) wrElem.textContent = `${Number(col.win_rate_pct ?? 0).toFixed(1)}% (${col.winning_trades || 0}/${col.total_trades || 0})`;
-      const ddElem = document.getElementById('top-maxdd');
-      if (ddElem) ddElem.textContent = `${Number(col.max_drawdown_pct ?? 0).toFixed(2)}%`;
-
-      // Render Asset Cards, Tables, Logs
-      renderAssetCards(data.tickers || {}, data.indicators || {});
-      renderPositionsTable(data.positions || []);
-      renderOrdersTable(data.orders || []);
-      if (data.logs) {
-        renderConsoleLogs(data.logs);
-      }
-
-      if (status.config) {
-        populateConfigModal(status.config);
-      }
-    }
-
-    // -------------------------------------------------------------------------
-    // Landing Page Tickers
-    // -------------------------------------------------------------------------
-    function updateLandingTickers(tickers) {
-      const grid = document.getElementById('landing-ticker-cards');
-      if (!grid) return;
-      const targetSymbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
-
-      if (!tickers || Object.keys(tickers).length === 0) return;
-      grid.replaceChildren();
-
-      targetSymbols.forEach(sym => {
+      symbols.forEach(sym => {
         const t = tickers[sym] || {};
         const price = Number(t.mark_price || t.close || 0);
         const chg = Number(t.change_24h || 0);
         const isUp = chg >= 0;
 
         const card = document.createElement('div');
-        card.className = 'glass-card glass-card-hover p-4 rounded-xl border border-white/5 space-y-1.5';
+        card.className = 'card p-4 rounded-xl border border-white/5 space-y-1';
         card.innerHTML = `
-          <div class="flex items-center justify-between">
-            <span class="font-display font-bold text-white text-sm">${sym}</span>
-            <span class="text-[11px] font-mono px-2 py-0.5 rounded ${isUp ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800' : 'bg-rose-950/80 text-rose-300 border border-rose-800'}">
-              ${isUp ? '+' : ''}${chg.toFixed(2)}%
-            </span>
+          <div class="flex items-center justify-between text-xs font-mono">
+            <span class="font-bold text-white">${sym}</span>
+            <span class="${isUp ? 'text-emerald-400' : 'text-rose-400'} font-semibold">${isUp ? '+' : ''}${chg.toFixed(2)}%</span>
           </div>
-          <div class="text-xl font-mono font-bold text-white tracking-tight">
-            $${price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 4})}
-          </div>
-          <div class="flex items-center justify-between text-[11px] font-mono text-slate-400 pt-1 border-t border-white/5">
-            <span>24h Range:</span>
-            <span class="text-slate-300">$${Number(t.low_24h || 0).toLocaleString()} - $${Number(t.high_24h || 0).toLocaleString()}</span>
-          </div>
+          <div class="text-xl font-bold font-mono text-white">$${price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 4})}</div>
+          <div class="text-[10px] text-slate-400 font-mono">24h Low/High: $${Number(t.low_24h || 0).toLocaleString()} - $${Number(t.high_24h || 0).toLocaleString()}</div>
         `;
-        grid.appendChild(card);
+        container.appendChild(card);
       });
     }
 
-    // -------------------------------------------------------------------------
-    // Dashboard Asset Cards
-    // -------------------------------------------------------------------------
-    function renderAssetCards(tickers, indicators) {
-      const grid = document.getElementById('asset-cards-grid');
-      if (!grid) return;
-      const targetSymbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
-      grid.replaceChildren();
+    function renderDashboard(data) {
+      if (!data) return;
+      const status = data.status || {};
+      const col = data.collateral || {};
+      const tenant = data.current_tenant || {};
 
-      targetSymbols.forEach(sym => {
+      // Engine Running State
+      isRunning = Boolean(status.is_running);
+      const btnLabel = document.getElementById('btn-engine-label');
+      const btnToggle = document.getElementById('btn-toggle-engine');
+      if (btnLabel && btnToggle) {
+        btnLabel.textContent = isRunning ? 'RUNNING' : 'PAUSED';
+        btnToggle.className = isRunning
+          ? 'px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase font-mono transition cursor-pointer flex items-center gap-1.5'
+          : 'px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase font-mono transition cursor-pointer flex items-center gap-1.5';
+      }
+
+      // Delta API Key Status
+      const hasKey = Boolean(tenant.has_api_key || tenant.delta_api_key_masked);
+      const apiBadge = document.getElementById('btn-api-badge');
+      const apiText = document.getElementById('api-badge-text');
+      const banner = document.getElementById('banner-api-needed');
+
+      if (apiBadge && apiText) {
+        if (hasKey) {
+          apiBadge.className = 'text-xs px-2.5 py-1 rounded-lg font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 border border-emerald-500/40 bg-emerald-950/50 text-emerald-300';
+          apiText.textContent = 'Keys Connected';
+          if (banner) banner.classList.add('hidden');
+        } else {
+          apiBadge.className = 'text-xs px-2.5 py-1 rounded-lg font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 border border-amber-500/40 bg-amber-950/50 text-amber-300 animate-pulse';
+          apiText.textContent = 'Keys Needed';
+          if (banner) banner.classList.remove('hidden');
+        }
+      }
+
+      // Equity & PnL
+      const eq = Number(col.equity ?? col.balance ?? 10000);
+      const upnl = Number(col.unrealized_pnl ?? 0);
+      const rpnl = Number(col.realized_pnl ?? 0);
+
+      const eqStr = `$${eq.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+      const upnlStr = `${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}`;
+      const rpnlStr = `${rpnl >= 0 ? '+' : ''}$${rpnl.toFixed(2)}`;
+
+      const dashEq = document.getElementById('dash-equity');
+      const cardEq = document.getElementById('card-equity');
+      if (dashEq) dashEq.textContent = eqStr;
+      if (cardEq) cardEq.textContent = eqStr;
+
+      const dashUpnl = document.getElementById('dash-upnl');
+      const cardUpnl = document.getElementById('card-upnl');
+      if (dashUpnl) {
+        dashUpnl.textContent = upnlStr;
+        dashUpnl.className = upnl >= 0 ? 'text-emerald-400 font-bold text-sm' : 'text-rose-400 font-bold text-sm';
+      }
+      if (cardUpnl) {
+        cardUpnl.textContent = upnlStr;
+        cardUpnl.className = upnl >= 0 ? 'text-xl font-bold font-mono text-emerald-400 mt-1 block' : 'text-xl font-bold font-mono text-rose-400 mt-1 block';
+      }
+
+      const dashRpnl = document.getElementById('dash-rpnl');
+      if (dashRpnl) dashRpnl.textContent = rpnlStr;
+
+      const cardWr = document.getElementById('card-winrate');
+      if (cardWr) cardWr.textContent = `${Number(col.win_rate_pct ?? 0).toFixed(1)}%`;
+
+      const cardTrades = document.getElementById('card-trades');
+      if (cardTrades) cardTrades.textContent = `${col.winning_trades || 0}W / ${col.total_trades || 0} total`;
+
+      const cardDd = document.getElementById('card-maxdd');
+      if (cardDd) cardDd.textContent = `${Number(col.max_drawdown_pct ?? 0).toFixed(2)}%`;
+
+      // Render Markets, Positions, Orders, Logs
+      renderMarketCards(data.tickers || {}, data.indicators || {});
+      renderPositions(data.positions || []);
+      renderOrders(data.orders || []);
+      if (data.logs) renderLogs(data.logs);
+    }
+
+    function renderMarketCards(tickers, indicators) {
+      const container = document.getElementById('dash-market-cards');
+      if (!container) return;
+      const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+      container.replaceChildren();
+
+      symbols.forEach(sym => {
         const t = tickers[sym] || {};
         const ind = indicators[sym] || {};
         const mark = Number(t.mark_price || 0);
         const chg = Number(t.change_24h || 0);
-        const isUp = chg >= 0;
         const adx = Number(ind.adx || 0);
-        const atr = Number(ind.atr || 0);
+        const isUp = chg >= 0;
         const enabled = ind.enabled !== false;
 
         const card = document.createElement('div');
-        card.className = `glass-card rounded-2xl p-4 border transition space-y-3 ${
-          enabled ? 'border-white/10 hover:border-brand-500/40' : 'border-white/5 opacity-50'
-        }`;
-
+        card.className = `card p-4 rounded-xl space-y-2 border ${enabled ? 'border-white/10' : 'border-white/5 opacity-50'}`;
         card.innerHTML = `
-          <div class="flex items-center justify-between">
-            <div class="flex items-center space-x-2">
-              <span class="h-2 w-2 rounded-full ${enabled ? 'bg-emerald-400' : 'bg-slate-600'}"></span>
-              <span class="font-display font-bold text-sm text-white">${sym}</span>
-            </div>
-            <button onclick="toggleSymbolTrading('${sym}', ${!enabled})" class="text-[10px] font-mono px-2 py-0.5 rounded transition cursor-pointer ${
-              enabled ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800' : 'bg-obsidian-850 text-slate-400 border border-white/5'
-            }">
-              ${enabled ? 'ACTIVE' : 'PAUSED'}
+          <div class="flex items-center justify-between text-xs font-mono">
+            <span class="font-bold text-white">${sym}</span>
+            <button onclick="toggleSymbol('${sym}', ${!enabled})" class="text-[10px] px-2 py-0.5 rounded cursor-pointer ${enabled ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-obsidian-850 text-slate-400'}">
+              ${enabled ? 'ACTIVE' : 'OFF'}
             </button>
           </div>
-
-          <div class="flex items-baseline justify-between">
-            <span class="text-xl font-mono font-bold text-white">$${mark.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 4})}</span>
-            <span class="text-xs font-mono font-semibold ${isUp ? 'text-emerald-400' : 'text-rose-400'}">${isUp ? '+' : ''}${chg.toFixed(2)}%</span>
+          <div class="flex items-baseline justify-between font-mono">
+            <span class="text-lg font-bold text-white">$${mark.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 4})}</span>
+            <span class="text-xs ${isUp ? 'text-emerald-400' : 'text-rose-400'}">${isUp ? '+' : ''}${chg.toFixed(2)}%</span>
           </div>
-
-          <div class="grid grid-cols-2 gap-2 text-[11px] font-mono bg-obsidian-950/70 p-2.5 rounded-xl border border-white/5">
-            <div>
-              <span class="text-slate-400 block text-[10px]">ADX (14)</span>
-              <span class="${adx >= 20 ? 'text-emerald-400 font-bold' : 'text-slate-300'}">${adx.toFixed(1)} ${adx >= 20 ? '🔥' : '⏳'}</span>
-            </div>
-            <div>
-              <span class="text-slate-400 block text-[10px]">ATR</span>
-              <span class="text-cyan-300 font-semibold">$${atr.toFixed(2)}</span>
-            </div>
+          <div class="flex justify-between text-[11px] font-mono text-slate-400 border-t border-white/5 pt-1.5">
+            <span>ADX (14): <strong class="${adx >= 20 ? 'text-emerald-400' : 'text-slate-300'}">${adx.toFixed(1)}</strong></span>
+            <span>ATR: <strong class="text-slate-300">$${Number(ind.atr || 0).toFixed(2)}</strong></span>
           </div>
         `;
-        grid.appendChild(card);
+        container.appendChild(card);
       });
     }
 
-    // -------------------------------------------------------------------------
-    // Positions & Orders Tables
-    // -------------------------------------------------------------------------
-    function createTd(content, className = '') {
-      const td = document.createElement('td');
-      td.className = `px-3 py-2.5 whitespace-nowrap ${className}`;
-      if (typeof content === 'string') {
-        td.innerHTML = content;
-      } else if (content instanceof HTMLElement) {
-        td.appendChild(content);
-      }
-      return td;
-    }
-
-    function renderPositionsTable(positions) {
-      const tbody = document.getElementById('positions-table-body');
-      const badge = document.getElementById('positions-count-badge');
-      const noMsg = document.getElementById('no-positions-msg');
+    function renderPositions(positions) {
+      const tbody = document.getElementById('dash-positions-body');
+      const badge = document.getElementById('badge-positions-count');
+      const emptyMsg = document.getElementById('msg-no-positions');
       if (!tbody) return;
 
       tbody.replaceChildren();
       const list = Array.isArray(positions) ? positions : [];
       if (badge) badge.textContent = list.length;
-
-      if (list.length === 0) {
-        if (noMsg) noMsg.classList.remove('hidden');
-        return;
-      }
-      if (noMsg) noMsg.classList.add('hidden');
+      if (emptyMsg) emptyMsg.classList.toggle('hidden', list.length > 0);
 
       list.forEach(pos => {
         const tr = document.createElement('tr');
-        tr.className = 'hover:bg-white/5 transition';
-
         const isLong = (pos.side || '').toUpperCase() === 'BUY' || (pos.side || '').toUpperCase() === 'LONG';
         const upnl = Number(pos.unrealized_pnl || 0);
 
-        tr.appendChild(createTd(pos.symbol || '--', 'font-bold text-white'));
-        tr.appendChild(createTd(
-          `<span class="px-2 py-0.5 rounded text-[10px] font-bold ${isLong ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300 border border-rose-800'}">${isLong ? 'LONG' : 'SHORT'}</span>`
-        ));
-        tr.appendChild(createTd(String(pos.size || pos.quantity || '--'), 'text-slate-200'));
-        tr.appendChild(createTd(`$${Number(pos.entry_price || 0).toLocaleString()}`, 'text-slate-300'));
-        tr.appendChild(createTd(`$${Number(pos.mark_price || 0).toLocaleString()}`, 'text-slate-300'));
-        tr.appendChild(createTd(
-          `<span class="${upnl >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}">${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}</span>`
-        ));
-        tr.appendChild(createTd(
-          `<span class="text-slate-300">$${Number(pos.stop_loss || 0).toFixed(1)} / $${Number(pos.take_profit || 0).toFixed(1)}</span>`,
-          'text-slate-400'
-        ));
-
-        const closeBtn = document.createElement('button');
-        closeBtn.className = 'px-2 py-1 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 text-[10px] font-bold cursor-pointer transition';
-        closeBtn.textContent = 'Close';
-        closeBtn.onclick = () => closePosition(pos.product_id, pos.symbol);
-        tr.appendChild(createTd(closeBtn, 'text-right'));
-
+        tr.innerHTML = `
+          <td class="py-2 font-bold text-white">${pos.symbol || '--'}</td>
+          <td class="py-2"><span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${isLong ? 'bg-emerald-950 text-emerald-300' : 'bg-rose-950 text-rose-300'}">${isLong ? 'LONG' : 'SHORT'}</span></td>
+          <td class="py-2 text-slate-300">${pos.size || pos.quantity || '--'}</td>
+          <td class="py-2 text-slate-300">$${Number(pos.entry_price || 0).toLocaleString()}</td>
+          <td class="py-2 text-slate-300">$${Number(pos.mark_price || 0).toLocaleString()}</td>
+          <td class="py-2 font-bold ${upnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}</td>
+          <td class="py-2 text-right">
+            <button onclick="closePosition('${pos.product_id}', '${pos.symbol}')" class="px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 text-[10px] font-bold cursor-pointer">
+              Close
+            </button>
+          </td>
+        `;
         tbody.appendChild(tr);
       });
     }
 
-    function renderOrdersTable(orders) {
-      const tbody = document.getElementById('orders-table-body');
-      const badge = document.getElementById('orders-count-badge');
-      const noMsg = document.getElementById('no-orders-msg');
+    function renderOrders(orders) {
+      const tbody = document.getElementById('dash-orders-body');
+      const badge = document.getElementById('badge-orders-count');
+      const emptyMsg = document.getElementById('msg-no-orders');
       if (!tbody) return;
 
       tbody.replaceChildren();
       const list = Array.isArray(orders) ? orders : [];
       if (badge) badge.textContent = list.length;
-
-      if (list.length === 0) {
-        if (noMsg) noMsg.classList.remove('hidden');
-        return;
-      }
-      if (noMsg) noMsg.classList.add('hidden');
+      if (emptyMsg) emptyMsg.classList.toggle('hidden', list.length > 0);
 
       list.forEach(ord => {
         const tr = document.createElement('tr');
-        tr.className = 'hover:bg-white/5 transition';
-
         const isBuy = (ord.side || '').toUpperCase() === 'BUY';
-        const orderIdShort = String(ord.id || ord.order_id || '--').slice(0, 8);
 
-        tr.appendChild(createTd(`<span class="text-slate-400">${orderIdShort}</span>`));
-        tr.appendChild(createTd(ord.symbol || '--', 'font-bold text-white'));
-        tr.appendChild(createTd(
-          `<span class="px-2 py-0.5 rounded text-[10px] font-bold ${isBuy ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-rose-950 text-rose-300 border border-rose-800'}">${ord.side}</span>`
-        ));
-        tr.appendChild(createTd(`$${Number(ord.stop_price || ord.trigger_price || ord.price || 0).toLocaleString()}`, 'text-amber-400 font-semibold'));
-        tr.appendChild(createTd(ord.ttl ? `${ord.ttl}s` : 'Active', 'text-slate-400'));
-
-        const cancelBtn = document.createElement('button');
-        cancelBtn.className = 'px-2 py-1 rounded bg-obsidian-850 hover:bg-obsidian-800 text-slate-300 border border-white/10 text-[10px] font-bold cursor-pointer transition';
-        cancelBtn.textContent = 'Cancel';
-        cancelBtn.onclick = () => cancelPendingOrder(ord.id || ord.order_id);
-        tr.appendChild(createTd(cancelBtn, 'text-right'));
-
+        tr.innerHTML = `
+          <td class="py-2 font-bold text-white">${ord.symbol || '--'}</td>
+          <td class="py-2"><span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${isBuy ? 'bg-emerald-950 text-emerald-300' : 'bg-rose-950 text-rose-300'}">${ord.side}</span></td>
+          <td class="py-2 text-amber-400 font-semibold">$${Number(ord.stop_price || ord.trigger_price || ord.price || 0).toLocaleString()}</td>
+          <td class="py-2 text-slate-400">${ord.ttl ? `${ord.ttl}s` : 'Active'}</td>
+          <td class="py-2 text-right">
+            <button onclick="cancelOrder('${ord.id || ord.order_id}')" class="px-2 py-0.5 rounded bg-obsidian-850 hover:bg-obsidian-800 text-slate-300 text-[10px] font-bold cursor-pointer">
+              Cancel
+            </button>
+          </td>
+        `;
         tbody.appendChild(tr);
       });
     }
 
-    // -------------------------------------------------------------------------
-    // Execution Feed / Logs
-    // -------------------------------------------------------------------------
-    function setLogFilter(filter) {
-      activeLogFilter = filter;
-      ['all', 'trade', 'info', 'error'].forEach(f => {
-        const btn = document.getElementById(`filter-${f}`);
-        if (btn) {
-          if (f.toUpperCase() === filter) {
-            btn.className = 'px-2.5 py-1 rounded-lg bg-brand-600 text-white font-semibold transition cursor-pointer';
-          } else {
-            btn.className = 'px-2.5 py-1 rounded-lg bg-obsidian-850 text-slate-400 hover:text-white transition cursor-pointer';
-          }
-        }
-      });
-      renderConsoleLogs(cachedLogs);
-    }
-
-    function renderConsoleLogs(logs) {
-      const container = document.getElementById('console-logs');
-      if (!container) return;
-      if (Array.isArray(logs)) cachedLogs = logs;
-
-      const filtered = cachedLogs.filter(log => {
-        if (activeLogFilter === 'ALL') return true;
-        const msg = String(log.message || log.msg || log).toUpperCase();
-        if (activeLogFilter === 'TRADE') return msg.includes('ORDER') || msg.includes('FILL') || msg.includes('TRADE') || msg.includes('CLOSE');
-        if (activeLogFilter === 'INFO') return msg.includes('SIGNAL') || msg.includes('ADX') || msg.includes('BREAKOUT') || msg.includes('ATR');
-        if (activeLogFilter === 'ERROR') return msg.includes('ERR') || msg.includes('FAIL') || msg.includes('CIRCUIT') || msg.includes('HALT');
-        return true;
-      });
+    function renderLogs(logs) {
+      const container = document.getElementById('dash-logs-feed');
+      if (!container || !Array.isArray(logs)) return;
 
       container.replaceChildren();
-      if (filtered.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'text-slate-500 py-4 text-center';
-        empty.textContent = 'No matching activity records.';
-        container.appendChild(empty);
-        return;
-      }
+      logs.slice(-40).forEach(log => {
+        const msg = typeof log === 'string' ? log : (log.message || log.msg || JSON.stringify(log));
+        const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
 
-      filtered.slice(-80).forEach(log => {
         const line = document.createElement('div');
-        line.className = 'leading-relaxed hover:bg-white/5 px-2 py-0.5 rounded';
-
-        const msgStr = typeof log === 'string' ? log : (log.message || log.msg || JSON.stringify(log));
-        const timeStr = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
-
-        let color = 'text-slate-300';
-        if (msgStr.includes('TRADE') || msgStr.includes('FILL') || msgStr.includes('OPEN')) color = 'text-emerald-400 font-semibold';
-        else if (msgStr.includes('WARN') || msgStr.includes('BREAKOUT')) color = 'text-amber-400';
-        else if (msgStr.includes('ERROR') || msgStr.includes('HALT')) color = 'text-rose-400 font-bold';
-
-        line.innerHTML = `<span class="text-slate-500">[${timeStr}]</span> <span class="${color}">${escapeHtml(msgStr)}</span>`;
+        line.className = 'text-slate-300 hover:bg-white/5 px-1 py-0.5 rounded';
+        line.innerHTML = `<span class="text-slate-500">[${time}]</span> ${escapeHtml(msg)}`;
         container.appendChild(line);
       });
       container.scrollTop = container.scrollHeight;
@@ -1881,198 +1087,156 @@
     }
 
     // -------------------------------------------------------------------------
-    // Execution Controls: Trading, Symbols, Flatten, Close
+    // Execution Controls
     // -------------------------------------------------------------------------
-    async function toggleTrading() {
+    async function toggleEngine() {
       const action = isRunning ? 'pause' : 'start';
       try {
-        const res = await fetch(getApiUrl(`/api/control/${action}`), {
+        const res = await fetch(`${BACKEND_URL}/api/control/${action}`, {
           method: 'POST',
           headers: getAuthHeaders()
         });
-        if (res.status === 401) {
-          await handleAuthError(res);
-          return;
-        }
         const data = await res.json();
-        alert(data.message || `Trading engine ${action}ed`);
-        fetchLatestStatus();
+        alert(data.message || `Bot ${action}ed`);
+        fetchStatus();
       } catch (err) {
-        alert(`Failed to ${action} trading: ${err}`);
+        alert(`Failed to ${action}: ${err}`);
       }
     }
 
-    async function toggleSymbolTrading(symbol, enable) {
+    async function toggleSymbol(symbol, enable) {
       try {
-        const res = await fetch(getApiUrl('/api/control/symbol_toggle'), {
+        await fetch(`${BACKEND_URL}/api/control/symbol_toggle`, {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify({ symbol, enabled: enable })
         });
-        if (res.status === 401) {
-          await handleAuthError(res);
-          return;
-        }
-        fetchLatestStatus();
+        fetchStatus();
       } catch (err) {
-        alert(`Failed to update symbol: ${err}`);
+        alert(`Symbol update failed: ${err}`);
       }
     }
 
-    async function triggerEmergencyFlatten() {
-      if (!confirm('WARNING: Emergency Kill Switch will market-close all open positions and cancel all pending resting orders. Proceed?')) return;
+    async function emergencyFlatten() {
+      if (!confirm('KILL SWITCH: Close ALL open positions and cancel ALL resting orders immediately?')) return;
       try {
-        const res = await fetch(getApiUrl('/api/control/flatten'), {
+        const res = await fetch(`${BACKEND_URL}/api/control/flatten`, {
           method: 'POST',
           headers: getAuthHeaders()
         });
-        if (res.status === 401) {
-          await handleAuthError(res);
-          return;
-        }
         const data = await res.json();
-        alert(data.message || 'Flatten execution completed');
-        fetchLatestStatus();
+        alert(data.message || 'Flatten complete');
+        fetchStatus();
       } catch (err) {
-        alert(`Flatten execution failed: ${err}`);
+        alert(`Flatten error: ${err}`);
       }
     }
 
     async function closePosition(productId, symbol) {
       if (!confirm(`Close position on ${symbol}?`)) return;
       try {
-        const res = await fetch(getApiUrl('/api/control/close_position'), {
+        const res = await fetch(`${BACKEND_URL}/api/control/close_position`, {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify({ product_id: productId, symbol })
         });
-        if (res.status === 401) {
-          await handleAuthError(res);
-          return;
-        }
         const data = await res.json();
         alert(data.message);
-        fetchLatestStatus();
+        fetchStatus();
       } catch (err) {
-        alert(`Failed to close position: ${err}`);
+        alert(`Failed: ${err}`);
       }
     }
 
-    async function cancelPendingOrder(orderId) {
+    async function cancelOrder(orderId) {
       try {
-        const res = await fetch(getApiUrl(`/api/orders/${orderId}`), {
+        const res = await fetch(`${BACKEND_URL}/api/orders/${orderId}`, {
           method: 'DELETE',
           headers: getAuthHeaders()
         });
-        if (res.status === 401) {
-          await handleAuthError(res);
-          return;
-        }
         const data = await res.json();
         alert(data.message || 'Order cancelled');
-        fetchLatestStatus();
+        fetchStatus();
       } catch (err) {
-        alert(`Failed to cancel order: ${err}`);
+        alert(`Failed: ${err}`);
       }
     }
 
     // -------------------------------------------------------------------------
-    // Config & Delta API Credentials Modal
+    // Settings Modal (Delta API Credentials & Risk)
     // -------------------------------------------------------------------------
-    function openConfigModal() {
-      document.getElementById('config-modal').classList.remove('hidden');
+    function openSettingsModal() {
+      document.getElementById('modal-settings').classList.remove('hidden');
     }
 
-    function closeConfigModal() {
-      document.getElementById('config-modal').classList.add('hidden');
+    function closeSettingsModal() {
+      document.getElementById('modal-settings').classList.add('hidden');
     }
 
-    function populateConfigModal(config) {
-      if (!config) return;
-      if (config.risk_pct !== undefined) {
-        document.getElementById('input-risk-pct').value = config.risk_pct;
-        document.getElementById('val-risk-pct').textContent = config.risk_pct + '%';
-      }
-      if (config.leverage !== undefined) {
-        document.getElementById('input-leverage').value = config.leverage;
-        document.getElementById('val-leverage').textContent = config.leverage + 'x';
-      }
-      if (config.max_drawdown_pct !== undefined) {
-        document.getElementById('input-max-dd').value = config.max_drawdown_pct;
-        document.getElementById('val-max-dd').textContent = config.max_drawdown_pct + '%';
-      }
-    }
-
-    async function saveConfig() {
-      const riskPct = parseFloat(document.getElementById('input-risk-pct').value);
+    async function saveSettings() {
+      const apiKey = document.getElementById('cfg-api-key').value.trim();
+      const apiSecret = document.getElementById('cfg-api-secret').value.trim();
+      const baseUrl = document.getElementById('cfg-api-url').value.trim();
+      const risk = parseFloat(document.getElementById('input-risk').value);
       const leverage = parseInt(document.getElementById('input-leverage').value, 10);
-      const maxDd = parseFloat(document.getElementById('input-max-dd').value);
-      const apiKey = document.getElementById('cfg-delta-key').value.trim();
-      const apiSecret = document.getElementById('cfg-delta-secret').value.trim();
-      const baseUrl = document.getElementById('cfg-delta-url').value.trim();
+      const maxDd = parseFloat(document.getElementById('input-maxdd').value);
 
       const payload = {
-        risk_pct: riskPct,
+        risk_pct: risk,
         leverage: leverage,
-        max_drawdown_pct: maxDd,
+        max_drawdown_pct: maxDd
       };
       if (apiKey) payload.delta_api_key = apiKey;
       if (apiSecret) payload.delta_api_secret = apiSecret;
       if (baseUrl) payload.delta_base_url = baseUrl;
 
       try {
-        const url = (currentTenantId && currentTenantId !== 'default')
-          ? `/api/tenants/${currentTenantId}/update`
-          : '/api/control/config';
+        const endpoint = (currentTenantId && currentTenantId !== 'default')
+          ? `${BACKEND_URL}/api/tenants/${currentTenantId}/update`
+          : `${BACKEND_URL}/api/control/config`;
 
-        const res = await fetch(getApiUrl(url), {
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify(payload)
         });
 
-        if (res.status === 401) {
-          await handleAuthError(res);
-          return;
-        }
         const data = await res.json();
-        alert(apiKey || apiSecret ? 'Delta Exchange API Keys & Risk Settings successfully applied!' : data.message);
-        document.getElementById('cfg-delta-key').value = '';
-        document.getElementById('cfg-delta-secret').value = '';
-        closeConfigModal();
-        fetchLatestStatus();
+        alert(apiKey || apiSecret ? 'Delta Exchange API Keys saved and activated!' : data.message);
+        document.getElementById('cfg-api-key').value = '';
+        document.getElementById('cfg-api-secret').value = '';
+        closeSettingsModal();
+        fetchStatus();
       } catch (err) {
-        alert(`Failed to apply settings: ${err}`);
+        alert(`Settings error: ${err}`);
       }
     }
 
     // -------------------------------------------------------------------------
-    // Initial Load & Route Dispatcher
+    // Lifecycle Initialization
     // -------------------------------------------------------------------------
     window.addEventListener('DOMContentLoaded', async () => {
-      await checkSupabaseSession();
-      updateAuthUI();
-
-      // Dispatch route based on URL hash
-      const hash = window.location.hash.replace('#', '').trim();
-      if (hash === 'dashboard' || hash === 'terminal') {
-        navigateTo('dashboard');
-      } else if (hash === 'auth' || hash === 'login') {
-        navigateTo('auth');
-      } else {
-        if (currentUser || getAuthToken()) {
-          navigateTo('dashboard');
-        } else {
-          navigateTo('landing');
-        }
+      if (supabase) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) setSession(session);
+        } catch (_) {}
       }
 
-      // Fetch snapshot data immediately
-      await fetchLatestStatus();
-      startRestPolling();
+      updateNavUser();
 
-      // Connect real-time WebSocket
-      initWebSocket();
+      const hash = window.location.hash.replace('#', '').trim();
+      if (hash === 'dashboard') {
+        navTo('dashboard');
+      } else if (hash === 'login') {
+        navTo('login');
+      } else {
+        navTo(currentUser ? 'dashboard' : 'landing');
+      }
+
+      await fetchStatus();
+      pollInterval = setInterval(fetchStatus, 2500);
+      initWs();
     });
   </script>
 </body>
