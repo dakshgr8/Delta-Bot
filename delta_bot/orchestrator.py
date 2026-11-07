@@ -122,7 +122,7 @@ class TradingBotOrchestrator:
             self.private_ws = private_ws  # Typically None in pure paper mode
             self.execution_manager = None
             self.paper_simulator = paper_simulator or PaperExchangeSimulator(
-                initial_balance=0.0,
+                initial_balance=10000.0,
                 state_manager=self.state_manager,
             )
             self.paper_simulator.set_state_manager(self.state_manager)
@@ -242,7 +242,7 @@ class TradingBotOrchestrator:
         else:
             if self.paper_simulator is None:
                 self.paper_simulator = PaperExchangeSimulator(
-                    initial_balance=0.0,
+                    initial_balance=10000.0,
                     state_manager=self.state_manager,
                 )
                 self.paper_simulator.set_state_manager(self.state_manager)

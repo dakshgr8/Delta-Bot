@@ -187,6 +187,60 @@ async def test_native_stop_order_with_brackets_live_submission(
     assert len(call_kwargs["client_order_id"]) <= 32
 
 
+@pytest.mark.asyncio
+async def test_native_stop_order_immediate_execution_fallback_to_market(
+    btc_global_spec: ContractSpec,
+    sample_bullish_intent: OrderIntent,
+) -> None:
+    """Verifies that immediate_execution_stop_order cleanly falls back to immediate market order with brackets."""
+    mock_client = AsyncMock(spec=DeltaRestClient)
+    mock_client.get_cached_contract_spec.return_value = btc_global_spec
+    mock_client.config = BotConfig()
+
+    immediate_exec_err = DeltaAPIError(
+        message="Immediate execution stop order",
+        status_code=400,
+        error_code="immediate_execution_stop_order",
+    )
+    fallback_market_order = ExchangeOrder(
+        id=11223344,
+        client_order_id=f"{sample_bullish_intent.intent_id[:29]}_m",
+        product_id=139,
+        symbol="BTCUSDT",
+        side="buy",
+        order_type="market_order",
+        size=50,
+        stop_price=None,
+        bracket_stop_loss_price=50600.0,
+        bracket_take_profit_price=51801.5,
+        state="open",
+        created_at=1700000000.0,
+    )
+
+    mock_client.place_order.side_effect = [immediate_exec_err, fallback_market_order]
+
+    exec_config = ExecutionConfig(execution_mode=ExecutionMode.LIVE, leverage=5)
+    manager = OrderExecutionManager(mock_client, exec_config)
+
+    order = await manager.execute_stop_order_with_brackets(
+        order_intent=sample_bullish_intent,
+        account_equity=10000.0,
+        available_margin_override=5000.0,
+    )
+
+    assert order.id == 11223344
+    assert sample_bullish_intent.exchange_order_id == 11223344
+    assert mock_client.place_order.await_count == 2
+
+    # Second call should be a market order with attached brackets
+    fallback_kwargs = mock_client.place_order.await_args_list[1].kwargs
+    assert fallback_kwargs["order_type"] == "market_order"
+    assert "stop_price" not in fallback_kwargs or fallback_kwargs.get("stop_price") is None
+    assert fallback_kwargs["bracket_stop_loss_price"] == 50600.0
+    assert fallback_kwargs["bracket_take_profit_price"] == 51801.5
+    assert fallback_kwargs["client_order_id"].endswith("_m")
+
+
 # -----------------------------------------------------------------------------
 # 2. Trap 1: Resting Order Cancellation (EMA Invalidation & TTL)
 # -----------------------------------------------------------------------------

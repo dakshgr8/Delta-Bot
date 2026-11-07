@@ -458,16 +458,16 @@ class MarginCheckResult(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    symbol: str
-    product_id: int
-    leverage: float
-    available_margin: float
-    required_margin: float
-    risk_budget_usd: float
-    risk_based_lots: int
-    margin_based_lots: int
-    final_lots: int
-    is_margin_sufficient: bool
+    symbol: str = ""
+    product_id: int = 0
+    leverage: float = 1.0
+    available_margin: float = 0.0
+    required_margin: float = 0.0
+    risk_budget_usd: float = 0.0
+    risk_based_lots: int = 0
+    margin_based_lots: int = 0
+    final_lots: int = 0
+    is_margin_sufficient: bool = False
     rejection_reason: str | None = None
 
 

@@ -114,6 +114,28 @@ def test_risk_manager_insufficient_margin_rejection(
     assert "insufficient for 1 BTCUSDT contract" in str(res.rejection_reason)
 
 
+def test_risk_manager_zero_equity_or_margin_returns_valid_model(
+    risk_manager: RiskManager,
+    btc_spec: ContractSpec,
+) -> None:
+    """Verifies that 0 equity or 0 margin cleanly returns valid MarginCheckResult without Pydantic ValidationError."""
+    res_zero_eq = risk_manager.size_position(
+        spec=btc_spec,
+        trigger_price=50000.0,
+        stop_loss_price=49000.0,
+        account_equity=0.0,
+        available_margin=0.0,
+    )
+    assert isinstance(res_zero_eq, MarginCheckResult)
+    assert res_zero_eq.is_margin_sufficient is False
+    assert res_zero_eq.final_lots == 0
+    assert res_zero_eq.symbol == "BTCUSDT"
+    assert res_zero_eq.product_id == 139
+    assert res_zero_eq.leverage == 5.0
+    assert res_zero_eq.risk_budget_usd == 0.0
+    assert "Insufficient collateral" in str(res_zero_eq.rejection_reason)
+
+
 # -----------------------------------------------------------------------------
 # 2. Circuit Breaker & Daily Max Drawdown
 # -----------------------------------------------------------------------------

@@ -2048,6 +2048,8 @@ class TenantManager:
                         order_intent=tenant_intent,
                         account_equity=account_equity,
                     )
+                    if tenant_intent.client_order_id:
+                        tenant.order_to_base_id[tenant_intent.client_order_id] = base_signal_id
                     executed_tenants.append(tenant.config.tenant_id)
                 except Exception as e:
                     logger.error("[FANOUT %s:%s] Live order failed: %s", tenant.config.tenant_id, clean_symbol, e)

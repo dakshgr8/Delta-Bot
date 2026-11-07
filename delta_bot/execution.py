@@ -235,20 +235,43 @@ class OrderRouter:
             return order
 
         # Live submission
-        return await self.client.place_order(
-            product_id=product_id,
-            size=size,
-            side=side,
-            order_type="market_order",
-            stop_price=stop_price,
-            stop_order_type="stop_loss_order",
-            stop_trigger_method=self.config.stop_trigger_method,
-            bracket_stop_loss_price=bracket_stop_loss_price,
-            bracket_take_profit_price=bracket_take_profit_price,
-            time_in_force="gtc",
-            client_order_id=client_order_id,
-            symbol=symbol,
-        )
+        try:
+            return await self.client.place_order(
+                product_id=product_id,
+                size=size,
+                side=side,
+                order_type="market_order",
+                stop_price=stop_price,
+                stop_order_type="stop_loss_order",
+                stop_trigger_method=self.config.stop_trigger_method,
+                bracket_stop_loss_price=bracket_stop_loss_price,
+                bracket_take_profit_price=bracket_take_profit_price,
+                time_in_force="gtc",
+                client_order_id=client_order_id,
+                symbol=symbol,
+            )
+        except DeltaAPIError as err:
+            if err.error_code == "immediate_execution_stop_order":
+                logger.warning(
+                    "[BREAKOUT GATEWAY] Stop trigger %.4f on %s (%s) was already breached (immediate_execution_stop_order). "
+                    "Falling back to immediate market order entry with attached brackets.",
+                    stop_price,
+                    symbol,
+                    side,
+                )
+                fallback_cid = f"{client_order_id[:29]}_m" if client_order_id else None
+                return await self.client.place_order(
+                    product_id=product_id,
+                    size=size,
+                    side=side,
+                    order_type="market_order",
+                    bracket_stop_loss_price=bracket_stop_loss_price,
+                    bracket_take_profit_price=bracket_take_profit_price,
+                    time_in_force="gtc",
+                    client_order_id=fallback_cid,
+                    symbol=symbol,
+                )
+            raise
 
     async def cancel_order(self, product_id: int, order_id: int) -> dict[str, Any]:
         """Cancels a resting stop order via DELETE /v2/orders."""
@@ -731,20 +754,27 @@ class ExecutionManager:
 
         # 6. Update intent & local registry
         order_intent.exchange_order_id = exchange_order.id
+        if exchange_order.client_order_id:
+            order_intent.client_order_id = exchange_order.client_order_id
+        if exchange_order.stop_price is None:
+            order_intent.status = OrderStatus.TRIGGERED
         self.registry.register(exchange_order, intent_id=order_intent.intent_id)
         self.risk_manager.record_trade_entry()
 
         if self.state_manager is not None:
             self.state_manager.register_intent(order_intent)
 
+        order_kind = "Market Order" if exchange_order.stop_price is None else "Stop Order"
+        stop_str = f"Stop={order_intent.trigger_price:.4f}" if exchange_order.stop_price is not None else "Type=MARKET"
         logger.info(
-            "Native %s Stop Order dispatched for %s: ExchangeID=%d | ClientID=%s | Lots=%d | Stop=%.4f | SL=%.4f | TP=%.4f",
+            "Native %s %s dispatched for %s: ExchangeID=%d | ClientID=%s | Lots=%d | %s | SL=%.4f | TP=%.4f",
             side.upper(),
+            order_kind,
             spec.symbol,
             exchange_order.id,
-            client_order_id,
+            exchange_order.client_order_id or client_order_id,
             exchange_order.size,
-            order_intent.trigger_price,
+            stop_str,
             order_intent.initial_stop_loss,
             order_intent.take_profit,
         )

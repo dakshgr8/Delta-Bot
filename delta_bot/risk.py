@@ -245,12 +245,16 @@ class RiskManager:
         """
         if account_equity <= 0 or available_margin <= 0:
             return MarginCheckResult(
-                is_margin_sufficient=False,
-                required_margin=0.0,
+                symbol=spec.symbol,
+                product_id=spec.product_id,
+                leverage=float(self.config.max_leverage),
                 available_margin=max(0.0, available_margin),
+                required_margin=0.0,
+                risk_budget_usd=0.0,
                 risk_based_lots=0,
                 margin_based_lots=0,
                 final_lots=0,
+                is_margin_sufficient=False,
                 rejection_reason="Insufficient collateral: account equity or available margin is $0.00",
             )
 

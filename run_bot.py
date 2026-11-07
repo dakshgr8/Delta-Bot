@@ -160,8 +160,8 @@ def parse_cli_args() -> argparse.Namespace:
     parser.add_argument(
         "--initial-balance",
         type=float,
-        default=0.0,
-        help="Starting virtual collateral balance for Paper trading mode",
+        default=10000.0,
+        help="Starting virtual collateral balance for Paper trading mode (default: 10,000 USD)",
     )
     parser.add_argument(
         "--log-level",
