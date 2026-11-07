@@ -3,105 +3,298 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DELTA-BOT | Quantitative Terminal</title>
+  <title>DELTA-BOT | Modern Dark Quantitative Terminal</title>
   
-  <!-- Fonts: Plus Jakarta Sans & JetBrains Mono -->
+  <!-- Fonts: Geist & Geist Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@300;400;500;600;700&family=Geist:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   
   <!-- Tailwind CSS & Supabase JS -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            obsidian: {
-              950: '#07090e',
-              900: '#0c1017',
-              850: '#121824',
-              800: '#1a2233',
-              700: '#26334d'
-            },
-            brand: {
-              400: '#34d399',
-              500: '#10b981',
-              600: '#059669'
-            }
-          },
-          fontFamily: {
-            sans: ['"Plus Jakarta Sans"', 'sans-serif'],
-            mono: ['"JetBrains Mono"', 'monospace']
-          }
-        }
-      }
-    };
-  </script>
-
   <style>
-    .card {
-      background: rgba(18, 24, 36, 0.75);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      backdrop-filter: blur(12px);
+    :root {
+      --dp-color-ground: #050505;
+      --dp-color-panel: #0e0e0e;
+      --dp-color-hairline: #222222;
+      --dp-color-hairline-2: #303030;
+      --dp-color-bright: #f2f2f2;
+      --dp-color-read: #a6a9ad;
+      --dp-color-meta: #8a8d91;
+      --dp-color-live: #3fd6c6;
+      --dp-color-inverse-ink: #0a0a0a;
+      --dp-color-dim: #96999d;
+      --dp-typography-face: "Geist", "Modern Dark Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --dp-typography-mono: "Geist Mono", "Modern Dark Mono", "SFMono-Regular", Menlo, monospace;
+      --dp-spacing-gutter: 48px;
+      --dp-spacing-gap: 24px;
+      --dp-spacing-max: 1360px;
+      --dp-radius-panel: 6px;
+      --dp-radius-pill: 999px;
+      --dp-border-hairline: 1px;
+      --dp-motion-duration: 120ms;
+      --dp-motion-ease: ease-out;
     }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      background-color: var(--dp-color-ground);
+      color: var(--dp-color-read);
+      font-family: var(--dp-typography-face);
+      font-size: 14px;
+      line-height: 1.5;
+      letter-spacing: -0.01em;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      margin: 0;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(255, 255, 255, 0.05), transparent 70%);
+      background-repeat: no-repeat;
+    }
+
+    /* Modern Dark Typography */
+    .hero-title {
+      font-family: var(--dp-typography-face);
+      font-size: clamp(34px, 5vw, 64px);
+      font-weight: 400;
+      line-height: 1.05;
+      letter-spacing: -0.035em;
+      color: var(--dp-color-bright);
+    }
+
+    .section-title {
+      font-family: var(--dp-typography-face);
+      font-size: 18px;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      color: var(--dp-color-bright);
+    }
+
+    .mono-label {
+      font-family: var(--dp-typography-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--dp-color-meta);
+    }
+
+    .mono-meta {
+      font-family: var(--dp-typography-mono);
+      font-size: 12px;
+      color: var(--dp-color-meta);
+    }
+
+    /* Modern Dark Surfaces */
+    .dp-panel {
+      background-color: var(--dp-color-panel);
+      border: 1px solid var(--dp-color-hairline);
+      border-radius: var(--dp-radius-panel);
+    }
+
+    .dp-card-gradient {
+      background: linear-gradient(180deg, #121212 0%, #0e0e0e 100%);
+      border: 1px solid var(--dp-color-hairline);
+      border-radius: var(--dp-radius-panel);
+    }
+
+    /* Buttons */
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--dp-color-bright);
+      color: var(--dp-color-inverse-ink);
+      border: 1px solid var(--dp-color-bright);
+      border-radius: var(--dp-radius-pill);
+      padding: 8px 18px;
+      font-family: var(--dp-typography-face);
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background var(--dp-motion-duration) var(--dp-motion-ease),
+                  border-color var(--dp-motion-duration) var(--dp-motion-ease),
+                  color var(--dp-motion-duration) var(--dp-motion-ease);
+    }
+    .btn-primary:hover {
+      background: #ffffff;
+      border-color: #ffffff;
+    }
+    .btn-primary:focus-visible {
+      outline: 2px solid var(--dp-color-bright);
+      outline-offset: 2px;
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      color: var(--dp-color-bright);
+      border: 1px solid var(--dp-color-hairline-2);
+      border-radius: var(--dp-radius-pill);
+      padding: 8px 18px;
+      font-family: var(--dp-typography-face);
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1;
+      cursor: pointer;
+      text-decoration: none;
+      transition: background var(--dp-motion-duration) var(--dp-motion-ease),
+                  border-color var(--dp-motion-duration) var(--dp-motion-ease),
+                  color var(--dp-motion-duration) var(--dp-motion-ease);
+    }
+    .btn-secondary:hover {
+      background: var(--dp-color-panel);
+      border-color: var(--dp-color-meta);
+      color: #ffffff;
+    }
+    .btn-secondary:focus-visible {
+      outline: 2px solid var(--dp-color-meta);
+      outline-offset: 2px;
+    }
+
+    .btn-danger {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      color: #f87171;
+      border: 1px solid rgba(248, 113, 113, 0.3);
+      border-radius: var(--dp-radius-pill);
+      padding: 7px 16px;
+      font-family: var(--dp-typography-mono);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      cursor: pointer;
+      transition: all var(--dp-motion-duration) var(--dp-motion-ease);
+    }
+    .btn-danger:hover {
+      background: rgba(248, 113, 113, 0.08);
+      border-color: #f87171;
+    }
+    .btn-danger:focus-visible {
+      outline: 2px solid #f87171;
+      outline-offset: 2px;
+    }
+
+    /* Small Mint Signal */
+    .signal-live {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: var(--dp-color-live);
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    .signal-muted {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: var(--dp-color-hairline-2);
+      display: inline-block;
+      flex-shrink: 0;
+    }
+
+    /* Inputs */
+    .dp-input {
+      background-color: var(--dp-color-ground);
+      border: 1px solid var(--dp-color-hairline);
+      border-radius: var(--dp-radius-panel);
+      color: var(--dp-color-bright);
+      padding: 8px 12px;
+      font-family: var(--dp-typography-mono);
+      font-size: 12px;
+      outline: none;
+      width: 100%;
+      transition: border-color var(--dp-motion-duration) var(--dp-motion-ease);
+    }
+    .dp-input:focus {
+      border-color: var(--dp-color-meta);
+    }
+
+    /* Views */
     .view-page {
       display: none;
     }
     .view-page.active {
       display: block !important;
     }
+
+    /* Container */
+    .dp-container {
+      max-width: var(--dp-spacing-max);
+      margin-left: auto;
+      margin-right: auto;
+      padding-left: var(--dp-spacing-gutter);
+      padding-right: var(--dp-spacing-gutter);
+      width: 100%;
+    }
+
+    @media (max-width: 1180px) {
+      :root {
+        --dp-spacing-gutter: 32px;
+      }
+    }
+    @media (max-width: 560px) {
+      :root {
+        --dp-spacing-gutter: 16px;
+        --dp-spacing-gap: 16px;
+      }
+    }
   </style>
 </head>
-<body class="bg-obsidian-950 text-slate-100 font-sans antialiased min-h-screen flex flex-col selection:bg-brand-500/30">
+<body class="selection:bg-white/20 selection:text-white">
 
   <!-- ========================================================================= -->
   <!-- NAVIGATION BAR -->
   <!-- ========================================================================= -->
-  <nav class="sticky top-0 z-50 bg-obsidian-950/90 border-b border-white/10 backdrop-blur-md">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+  <nav class="sticky top-0 z-50 bg-[var(--dp-color-ground)] border-b border-[var(--dp-color-hairline)]">
+    <div class="dp-container h-16 flex items-center justify-between">
       
       <!-- Brand Logo -->
-      <a href="#landing" onclick="navTo('landing'); return false;" class="flex items-center space-x-2.5 cursor-pointer">
-        <div class="h-8 w-8 rounded-lg bg-emerald-500 flex items-center justify-center font-bold text-obsidian-950 text-lg shadow-lg shadow-emerald-950">
-          Δ
-        </div>
-        <div>
-          <span class="font-extrabold text-white tracking-tight text-base">DELTA-BOT</span>
-          <span class="text-[10px] text-emerald-400 font-mono ml-1 font-semibold">TERMINAL</span>
-        </div>
+      <a href="#landing" onclick="navTo('landing'); return false;" class="flex items-center space-x-2.5 text-[var(--dp-color-bright)] hover:opacity-90 transition">
+        <span class="font-medium text-base tracking-tight font-sans">Δ DELTA-BOT</span>
+        <span class="mono-label text-[10px] text-[var(--dp-color-meta)] border border-[var(--dp-color-hairline)] px-1.5 py-0.5 rounded-[4px]">TERMINAL</span>
       </a>
 
       <!-- Center Links (Landing Only) -->
-      <div id="nav-landing-links" class="hidden md:flex items-center space-x-6 text-xs font-semibold text-slate-300">
-        <a href="#features" class="hover:text-emerald-400 transition">Features</a>
-        <a href="#markets" class="hover:text-emerald-400 transition">Markets</a>
-        <a href="#pricing" class="hover:text-emerald-400 transition">Pricing</a>
+      <div id="nav-landing-links" class="hidden md:flex items-center space-x-8 text-xs font-mono text-[var(--dp-color-read)]">
+        <a href="#overview" class="hover:text-[var(--dp-color-bright)] transition-colors">Overview</a>
+        <a href="#markets" class="hover:text-[var(--dp-color-bright)] transition-colors">Markets</a>
+        <a href="#architecture" class="hover:text-[var(--dp-color-bright)] transition-colors">Architecture</a>
       </div>
 
-      <!-- Right Action Buttons -->
+      <!-- Right Action Area -->
       <div class="flex items-center space-x-3">
         <!-- Logged Out State -->
         <div id="nav-auth-buttons" class="flex items-center space-x-2">
-          <button type="button" onclick="navTo('login'); switchAuthTab('signin');" class="text-xs font-semibold px-3 py-1.5 rounded-lg text-slate-300 hover:text-white transition cursor-pointer">
+          <button type="button" onclick="navTo('login'); switchAuthTab('signin');" class="btn-secondary text-xs py-1.5 px-3">
             Sign In
           </button>
-          <button type="button" onclick="navTo('login'); switchAuthTab('signup');" class="text-xs font-semibold px-4 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-obsidian-950 font-bold transition shadow-md shadow-emerald-950 cursor-pointer">
+          <button type="button" onclick="navTo('login'); switchAuthTab('signup');" class="btn-primary text-xs py-1.5 px-3.5">
             Get Started
           </button>
         </div>
 
         <!-- Logged In State -->
         <div id="nav-user-buttons" class="hidden flex items-center space-x-3">
-          <button type="button" onclick="navTo('dashboard')" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-obsidian-850 border border-white/10 text-slate-200 hover:text-white transition cursor-pointer flex items-center gap-1.5">
-            <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <button type="button" onclick="navTo('dashboard')" class="btn-secondary text-xs py-1.5 px-3 flex items-center gap-2">
+            <span class="signal-live"></span>
             <span>Dashboard</span>
           </button>
-          <span id="nav-user-email" class="text-xs font-mono text-slate-400 hidden sm:inline">user@domain.com</span>
-          <button type="button" onclick="signOut()" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-rose-950/50 border border-rose-800/60 text-rose-300 hover:bg-rose-900/60 transition cursor-pointer">
+          <span id="nav-user-email" class="mono-meta hidden sm:inline">user@domain.com</span>
+          <button type="button" onclick="signOut()" class="btn-secondary text-xs py-1.5 px-3 text-[var(--dp-color-read)] hover:text-white">
             Sign Out
           </button>
         </div>
@@ -116,172 +309,178 @@
   <!-- ========================================================================= -->
   <div id="page-landing" class="view-page active">
     
-    <!-- Hero Section -->
-    <section class="py-20 md:py-28 max-w-5xl mx-auto px-4 text-center">
-      <div class="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 text-xs font-mono mb-6">
-        <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-        <span>Quantitative Terminal &bull; Automated Delta Exchange Perpetuals</span>
-      </div>
+    <!-- Hero (12-column grid layout with product object) -->
+    <section id="overview" class="py-16 md:py-24 border-b border-[var(--dp-color-hairline)]">
+      <div class="dp-container">
+        
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-[var(--dp-spacing-gap)] items-center">
+          
+          <!-- Left: Opening Statement (Cols 1-7) -->
+          <div class="lg:col-span-7 space-y-6">
+            <div class="inline-flex items-center gap-2 text-xs font-mono text-[var(--dp-color-meta)]">
+              <span class="signal-live"></span>
+              <span>Delta Exchange Quantitative Engine &bull; Non-Custodial</span>
+            </div>
 
-      <h1 class="text-4xl sm:text-6xl font-extrabold tracking-tight text-white leading-tight">
-        Automate Your Trading on <br><span class="text-emerald-400">Delta Exchange</span>
-      </h1>
+            <h1 class="hero-title">
+              Automate your trading on Delta Exchange.
+            </h1>
 
-      <p class="mt-6 text-base sm:text-lg text-slate-300 max-w-2xl mx-auto leading-relaxed">
-        High-probability volatility breakouts across BTC, ETH, SOL, and XRP perpetuals. 
-        Automated trailing stop-loss, risk management, and 100% non-custodial execution.
-      </p>
+            <p class="text-[var(--dp-color-read)] text-base max-w-xl leading-relaxed">
+              Algorithmic volatility breakout execution across BTC, ETH, SOL, and XRP perpetuals. Direct HMAC-SHA256 authenticated API trading with automated trailing stops and strict risk boundaries.
+            </p>
 
-      <div class="mt-8 flex flex-wrap justify-center gap-3">
-        <button type="button" onclick="navTo('login'); switchAuthTab('signup');" class="px-7 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-obsidian-950 font-bold text-sm shadow-xl shadow-emerald-950/60 transition cursor-pointer">
-          Start Live Trading
-        </button>
-        <button type="button" onclick="navTo('login'); switchAuthTab('signin');" class="px-7 py-3 rounded-xl card hover:border-emerald-500/40 text-slate-200 font-semibold text-sm transition cursor-pointer">
-          Client Login
-        </button>
-      </div>
+            <div class="pt-2 flex flex-wrap items-center gap-3">
+              <button type="button" onclick="navTo('login'); switchAuthTab('signup');" class="btn-primary">
+                Launch Terminal
+              </button>
+              <button type="button" onclick="navTo('login'); switchAuthTab('signin');" class="btn-secondary">
+                Client Login
+              </button>
+            </div>
+          </div>
 
-      <!-- Trust Features -->
-      <div class="mt-14 pt-8 border-t border-white/10 grid grid-cols-2 md:grid-cols-4 gap-4 text-left font-mono text-xs">
-        <div class="card p-4 rounded-xl">
-          <span class="text-slate-400 block text-[10px] uppercase">Security</span>
-          <span class="text-emerald-400 font-bold mt-1 block">Non-Custodial</span>
-          <span class="text-slate-400 text-[11px]">Funds stay on Delta</span>
+          <!-- Right: Narrower Product Object (Cols 8-12) -->
+          <div class="lg:col-span-5">
+            <div class="dp-card-gradient p-5 space-y-4">
+              <div class="flex items-center justify-between pb-3 border-b border-[var(--dp-color-hairline)]">
+                <span class="mono-label">Execution Terminal</span>
+                <div class="flex items-center gap-1.5 text-xs font-mono text-[var(--dp-color-meta)]">
+                  <span class="signal-live"></span>
+                  <span>Direct API</span>
+                </div>
+              </div>
+
+              <!-- Compact Product View Table -->
+              <div class="space-y-2.5 font-mono text-xs">
+                <div class="flex items-center justify-between text-[var(--dp-color-read)]">
+                  <span class="text-[var(--dp-color-meta)]">Pair</span>
+                  <span>BTC-PERP / ETH-PERP</span>
+                </div>
+                <div class="flex items-center justify-between text-[var(--dp-color-read)]">
+                  <span class="text-[var(--dp-color-meta)]">Strategy</span>
+                  <span>Volatility Breakout (1m)</span>
+                </div>
+                <div class="flex items-center justify-between text-[var(--dp-color-read)]">
+                  <span class="text-[var(--dp-color-meta)]">Protection</span>
+                  <span>Trailing ATR Stop-Loss</span>
+                </div>
+                <div class="flex items-center justify-between text-[var(--dp-color-read)]">
+                  <span class="text-[var(--dp-color-meta)]">Custody</span>
+                  <span class="text-white">100% Non-Custodial</span>
+                </div>
+                <div class="flex items-center justify-between text-[var(--dp-color-read)]">
+                  <span class="text-[var(--dp-color-meta)]">Latency</span>
+                  <span class="text-[var(--dp-color-bright)]">&lt; 15 ms</span>
+                </div>
+              </div>
+
+              <div class="pt-3 border-t border-[var(--dp-color-hairline)] flex items-center justify-between text-[11px] font-mono text-[var(--dp-color-meta)]">
+                <span>Status: Ready for deployment</span>
+                <span class="text-[var(--dp-color-bright)]">v2.4.0</span>
+              </div>
+            </div>
+          </div>
+
         </div>
-        <div class="card p-4 rounded-xl">
-          <span class="text-slate-400 block text-[10px] uppercase">Execution</span>
-          <span class="text-emerald-400 font-bold mt-1 block">Direct API</span>
-          <span class="text-slate-400 text-[11px]">HMAC-SHA256 authenticated</span>
+
+        <!-- Ruled Row of Facts Anchoring Bottom of Hero -->
+        <div class="mt-16 pt-8 border-t border-[var(--dp-color-hairline)] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div class="space-y-1">
+            <span class="mono-label">Security</span>
+            <div class="text-sm font-medium text-[var(--dp-color-bright)]">Non-Custodial API</div>
+            <p class="text-xs text-[var(--dp-color-meta)]">API keys hold trade-only permissions. Capital remains securely on Delta Exchange.</p>
+          </div>
+          <div class="space-y-1">
+            <span class="mono-label">Execution</span>
+            <div class="text-sm font-medium text-[var(--dp-color-bright)]">Sub-Second Direct API</div>
+            <p class="text-xs text-[var(--dp-color-meta)]">Direct WebSocket and REST connection without broker intermediaries.</p>
+          </div>
+          <div class="space-y-1">
+            <span class="mono-label">Protection</span>
+            <div class="text-sm font-medium text-[var(--dp-color-bright)]">Dynamic Trailing Stop</div>
+            <p class="text-xs text-[var(--dp-color-meta)]">ATR-based stop brackets ratchet upward to safeguard accrued gains.</p>
+          </div>
+          <div class="space-y-1">
+            <span class="mono-label">Risk Limits</span>
+            <div class="text-sm font-medium text-[var(--dp-color-bright)]">Circuit Breaker</div>
+            <p class="text-xs text-[var(--dp-color-meta)]">Automatic daily drawdown shutdown halts order generation on adverse volatility.</p>
+          </div>
         </div>
-        <div class="card p-4 rounded-xl">
-          <span class="text-slate-400 block text-[10px] uppercase">Protection</span>
-          <span class="text-emerald-400 font-bold mt-1 block">Trailing ATR Stop</span>
-          <span class="text-slate-400 text-[11px]">Locks profit automatically</span>
-        </div>
-        <div class="card p-4 rounded-xl">
-          <span class="text-slate-400 block text-[10px] uppercase">Safety</span>
-          <span class="text-emerald-400 font-bold mt-1 block">Circuit Breaker</span>
-          <span class="text-slate-400 text-[11px]">Daily max drawdown limit</span>
-        </div>
+
       </div>
     </section>
 
-    <!-- Live Market Tickers -->
-    <section id="markets" class="py-12 bg-obsidian-900 border-y border-white/5">
-      <div class="max-w-6xl mx-auto px-4">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-xs font-mono font-bold uppercase text-slate-300">Live Delta Exchange Markets</h2>
-          <span class="text-[11px] font-mono text-emerald-400">Live Feed</span>
+    <!-- Live Delta Markets Grid -->
+    <section id="markets" class="py-14 border-b border-[var(--dp-color-hairline)]">
+      <div class="dp-container">
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h2 class="section-title">Delta Exchange Markets</h2>
+            <p class="text-xs text-[var(--dp-color-meta)] mt-0.5">Live perpetual contract quotes via WebSocket</p>
+          </div>
+          <div class="flex items-center gap-2 text-xs font-mono text-[var(--dp-color-meta)]">
+            <span class="signal-live"></span>
+            <span>Live Feed</span>
+          </div>
         </div>
-        <div id="landing-tickers" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+        <div id="landing-tickers" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[var(--dp-spacing-gap)]">
           <!-- Populated by JS -->
-          <div class="card p-4 rounded-xl animate-pulse text-xs font-mono text-slate-400">Loading BTCUSDT...</div>
-          <div class="card p-4 rounded-xl animate-pulse text-xs font-mono text-slate-400">Loading ETHUSDT...</div>
-          <div class="card p-4 rounded-xl animate-pulse text-xs font-mono text-slate-400">Loading SOLUSDT...</div>
-          <div class="card p-4 rounded-xl animate-pulse text-xs font-mono text-slate-400">Loading XRPUSDT...</div>
+          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading BTC/USDT...</div>
+          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading ETH/USDT...</div>
+          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading SOL/USDT...</div>
+          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading XRP/USDT...</div>
         </div>
       </div>
     </section>
 
-    <!-- 3 Simple Features -->
-    <section id="features" class="py-20 max-w-5xl mx-auto px-4">
-      <div class="text-center mb-12">
-        <h2 class="text-2xl font-bold text-white">How It Works</h2>
-        <p class="text-xs text-slate-400 mt-1">Simple 3-step automated quantitative trading</p>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div class="card p-6 rounded-2xl space-y-3">
-          <div class="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">1</div>
-          <h3 class="font-bold text-white text-base">Connect Your API Keys</h3>
-          <p class="text-xs text-slate-300 leading-relaxed">
-            Generate Trading-only API keys on Delta Exchange. Your funds stay safe in your account—withdrawals are never permitted.
-          </p>
+    <!-- Architecture & Workflow -->
+    <section id="architecture" class="py-16 border-b border-[var(--dp-color-hairline)]">
+      <div class="dp-container">
+        <div class="max-w-xl mb-10">
+          <span class="mono-label">Workflow</span>
+          <h2 class="section-title mt-1">Direct Three-Stage Architecture</h2>
+          <p class="text-xs text-[var(--dp-color-meta)] mt-1">Deterministic automated execution without manual intervention.</p>
         </div>
 
-        <div class="card p-6 rounded-2xl space-y-3">
-          <div class="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">2</div>
-          <h3 class="font-bold text-white text-base">Automated Breakouts</h3>
-          <p class="text-xs text-slate-300 leading-relaxed">
-            The bot monitors 1m candles for dynamic volatility expansion (ADX &ge; 20). Orders are placed automatically with immediate Stop-Loss & Take-Profit brackets.
-          </p>
-        </div>
-
-        <div class="card p-6 rounded-2xl space-y-3">
-          <div class="h-10 w-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">3</div>
-          <h3 class="font-bold text-white text-base">Capital Protection</h3>
-          <p class="text-xs text-slate-300 leading-relaxed">
-            ATR trailing stops protect accumulated gains. If market conditions cross your daily drawdown limit (e.g. 4%), the bot halts automatically.
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <!-- Pricing Section -->
-    <section id="pricing" class="py-20 bg-obsidian-900 border-t border-white/5">
-      <div class="max-w-4xl mx-auto px-4 text-center">
-        <h2 class="text-2xl font-bold text-white">Plans & Pricing</h2>
-        <p class="text-xs text-slate-400 mt-1">Start free, upgrade as your trading scales</p>
-
-        <div class="mt-10 grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
-          <div class="card p-6 rounded-2xl flex flex-col justify-between">
-            <div>
-              <div class="text-xs font-mono font-bold text-slate-400 uppercase">Starter</div>
-              <div class="text-3xl font-extrabold text-white mt-2">$0 <span class="text-xs font-normal text-slate-400">/ trial</span></div>
-              <ul class="mt-4 space-y-2 text-xs text-slate-300 border-t border-white/5 pt-4">
-                <li>✓ 1 Active Coin (BTC)</li>
-                <li>✓ Up to 5x Leverage</li>
-                <li>✓ Automated Trailing Stops</li>
-              </ul>
-            </div>
-            <button type="button" onclick="navTo('login'); switchAuthTab('signup');" class="mt-6 w-full py-2.5 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 border border-white/10 text-xs font-semibold text-white transition cursor-pointer">
-              Deploy Free
-            </button>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-[var(--dp-spacing-gap)]">
+          <div class="dp-panel p-6 space-y-3">
+            <span class="mono-label">Stage 01</span>
+            <h3 class="text-sm font-medium text-[var(--dp-color-bright)]">Connect Delta API</h3>
+            <p class="text-xs text-[var(--dp-color-read)] leading-relaxed">
+              Generate trade-only API credentials inside your Delta Exchange console. Enter keys locally into the client vault.
+            </p>
           </div>
-
-          <div class="card p-6 rounded-2xl flex flex-col justify-between border-2 border-emerald-500/60 bg-emerald-950/20 relative shadow-xl shadow-emerald-950/40">
-            <span class="absolute -top-3 left-1/2 -translate-x-1/2 px-2.5 py-0.5 rounded-full bg-emerald-500 text-obsidian-950 text-[10px] font-bold font-mono uppercase">Popular</span>
-            <div>
-              <div class="text-xs font-mono font-bold text-emerald-400 uppercase">Pro Quant</div>
-              <div class="text-3xl font-extrabold text-white mt-2">$99 <span class="text-xs font-normal text-slate-400">/ month</span></div>
-              <ul class="mt-4 space-y-2 text-xs text-slate-200 border-t border-white/10 pt-4">
-                <li>✓ All 4 Coins (BTC, ETH, SOL, XRP)</li>
-                <li>✓ Up to 20x Leverage</li>
-                <li>✓ Dynamic Multi-Bracket Trailing</li>
-                <li>✓ 24/7 Cloud Execution</li>
-              </ul>
-            </div>
-            <button type="button" onclick="navTo('login'); switchAuthTab('signup');" class="mt-6 w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 font-bold text-xs text-obsidian-950 transition cursor-pointer shadow-md shadow-emerald-950">
-              Get Pro Desk
-            </button>
+          <div class="dp-panel p-6 space-y-3">
+            <span class="mono-label">Stage 02</span>
+            <h3 class="text-sm font-medium text-[var(--dp-color-bright)]">Breakout Detection</h3>
+            <p class="text-xs text-[var(--dp-color-read)] leading-relaxed">
+              Real-time candle polling evaluates momentum thresholds. When conditions trigger, bracket stop orders are placed instantly.
+            </p>
           </div>
-
-          <div class="card p-6 rounded-2xl flex flex-col justify-between">
-            <div>
-              <div class="text-xs font-mono font-bold text-slate-400 uppercase">Institutional</div>
-              <div class="text-3xl font-extrabold text-white mt-2">$299 <span class="text-xs font-normal text-slate-400">/ month</span></div>
-              <ul class="mt-4 space-y-2 text-xs text-slate-300 border-t border-white/5 pt-4">
-                <li>✓ Custom Pairs & Webhooks</li>
-                <li>✓ Dedicated Execution Instance</li>
-                <li>✓ Priority 1-on-1 Support</li>
-              </ul>
-            </div>
-            <button type="button" onclick="navTo('login'); switchAuthTab('signup');" class="mt-6 w-full py-2.5 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 border border-white/10 text-xs font-semibold text-white transition cursor-pointer">
-              Deploy VIP Desk
-            </button>
+          <div class="dp-panel p-6 space-y-3">
+            <span class="mono-label">Stage 03</span>
+            <h3 class="text-sm font-medium text-[var(--dp-color-bright)]">Disciplined Risk Exit</h3>
+            <p class="text-xs text-[var(--dp-color-read)] leading-relaxed">
+              ATR trailing stops follow profitable expansions. Daily drawdown triggers halt order generation to conserve capital.
+            </p>
           </div>
         </div>
       </div>
     </section>
 
     <!-- Footer -->
-    <footer class="py-10 bg-obsidian-950 border-t border-white/5 text-xs text-slate-400 text-center">
-      <div class="max-w-5xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div>
-          <span class="font-bold text-white">DELTA-BOT</span> &bull; Quantitative Terminal
+    <footer class="py-10 text-xs text-[var(--dp-color-meta)]">
+      <div class="dp-container flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div class="flex items-center space-x-2">
+          <span class="text-white font-medium">Δ DELTA-BOT</span>
+          <span>&mdash; Non-Custodial Algorithmic Terminal</span>
         </div>
-        <div>
-          Non-custodial trading engine for Delta Exchange.
+        <div class="flex items-center space-x-6 font-mono text-[11px]">
+          <a href="https://www.delta.exchange" target="_blank" rel="noopener" class="hover:text-white transition">Delta Exchange</a>
+          <a href="#overview" class="hover:text-white transition">Documentation</a>
+          <span>2026</span>
         </div>
       </div>
     </footer>
@@ -294,62 +493,60 @@
   <!-- ========================================================================= -->
   <div id="page-login" class="view-page">
     <div class="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4">
-      <div class="max-w-md w-full card rounded-2xl p-6 sm:p-8 space-y-5 border border-white/10 shadow-2xl">
+      <div class="dp-panel p-6 sm:p-8 max-w-md w-full space-y-6">
         
-        <div class="text-center space-y-1">
-          <div class="h-10 w-10 mx-auto rounded-xl bg-emerald-500 flex items-center justify-center text-obsidian-950 font-bold text-xl mb-2">
-            Δ
-          </div>
-          <h2 class="text-xl font-bold text-white">Client Portal</h2>
-          <p class="text-xs text-slate-400">Sign in to manage your Delta Exchange trading desk</p>
+        <div>
+          <span class="mono-label">Access Portal</span>
+          <h2 class="text-xl font-medium text-[var(--dp-color-bright)] mt-1">Delta-Bot Terminal</h2>
+          <p class="text-xs text-[var(--dp-color-meta)] mt-1">Authenticate to access your execution desk</p>
         </div>
 
-        <!-- Auth Tabs -->
-        <div class="flex rounded-xl bg-obsidian-950 p-1 border border-white/10 font-mono text-xs">
-          <button type="button" id="auth-btn-tab-signin" onclick="switchAuthTab('signin')" class="flex-1 py-1.5 rounded-lg font-bold bg-emerald-500 text-obsidian-950 transition cursor-pointer">
+        <!-- Segmented Tab Switch -->
+        <div class="grid grid-cols-2 p-1 bg-[var(--dp-color-ground)] border border-[var(--dp-color-hairline)] rounded-[var(--dp-radius-pill)] font-mono text-xs">
+          <button type="button" id="auth-btn-tab-signin" onclick="switchAuthTab('signin')" class="py-1.5 rounded-[var(--dp-radius-pill)] font-medium bg-[var(--dp-color-bright)] text-[var(--dp-color-inverse-ink)] transition-colors">
             Sign In
           </button>
-          <button type="button" id="auth-btn-tab-signup" onclick="switchAuthTab('signup')" class="flex-1 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition cursor-pointer">
+          <button type="button" id="auth-btn-tab-signup" onclick="switchAuthTab('signup')" class="py-1.5 rounded-[var(--dp-radius-pill)] font-medium text-[var(--dp-color-meta)] hover:text-white transition-colors">
             Create Account
           </button>
         </div>
 
-        <!-- Auth Error / Status Feedback -->
-        <div id="auth-status-box" class="hidden p-3 rounded-xl text-xs font-mono"></div>
+        <!-- Auth Status Box -->
+        <div id="auth-status-box" class="hidden p-3 rounded-[var(--dp-radius-panel)] text-xs font-mono border border-[var(--dp-color-hairline)]"></div>
 
-        <!-- Form: Sign In -->
+        <!-- Sign In Form -->
         <div id="auth-form-signin" class="space-y-4">
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Email</label>
-            <input type="email" id="input-login-email" placeholder="you@domain.com" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500" onkeydown="if(event.key === 'Enter') handleSignIn()">
+            <label class="block mono-label mb-1.5">Email Address</label>
+            <input type="email" id="input-login-email" placeholder="trader@domain.com" class="dp-input" onkeydown="if(event.key === 'Enter') handleSignIn()">
           </div>
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Password</label>
-            <input type="password" id="input-login-password" placeholder="••••••••••••" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500" onkeydown="if(event.key === 'Enter') handleSignIn()">
+            <label class="block mono-label mb-1.5">Password</label>
+            <input type="password" id="input-login-password" placeholder="••••••••••••" class="dp-input" onkeydown="if(event.key === 'Enter') handleSignIn()">
           </div>
-          <button type="button" id="btn-submit-signin" onclick="handleSignIn()" class="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 font-bold text-xs text-obsidian-950 transition cursor-pointer shadow-md shadow-emerald-950">
-            Sign In to Dashboard
+          <button type="button" id="btn-submit-signin" onclick="handleSignIn()" class="btn-primary w-full py-2.5">
+            Sign In to Terminal
           </button>
         </div>
 
-        <!-- Form: Sign Up -->
+        <!-- Sign Up Form -->
         <div id="auth-form-signup" class="space-y-4 hidden">
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Email</label>
-            <input type="email" id="input-signup-email" placeholder="you@domain.com" class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500" onkeydown="if(event.key === 'Enter') handleSignUp()">
+            <label class="block mono-label mb-1.5">Email Address</label>
+            <input type="email" id="input-signup-email" placeholder="trader@domain.com" class="dp-input" onkeydown="if(event.key === 'Enter') handleSignUp()">
           </div>
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Password (Min 6 Characters)</label>
-            <input type="password" id="input-signup-password" placeholder="Create strong password..." class="w-full bg-obsidian-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500" onkeydown="if(event.key === 'Enter') handleSignUp()">
+            <label class="block mono-label mb-1.5">Password (Min 6 Characters)</label>
+            <input type="password" id="input-signup-password" placeholder="Create password..." class="dp-input" onkeydown="if(event.key === 'Enter') handleSignUp()">
           </div>
-          <button type="button" id="btn-submit-signup" onclick="handleSignUp()" class="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 font-bold text-xs text-obsidian-950 transition cursor-pointer shadow-md shadow-emerald-950">
-            Create Trading Desk
+          <button type="button" id="btn-submit-signup" onclick="handleSignUp()" class="btn-primary w-full py-2.5">
+            Create Account
           </button>
         </div>
 
-        <div class="text-center pt-2 border-t border-white/5">
-          <a href="#landing" onclick="navTo('landing'); return false;" class="text-xs text-slate-400 hover:text-white transition">
-            ← Back to Home
+        <div class="pt-2 border-t border-[var(--dp-color-hairline)] text-center">
+          <a href="#landing" onclick="navTo('landing'); return false;" class="text-xs text-[var(--dp-color-meta)] hover:text-white transition">
+            &larr; Return to Overview
           </a>
         </div>
 
@@ -359,198 +556,171 @@
 
 
   <!-- ========================================================================= -->
-  <!-- 3. SIMPLE DASHBOARD -->
+  <!-- 3. SIMPLE MODERN DARK DASHBOARD -->
   <!-- ========================================================================= -->
   <div id="page-dashboard" class="view-page">
     
-    <!-- Dashboard Top Bar -->
-    <div class="bg-obsidian-900 border-b border-white/5 px-4 sm:px-6 lg:px-8 py-3.5">
-      <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+    <!-- Top Action Bar -->
+    <div class="border-b border-[var(--dp-color-hairline)] bg-[var(--dp-color-ground)] py-3">
+      <div class="dp-container flex flex-wrap items-center justify-between gap-4">
         
-        <!-- Left: Status Indicator -->
-        <div class="flex items-center space-x-3">
-          <div class="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-500/40 text-emerald-300 text-xs font-mono font-semibold">
-            <span class="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>LIVE TRADING</span>
+        <!-- Status Label -->
+        <div class="flex items-center space-x-3 text-xs font-mono">
+          <div class="flex items-center space-x-2 text-[var(--dp-color-bright)]">
+            <span id="dash-engine-signal" class="signal-live"></span>
+            <span id="dash-status-text" class="font-medium">Live Terminal</span>
           </div>
-          <button type="button" id="btn-api-badge" onclick="openSettingsModal()" class="text-xs px-2.5 py-1 rounded-lg font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 border border-amber-500/40 bg-amber-950/50 text-amber-300">
-            <span class="h-1.5 w-1.5 rounded-full bg-amber-400"></span>
-            <span id="api-badge-text">Keys Needed</span>
-          </button>
-        </div>
-
-        <!-- Center: Quick Metric Pill -->
-        <div class="flex items-center space-x-6 text-xs font-mono">
-          <div>
-            <span class="text-[10px] text-slate-400 block uppercase">Equity</span>
-            <span id="dash-equity" class="text-emerald-400 font-bold text-sm">$10,000.00</span>
-          </div>
-          <div>
-            <span class="text-[10px] text-slate-400 block uppercase">Unrealized PnL</span>
-            <span id="dash-upnl" class="text-emerald-400 font-bold text-sm">+$0.00</span>
-          </div>
-          <div>
-            <span class="text-[10px] text-slate-400 block uppercase">Realized PnL</span>
-            <span id="dash-rpnl" class="text-slate-200 font-bold text-sm">+$0.00</span>
+          <span class="text-[var(--dp-color-hairline-2)]">|</span>
+          <div class="flex items-center space-x-1.5 text-[var(--dp-color-meta)]">
+            <span id="api-status-signal" class="signal-muted"></span>
+            <span id="api-badge-text">Keys Configured</span>
           </div>
         </div>
 
-        <!-- Right: Controls -->
-        <div class="flex items-center space-x-2">
-          <!-- Start / Pause Toggle -->
-          <button type="button" id="btn-toggle-engine" onclick="toggleEngine()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase font-mono transition cursor-pointer flex items-center gap-1.5">
-            <span class="h-2 w-2 rounded-full bg-white animate-pulse"></span>
-            <span id="btn-engine-label">RUNNING</span>
+        <!-- Controls: Simplified, minimal buttons -->
+        <div class="flex items-center space-x-2.5">
+          <button type="button" id="btn-toggle-engine" onclick="toggleEngine()" class="btn-secondary text-xs py-1.5 px-3">
+            <span id="btn-engine-label">Pause Engine</span>
           </button>
 
-          <!-- Emergency Kill Switch -->
-          <button type="button" onclick="emergencyFlatten()" class="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs uppercase font-mono transition cursor-pointer flex items-center gap-1" title="Close all positions & cancel all orders immediately">
-            <span>KILL SWITCH</span>
+          <button type="button" onclick="openSettingsModal()" class="btn-secondary text-xs py-1.5 px-3">
+            API & Risk
           </button>
 
-          <!-- Settings Button -->
-          <button type="button" onclick="openSettingsModal()" class="px-3 py-1.5 rounded-lg bg-obsidian-850 hover:bg-obsidian-800 border border-white/10 text-xs font-semibold text-slate-200 transition cursor-pointer flex items-center gap-1">
-            <span>⚙ Keys & Risk</span>
+          <button type="button" onclick="emergencyFlatten()" class="btn-danger text-xs py-1.5 px-3" title="Close all positions & cancel all orders">
+            Kill Switch
           </button>
         </div>
 
       </div>
     </div>
 
-    <!-- Main Dashboard Body -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+    <!-- Main Container -->
+    <main class="dp-container py-8 space-y-6">
 
-      <!-- Action Required Banner: API Keys Missing -->
-      <div id="banner-api-needed" class="hidden card rounded-2xl p-4 border border-amber-500/40 bg-amber-950/20 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div class="flex items-center space-x-3">
-          <span class="text-2xl">🔑</span>
-          <div>
-            <h3 class="font-bold text-sm text-white">Connect Your Delta Exchange Account</h3>
-            <p class="text-xs text-slate-300 mt-0.5">Enter your Delta API Key & Secret to allow the bot to manage breakout orders. Funds stay 100% on Delta.</p>
-          </div>
+      <!-- Action Required Notice: Missing API Keys -->
+      <div id="banner-api-needed" class="hidden dp-panel p-4 border-l-2 border-l-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div class="space-y-0.5">
+          <div class="text-xs font-medium text-white">Delta Exchange API Credentials Required</div>
+          <p class="text-xs text-[var(--dp-color-meta)]">Provide trading-only API credentials to enable automated execution on Delta Exchange.</p>
         </div>
-        <button type="button" onclick="openSettingsModal()" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-obsidian-950 font-bold text-xs transition cursor-pointer shrink-0">
-          Enter API Keys
+        <button type="button" onclick="openSettingsModal()" class="btn-primary text-xs py-1.5 px-3 shrink-0">
+          Configure Keys
         </button>
       </div>
 
-      <!-- 1. Stats Summary Bar -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div class="card p-4 rounded-xl">
-          <span class="text-[10px] text-slate-400 font-mono uppercase block">Total Equity</span>
-          <span id="card-equity" class="text-xl font-bold font-mono text-white mt-1 block">$10,000.00</span>
-          <span class="text-[11px] text-slate-400">Delta USD Balance</span>
+      <!-- Ruled Summary Row: 4 Essential Financial Metrics -->
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-[var(--dp-spacing-gap)]">
+        <div class="dp-panel p-4">
+          <span class="mono-label block">Account Equity</span>
+          <span id="card-equity" class="text-xl font-mono text-white mt-1 block font-normal">$10,000.00</span>
+          <span class="mono-meta text-[11px]">Delta USD Balance</span>
         </div>
-        <div class="card p-4 rounded-xl">
-          <span class="text-[10px] text-slate-400 font-mono uppercase block">Unrealized PnL</span>
-          <span id="card-upnl" class="text-xl font-bold font-mono text-emerald-400 mt-1 block">+$0.00</span>
-          <span class="text-[11px] text-slate-400">Open positions</span>
+        <div class="dp-panel p-4">
+          <span class="mono-label block">Unrealized P&L</span>
+          <span id="card-upnl" class="text-xl font-mono text-white mt-1 block font-normal">+$0.00</span>
+          <span class="mono-meta text-[11px]">Open contract exposure</span>
         </div>
-        <div class="card p-4 rounded-xl">
-          <span class="text-[10px] text-slate-400 font-mono uppercase block">Win Rate</span>
-          <span id="card-winrate" class="text-xl font-bold font-mono text-slate-200 mt-1 block">0.0%</span>
-          <span id="card-trades" class="text-[11px] text-slate-400">0 trades today</span>
+        <div class="dp-panel p-4">
+          <span class="mono-label block">Win Rate</span>
+          <span id="card-winrate" class="text-xl font-mono text-white mt-1 block font-normal">0.0%</span>
+          <span id="card-trades" class="mono-meta text-[11px]">0W / 0 total trades</span>
         </div>
-        <div class="card p-4 rounded-xl">
-          <span class="text-[10px] text-slate-400 font-mono uppercase block">Max Drawdown</span>
-          <span id="card-maxdd" class="text-xl font-bold font-mono text-rose-400 mt-1 block">0.00%</span>
-          <span class="text-[11px] text-slate-400">Limit: 4.0%</span>
+        <div class="dp-panel p-4">
+          <span class="mono-label block">Max Drawdown</span>
+          <span id="card-maxdd" class="text-xl font-mono text-white mt-1 block font-normal">0.00%</span>
+          <span class="mono-meta text-[11px]">Circuit Limit: 4.0%</span>
         </div>
       </div>
 
-      <!-- 2. Target Markets (BTC, ETH, SOL, XRP) -->
+      <!-- Perpetual Markets (Clean & Simple: NO ADX/ATR indicator noise, NO unwanted per-symbol buttons) -->
       <div>
         <div class="flex items-center justify-between mb-3">
-          <h3 class="text-xs font-mono font-bold text-slate-300 uppercase">Perpetual Markets & Breakout Watch</h3>
-          <span class="text-[11px] font-mono text-slate-400">ADX Trend & ATR Volatility</span>
+          <span class="mono-label">Active Perpetual Markets</span>
+          <span class="mono-meta">Live Delta Quotes</span>
         </div>
-        <div id="dash-market-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div id="dash-market-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[var(--dp-spacing-gap)]">
           <!-- Populated by JS -->
         </div>
       </div>
 
-      <!-- 3. Active Positions & Resting Orders -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Positions & Resting Orders -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-[var(--dp-spacing-gap)]">
         
-        <!-- Positions -->
-        <div class="card rounded-2xl overflow-hidden flex flex-col">
-          <div class="px-4 py-3 border-b border-white/5 bg-obsidian-900/60 flex items-center justify-between">
+        <!-- Active Positions Panel -->
+        <div class="dp-panel overflow-hidden">
+          <div class="px-4 py-3 border-b border-[var(--dp-color-hairline)] flex items-center justify-between">
             <div class="flex items-center space-x-2">
-              <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
-              <h4 class="font-bold text-xs text-white uppercase">Active Positions</h4>
-              <span id="badge-positions-count" class="text-[10px] font-mono px-2 py-0.5 rounded bg-obsidian-850 text-slate-300">0</span>
+              <span class="mono-label">Active Positions</span>
+              <span id="badge-positions-count" class="mono-meta text-[10px] px-1.5 py-0.5 rounded border border-[var(--dp-color-hairline)]">0</span>
             </div>
-            <span class="text-[11px] font-mono text-slate-400">Trailing Stop Protected</span>
+            <span class="mono-meta text-[11px]">Trailing Stop Active</span>
           </div>
 
           <div class="p-3 overflow-x-auto min-h-[140px]">
             <table class="w-full text-left text-xs font-mono">
-              <thead class="text-[10px] text-slate-400 uppercase border-b border-white/5">
+              <thead class="text-[11px] text-[var(--dp-color-meta)] border-b border-[var(--dp-color-hairline)]">
                 <tr>
-                  <th class="pb-2">Symbol</th>
-                  <th class="pb-2">Side</th>
-                  <th class="pb-2">Size</th>
-                  <th class="pb-2">Entry</th>
-                  <th class="pb-2">Mark</th>
-                  <th class="pb-2">PnL</th>
-                  <th class="pb-2 text-right">Action</th>
+                  <th class="pb-2 font-normal">Symbol</th>
+                  <th class="pb-2 font-normal">Side</th>
+                  <th class="pb-2 font-normal">Size</th>
+                  <th class="pb-2 font-normal">Entry</th>
+                  <th class="pb-2 font-normal">Mark</th>
+                  <th class="pb-2 font-normal">P&L</th>
+                  <th class="pb-2 font-normal text-right">Action</th>
                 </tr>
               </thead>
-              <tbody id="dash-positions-body" class="divide-y border-white/5">
-                <!-- Rendered dynamically -->
+              <tbody id="dash-positions-body">
+                <!-- Populated dynamically -->
               </tbody>
             </table>
-            <div id="msg-no-positions" class="text-center py-8 text-slate-500 font-mono text-xs">
-              No open positions. Bot is scanning for momentum breakouts.
+            <div id="msg-no-positions" class="text-center py-8 text-[var(--dp-color-meta)] font-mono text-xs">
+              No open positions. Monitoring market breakouts.
             </div>
           </div>
         </div>
 
-        <!-- Orders -->
-        <div class="card rounded-2xl overflow-hidden flex flex-col">
-          <div class="px-4 py-3 border-b border-white/5 bg-obsidian-900/60 flex items-center justify-between">
+        <!-- Resting Orders Panel -->
+        <div class="dp-panel overflow-hidden">
+          <div class="px-4 py-3 border-b border-[var(--dp-color-hairline)] flex items-center justify-between">
             <div class="flex items-center space-x-2">
-              <span class="h-2 w-2 rounded-full bg-cyan-400"></span>
-              <h4 class="font-bold text-xs text-white uppercase">Resting Breakout Orders</h4>
-              <span id="badge-orders-count" class="text-[10px] font-mono px-2 py-0.5 rounded bg-obsidian-850 text-slate-300">0</span>
+              <span class="mono-label">Resting Orders</span>
+              <span id="badge-orders-count" class="mono-meta text-[10px] px-1.5 py-0.5 rounded border border-[var(--dp-color-hairline)]">0</span>
             </div>
-            <span class="text-[11px] font-mono text-slate-400">Stop-Trigger Orders</span>
+            <span class="mono-meta text-[11px]">Trigger Brackets</span>
           </div>
 
           <div class="p-3 overflow-x-auto min-h-[140px]">
             <table class="w-full text-left text-xs font-mono">
-              <thead class="text-[10px] text-slate-400 uppercase border-b border-white/5">
+              <thead class="text-[11px] text-[var(--dp-color-meta)] border-b border-[var(--dp-color-hairline)]">
                 <tr>
-                  <th class="pb-2">Symbol</th>
-                  <th class="pb-2">Side</th>
-                  <th class="pb-2">Trigger Price</th>
-                  <th class="pb-2">TTL</th>
-                  <th class="pb-2 text-right">Action</th>
+                  <th class="pb-2 font-normal">Symbol</th>
+                  <th class="pb-2 font-normal">Side</th>
+                  <th class="pb-2 font-normal">Trigger Price</th>
+                  <th class="pb-2 font-normal">TTL</th>
+                  <th class="pb-2 font-normal text-right">Action</th>
                 </tr>
               </thead>
-              <tbody id="dash-orders-body" class="divide-y border-white/5">
-                <!-- Rendered dynamically -->
+              <tbody id="dash-orders-body">
+                <!-- Populated dynamically -->
               </tbody>
             </table>
-            <div id="msg-no-orders" class="text-center py-8 text-slate-500 font-mono text-xs">
-              No pending orders.
+            <div id="msg-no-orders" class="text-center py-8 text-[var(--dp-color-meta)] font-mono text-xs">
+              No resting orders.
             </div>
           </div>
         </div>
 
       </div>
 
-      <!-- 4. Execution Activity Feed -->
-      <div class="card rounded-2xl overflow-hidden">
-        <div class="px-4 py-3 border-b border-white/5 bg-obsidian-900/60 flex items-center justify-between">
-          <div class="flex items-center space-x-2">
-            <span class="h-2 w-2 rounded-full bg-brand-400"></span>
-            <h4 class="font-bold text-xs text-white uppercase">Strategy Execution Feed</h4>
-          </div>
-          <span class="text-[10px] font-mono text-slate-400">Live Activity</span>
+      <!-- Execution Activity Feed -->
+      <div class="dp-panel overflow-hidden">
+        <div class="px-4 py-3 border-b border-[var(--dp-color-hairline)] flex items-center justify-between">
+          <span class="mono-label">Execution Feed</span>
+          <span class="mono-meta text-[11px]">Real-time telemetry</span>
         </div>
-        <div id="dash-logs-feed" class="p-4 h-40 overflow-y-auto font-mono text-xs space-y-1 bg-obsidian-950">
-          <div class="text-slate-500">Connecting to execution stream...</div>
+        <div id="dash-logs-feed" class="p-4 h-36 overflow-y-auto font-mono text-xs space-y-1 bg-[var(--dp-color-ground)]">
+          <div class="text-[var(--dp-color-meta)]">Connected to execution stream.</div>
         </div>
       </div>
 
@@ -561,37 +731,32 @@
   <!-- ========================================================================= -->
   <!-- SETTINGS MODAL (DELTA API KEYS & RISK) -->
   <!-- ========================================================================= -->
-  <div id="modal-settings" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
-    <div class="card rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-white/10">
+  <div id="modal-settings" class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center hidden p-4">
+    <div class="dp-panel p-6 max-w-md w-full space-y-5 border border-[var(--dp-color-hairline-2)] shadow-2xl">
       
-      <div class="flex items-center justify-between border-b border-white/10 pb-3">
-        <div class="flex items-center space-x-2">
-          <span class="text-emerald-400 font-bold text-lg">⚙</span>
-          <h3 class="font-bold text-white text-sm">Trading Desk Settings</h3>
+      <div class="flex items-center justify-between border-b border-[var(--dp-color-hairline)] pb-3">
+        <div>
+          <span class="mono-label">Configuration</span>
+          <h3 class="text-sm font-medium text-white mt-0.5">API & Risk Governance</h3>
         </div>
-        <button type="button" onclick="closeSettingsModal()" class="text-slate-400 hover:text-white text-lg cursor-pointer">&times;</button>
+        <button type="button" onclick="closeSettingsModal()" class="text-[var(--dp-color-meta)] hover:text-white text-lg cursor-pointer">&times;</button>
       </div>
 
-      <!-- Delta Exchange API Keys -->
-      <div class="p-3.5 rounded-xl bg-obsidian-950 border border-emerald-500/30 space-y-3">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold font-mono text-emerald-400 uppercase">Delta API Credentials</span>
-          <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">Non-Custodial</span>
-        </div>
-        
+      <!-- API Keys -->
+      <div class="space-y-3">
         <div>
-          <label class="block text-[11px] font-mono text-slate-300 uppercase mb-1">Delta API Key</label>
-          <input type="text" id="cfg-api-key" placeholder="Enter API Key..." class="w-full bg-obsidian-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 font-mono">
+          <label class="block mono-label mb-1">Delta API Key</label>
+          <input type="text" id="cfg-api-key" placeholder="Enter API Key..." class="dp-input">
         </div>
 
         <div>
-          <label class="block text-[11px] font-mono text-slate-300 uppercase mb-1">Delta API Secret</label>
-          <input type="password" id="cfg-api-secret" placeholder="Enter API Secret..." class="w-full bg-obsidian-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 font-mono">
+          <label class="block mono-label mb-1">Delta API Secret</label>
+          <input type="password" id="cfg-api-secret" placeholder="Enter API Secret..." class="dp-input">
         </div>
 
         <div>
-          <label class="block text-[11px] font-mono text-slate-300 uppercase mb-1">Regional Endpoint</label>
-          <select id="cfg-api-url" class="w-full bg-obsidian-900 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 font-mono">
+          <label class="block mono-label mb-1">Regional Endpoint</label>
+          <select id="cfg-api-url" class="dp-input cursor-pointer">
             <option value="https://api.delta.exchange">Delta Global (api.delta.exchange)</option>
             <option value="https://cdn.india.delta.exchange">Delta India (cdn.india.delta.exchange)</option>
           </select>
@@ -599,38 +764,38 @@
       </div>
 
       <!-- Risk Controls -->
-      <div class="space-y-3 text-xs font-mono">
+      <div class="space-y-3 pt-3 border-t border-[var(--dp-color-hairline)] text-xs font-mono">
         <div>
-          <div class="flex justify-between text-slate-300 mb-1">
+          <div class="flex justify-between text-[var(--dp-color-read)] mb-1">
             <span>Risk Per Trade:</span>
-            <span id="label-risk" class="text-emerald-400 font-bold">1.0%</span>
+            <span id="label-risk" class="text-white font-medium">1.0%</span>
           </div>
-          <input type="range" id="input-risk" min="0.5" max="5.0" step="0.5" value="1.0" class="w-full accent-emerald-500" oninput="document.getElementById('label-risk').textContent = this.value + '%'">
+          <input type="range" id="input-risk" min="0.5" max="5.0" step="0.5" value="1.0" class="w-full accent-white" oninput="document.getElementById('label-risk').textContent = this.value + '%'">
         </div>
 
         <div>
-          <div class="flex justify-between text-slate-300 mb-1">
+          <div class="flex justify-between text-[var(--dp-color-read)] mb-1">
             <span>Default Leverage:</span>
-            <span id="label-leverage" class="text-emerald-400 font-bold">5x</span>
+            <span id="label-leverage" class="text-white font-medium">5x</span>
           </div>
-          <input type="range" id="input-leverage" min="1" max="20" step="1" value="5" class="w-full accent-emerald-500" oninput="document.getElementById('label-leverage').textContent = this.value + 'x'">
+          <input type="range" id="input-leverage" min="1" max="20" step="1" value="5" class="w-full accent-white" oninput="document.getElementById('label-leverage').textContent = this.value + 'x'">
         </div>
 
         <div>
-          <div class="flex justify-between text-slate-300 mb-1">
+          <div class="flex justify-between text-[var(--dp-color-read)] mb-1">
             <span>Daily Max Drawdown:</span>
-            <span id="label-maxdd" class="text-rose-400 font-bold">4.0%</span>
+            <span id="label-maxdd" class="text-white font-medium">4.0%</span>
           </div>
-          <input type="range" id="input-maxdd" min="1.0" max="10.0" step="0.5" value="4.0" class="w-full accent-rose-500" oninput="document.getElementById('label-maxdd').textContent = this.value + '%'">
+          <input type="range" id="input-maxdd" min="1.0" max="10.0" step="0.5" value="4.0" class="w-full accent-white" oninput="document.getElementById('label-maxdd').textContent = this.value + '%'">
         </div>
       </div>
 
       <!-- Action Buttons -->
       <div class="flex gap-2 pt-2">
-        <button type="button" onclick="saveSettings()" class="flex-1 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-obsidian-950 font-bold text-xs transition cursor-pointer">
-          Save Settings & Activate Keys
+        <button type="button" onclick="saveSettings()" class="btn-primary flex-1 text-xs py-2">
+          Save Settings
         </button>
-        <button type="button" onclick="closeSettingsModal()" class="px-4 py-2 rounded-xl bg-obsidian-850 hover:bg-obsidian-800 text-slate-300 text-xs font-semibold transition cursor-pointer">
+        <button type="button" onclick="closeSettingsModal()" class="btn-secondary text-xs py-2 px-4">
           Cancel
         </button>
       </div>
@@ -711,13 +876,13 @@
       if (statusBox) statusBox.classList.add('hidden');
 
       if (tab === 'signin') {
-        if (btnIn) btnIn.className = 'flex-1 py-1.5 rounded-lg font-bold bg-emerald-500 text-obsidian-950 transition cursor-pointer';
-        if (btnUp) btnUp.className = 'flex-1 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition cursor-pointer';
+        if (btnIn) btnIn.className = 'py-1.5 rounded-[var(--dp-radius-pill)] font-medium bg-[var(--dp-color-bright)] text-[var(--dp-color-inverse-ink)] transition-colors';
+        if (btnUp) btnUp.className = 'py-1.5 rounded-[var(--dp-radius-pill)] font-medium text-[var(--dp-color-meta)] hover:text-white transition-colors';
         if (formIn) formIn.classList.remove('hidden');
         if (formUp) formUp.classList.add('hidden');
       } else {
-        if (btnUp) btnUp.className = 'flex-1 py-1.5 rounded-lg font-bold bg-emerald-500 text-obsidian-950 transition cursor-pointer';
-        if (btnIn) btnIn.className = 'flex-1 py-1.5 rounded-lg font-bold text-slate-400 hover:text-white transition cursor-pointer';
+        if (btnUp) btnUp.className = 'py-1.5 rounded-[var(--dp-radius-pill)] font-medium bg-[var(--dp-color-bright)] text-[var(--dp-color-inverse-ink)] transition-colors';
+        if (btnIn) btnIn.className = 'py-1.5 rounded-[var(--dp-radius-pill)] font-medium text-[var(--dp-color-meta)] hover:text-white transition-colors';
         if (formUp) formUp.classList.remove('hidden');
         if (formIn) formIn.classList.add('hidden');
       }
@@ -728,8 +893,8 @@
       if (!box) return;
       box.classList.remove('hidden');
       box.className = isErr 
-        ? 'p-3 rounded-xl text-xs font-mono border bg-rose-950/60 border-rose-800 text-rose-300'
-        : 'p-3 rounded-xl text-xs font-mono border bg-emerald-950/60 border-emerald-800 text-emerald-300';
+        ? 'p-3 rounded-[var(--dp-radius-panel)] text-xs font-mono border border-rose-900/50 bg-rose-950/20 text-rose-300'
+        : 'p-3 rounded-[var(--dp-radius-panel)] text-xs font-mono border border-[var(--dp-color-hairline-2)] bg-[var(--dp-color-panel)] text-[var(--dp-color-bright)]';
       box.textContent = msg;
     }
 
@@ -764,7 +929,7 @@
       } finally {
         if (btn) {
           btn.disabled = false;
-          btn.textContent = 'Sign In to Dashboard';
+          btn.textContent = 'Sign In to Terminal';
         }
       }
     }
@@ -783,7 +948,7 @@
       const btn = document.getElementById('btn-submit-signup');
       if (btn) {
         btn.disabled = true;
-        btn.textContent = 'Creating desk...';
+        btn.textContent = 'Creating account...';
       }
       try {
         if (!supabaseClient) {
@@ -799,7 +964,6 @@
           setSession(data.session);
           navTo('dashboard');
         } else {
-          // Auto sign in fallback
           const login = await supabaseClient.auth.signInWithPassword({ email, password });
           if (login.data && login.data.session) {
             setSession(login.data.session);
@@ -814,7 +978,7 @@
       } finally {
         if (btn) {
           btn.disabled = false;
-          btn.textContent = 'Create Trading Desk';
+          btn.textContent = 'Create Account';
         }
       }
     }
@@ -914,14 +1078,18 @@
         const isUp = chg >= 0;
 
         const card = document.createElement('div');
-        card.className = 'card p-4 rounded-xl border border-white/5 space-y-1';
+        card.className = 'dp-panel p-4 flex flex-col justify-between';
         card.innerHTML = `
-          <div class="flex items-center justify-between text-xs font-mono">
-            <span class="font-bold text-white">${sym}</span>
-            <span class="${isUp ? 'text-emerald-400' : 'text-rose-400'} font-semibold">${isUp ? '+' : ''}${chg.toFixed(2)}%</span>
+          <div class="flex items-center justify-between text-xs font-mono text-[var(--dp-color-meta)]">
+            <span class="font-medium text-white">${sym.replace('USDT', '/USDT')}</span>
+            <span class="${isUp ? 'text-white' : 'text-[var(--dp-color-meta)]'}">${isUp ? '+' : ''}${chg.toFixed(2)}%</span>
           </div>
-          <div class="text-xl font-bold font-mono text-white">$${price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 4})}</div>
-          <div class="text-[10px] text-slate-400 font-mono">24h Low/High: $${Number(t.low_24h || 0).toLocaleString()} - $${Number(t.high_24h || 0).toLocaleString()}</div>
+          <div class="text-xl font-mono text-[var(--dp-color-bright)] mt-3">
+            $${price.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 4})}
+          </div>
+          <div class="text-[11px] font-mono text-[var(--dp-color-meta)] mt-1">
+            24h Vol: $${Number(t.volume_24h || 0).toLocaleString()}
+          </div>
         `;
         container.appendChild(card);
       });
@@ -937,29 +1105,34 @@
       isRunning = Boolean(status.is_running);
       const btnLabel = document.getElementById('btn-engine-label');
       const btnToggle = document.getElementById('btn-toggle-engine');
+      const liveSignal = document.getElementById('dash-engine-signal');
+      const statusText = document.getElementById('dash-status-text');
+
       if (btnLabel && btnToggle) {
-        btnLabel.textContent = isRunning ? 'RUNNING' : 'PAUSED';
-        btnToggle.className = isRunning
-          ? 'px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase font-mono transition cursor-pointer flex items-center gap-1.5'
-          : 'px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs uppercase font-mono transition cursor-pointer flex items-center gap-1.5';
+        btnLabel.textContent = isRunning ? 'Pause Engine' : 'Resume Engine';
+        btnToggle.className = isRunning ? 'btn-secondary text-xs py-1.5 px-3' : 'btn-primary text-xs py-1.5 px-3';
+      }
+      if (liveSignal) {
+        liveSignal.className = isRunning ? 'signal-live' : 'signal-muted';
+      }
+      if (statusText) {
+        statusText.textContent = isRunning ? 'Live Terminal' : 'Engine Paused';
       }
 
       // Delta API Key Status
       const hasKey = Boolean(tenant.has_api_key || tenant.delta_api_key_masked);
-      const apiBadge = document.getElementById('btn-api-badge');
-      const apiText = document.getElementById('api-badge-text');
       const banner = document.getElementById('banner-api-needed');
+      const apiBadgeText = document.getElementById('api-badge-text');
+      const apiSignal = document.getElementById('api-status-signal');
 
-      if (apiBadge && apiText) {
-        if (hasKey) {
-          apiBadge.className = 'text-xs px-2.5 py-1 rounded-lg font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 border border-emerald-500/40 bg-emerald-950/50 text-emerald-300';
-          apiText.textContent = 'Keys Connected';
-          if (banner) banner.classList.add('hidden');
-        } else {
-          apiBadge.className = 'text-xs px-2.5 py-1 rounded-lg font-mono font-semibold transition cursor-pointer flex items-center gap-1.5 border border-amber-500/40 bg-amber-950/50 text-amber-300 animate-pulse';
-          apiText.textContent = 'Keys Needed';
-          if (banner) banner.classList.remove('hidden');
-        }
+      if (banner) {
+        banner.classList.toggle('hidden', hasKey);
+      }
+      if (apiBadgeText) {
+        apiBadgeText.textContent = hasKey ? 'Keys Configured' : 'Keys Needed';
+      }
+      if (apiSignal) {
+        apiSignal.className = hasKey ? 'signal-live' : 'signal-muted';
       }
 
       // Equity & PnL
@@ -971,30 +1144,20 @@
       const upnlStr = `${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}`;
       const rpnlStr = `${rpnl >= 0 ? '+' : ''}$${rpnl.toFixed(2)}`;
 
-      const dashEq = document.getElementById('dash-equity');
       const cardEq = document.getElementById('card-equity');
-      if (dashEq) dashEq.textContent = eqStr;
       if (cardEq) cardEq.textContent = eqStr;
 
-      const dashUpnl = document.getElementById('dash-upnl');
       const cardUpnl = document.getElementById('card-upnl');
-      if (dashUpnl) {
-        dashUpnl.textContent = upnlStr;
-        dashUpnl.className = upnl >= 0 ? 'text-emerald-400 font-bold text-sm' : 'text-rose-400 font-bold text-sm';
-      }
       if (cardUpnl) {
         cardUpnl.textContent = upnlStr;
-        cardUpnl.className = upnl >= 0 ? 'text-xl font-bold font-mono text-emerald-400 mt-1 block' : 'text-xl font-bold font-mono text-rose-400 mt-1 block';
+        cardUpnl.className = upnl >= 0 ? 'text-xl font-mono text-white mt-1 block font-normal' : 'text-xl font-mono text-slate-400 mt-1 block font-normal';
       }
-
-      const dashRpnl = document.getElementById('dash-rpnl');
-      if (dashRpnl) dashRpnl.textContent = rpnlStr;
 
       const cardWr = document.getElementById('card-winrate');
       if (cardWr) cardWr.textContent = `${Number(col.win_rate_pct ?? 0).toFixed(1)}%`;
 
       const cardTrades = document.getElementById('card-trades');
-      if (cardTrades) cardTrades.textContent = `${col.winning_trades || 0}W / ${col.total_trades || 0} total`;
+      if (cardTrades) cardTrades.textContent = `${col.winning_trades || 0}W / ${col.total_trades || 0} total trades`;
 
       const cardDd = document.getElementById('card-maxdd');
       if (cardDd) cardDd.textContent = `${Number(col.max_drawdown_pct ?? 0).toFixed(2)}%`;
@@ -1006,6 +1169,7 @@
       if (data.logs) renderLogs(data.logs);
     }
 
+    // Clean Market Cards: NO ADX/ATR indicator clutter, NO unwanted per-symbol buttons
     function renderMarketCards(tickers, indicators) {
       const container = document.getElementById('dash-market-cards');
       if (!container) return;
@@ -1014,29 +1178,22 @@
 
       symbols.forEach(sym => {
         const t = tickers[sym] || {};
-        const ind = indicators[sym] || {};
         const mark = Number(t.mark_price || 0);
         const chg = Number(t.change_24h || 0);
-        const adx = Number(ind.adx || 0);
         const isUp = chg >= 0;
-        const enabled = ind.enabled !== false;
 
         const card = document.createElement('div');
-        card.className = `card p-4 rounded-xl space-y-2 border ${enabled ? 'border-white/10' : 'border-white/5 opacity-50'}`;
+        card.className = 'dp-panel p-4 flex flex-col justify-between';
         card.innerHTML = `
-          <div class="flex items-center justify-between text-xs font-mono">
-            <span class="font-bold text-white">${sym}</span>
-            <button type="button" onclick="toggleSymbol('${sym}', ${!enabled})" class="text-[10px] px-2 py-0.5 rounded cursor-pointer ${enabled ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-obsidian-850 text-slate-400'}">
-              ${enabled ? 'ACTIVE' : 'OFF'}
-            </button>
+          <div class="flex items-center justify-between">
+            <span class="mono-label">${sym.replace('USDT', '/USDT')}</span>
+            <span class="signal-live" title="Active Feed"></span>
           </div>
-          <div class="flex items-baseline justify-between font-mono">
-            <span class="text-lg font-bold text-white">$${mark.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 4})}</span>
-            <span class="text-xs ${isUp ? 'text-emerald-400' : 'text-rose-400'}">${isUp ? '+' : ''}${chg.toFixed(2)}%</span>
-          </div>
-          <div class="flex justify-between text-[11px] font-mono text-slate-400 border-t border-white/5 pt-1.5">
-            <span>ADX (14): <strong class="${adx >= 20 ? 'text-emerald-400' : 'text-slate-300'}">${adx.toFixed(1)}</strong></span>
-            <span>ATR: <strong class="text-slate-300">$${Number(ind.atr || 0).toFixed(2)}</strong></span>
+          <div class="mt-3">
+            <div class="text-xl font-mono text-white">$${mark.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 4})}</div>
+            <div class="text-xs font-mono mt-1 ${isUp ? 'text-white' : 'text-[var(--dp-color-meta)]'}">
+              ${isUp ? '+' : ''}${chg.toFixed(2)}%
+            </div>
           </div>
         `;
         container.appendChild(card);
@@ -1056,18 +1213,19 @@
 
       list.forEach(pos => {
         const tr = document.createElement('tr');
+        tr.className = 'border-b border-[var(--dp-color-hairline)] hover:bg-[var(--dp-color-hairline)]/30 transition-colors';
         const isLong = (pos.side || '').toUpperCase() === 'BUY' || (pos.side || '').toUpperCase() === 'LONG';
         const upnl = Number(pos.unrealized_pnl || 0);
 
         tr.innerHTML = `
-          <td class="py-2 font-bold text-white">${pos.symbol || '--'}</td>
-          <td class="py-2"><span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${isLong ? 'bg-emerald-950 text-emerald-300' : 'bg-rose-950 text-rose-300'}">${isLong ? 'LONG' : 'SHORT'}</span></td>
-          <td class="py-2 text-slate-300">${pos.size || pos.quantity || '--'}</td>
-          <td class="py-2 text-slate-300">$${Number(pos.entry_price || 0).toLocaleString()}</td>
-          <td class="py-2 text-slate-300">$${Number(pos.mark_price || 0).toLocaleString()}</td>
-          <td class="py-2 font-bold ${upnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}">${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}</td>
-          <td class="py-2 text-right">
-            <button type="button" onclick="closePosition('${pos.product_id}', '${pos.symbol}')" class="px-2 py-0.5 rounded bg-rose-950 hover:bg-rose-900 text-rose-300 text-[10px] font-bold cursor-pointer">
+          <td class="py-2.5 font-medium text-white">${pos.symbol || '--'}</td>
+          <td class="py-2.5 font-mono text-xs text-[var(--dp-color-meta)]">${isLong ? 'LONG' : 'SHORT'}</td>
+          <td class="py-2.5 font-mono text-xs text-[var(--dp-color-read)]">${pos.size || pos.quantity || '--'}</td>
+          <td class="py-2.5 font-mono text-xs text-[var(--dp-color-read)]">$${Number(pos.entry_price || 0).toLocaleString()}</td>
+          <td class="py-2.5 font-mono text-xs text-[var(--dp-color-read)]">$${Number(pos.mark_price || 0).toLocaleString()}</td>
+          <td class="py-2.5 font-mono text-xs ${upnl >= 0 ? 'text-white' : 'text-slate-400'}">${upnl >= 0 ? '+' : ''}$${upnl.toFixed(2)}</td>
+          <td class="py-2.5 text-right">
+            <button type="button" onclick="closePosition('${pos.product_id}', '${pos.symbol}')" class="btn-secondary text-[11px] py-1 px-2.5">
               Close
             </button>
           </td>
@@ -1089,15 +1247,15 @@
 
       list.forEach(ord => {
         const tr = document.createElement('tr');
-        const isBuy = (ord.side || '').toUpperCase() === 'BUY';
+        tr.className = 'border-b border-[var(--dp-color-hairline)] hover:bg-[var(--dp-color-hairline)]/30 transition-colors';
 
         tr.innerHTML = `
-          <td class="py-2 font-bold text-white">${ord.symbol || '--'}</td>
-          <td class="py-2"><span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${isBuy ? 'bg-emerald-950 text-emerald-300' : 'bg-rose-950 text-rose-300'}">${ord.side}</span></td>
-          <td class="py-2 text-amber-400 font-semibold">$${Number(ord.stop_price || ord.trigger_price || ord.price || 0).toLocaleString()}</td>
-          <td class="py-2 text-slate-400">${ord.ttl ? `${ord.ttl}s` : 'Active'}</td>
-          <td class="py-2 text-right">
-            <button type="button" onclick="cancelOrder('${ord.id || ord.order_id}')" class="px-2 py-0.5 rounded bg-obsidian-850 hover:bg-obsidian-800 text-slate-300 text-[10px] font-bold cursor-pointer">
+          <td class="py-2.5 font-medium text-white">${ord.symbol || '--'}</td>
+          <td class="py-2.5 font-mono text-xs text-[var(--dp-color-meta)]">${ord.side || '--'}</td>
+          <td class="py-2.5 font-mono text-xs text-white">$${Number(ord.stop_price || ord.trigger_price || ord.price || 0).toLocaleString()}</td>
+          <td class="py-2.5 font-mono text-xs text-[var(--dp-color-meta)]">${ord.ttl ? `${ord.ttl}s` : 'Active'}</td>
+          <td class="py-2.5 text-right">
+            <button type="button" onclick="cancelOrder('${ord.id || ord.order_id}')" class="btn-secondary text-[11px] py-1 px-2.5">
               Cancel
             </button>
           </td>
@@ -1111,13 +1269,13 @@
       if (!container || !Array.isArray(logs)) return;
 
       container.replaceChildren();
-      logs.slice(-40).forEach(log => {
+      logs.slice(-30).forEach(log => {
         const msg = typeof log === 'string' ? log : (log.message || log.msg || JSON.stringify(log));
         const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
 
         const line = document.createElement('div');
-        line.className = 'text-slate-300 hover:bg-white/5 px-1 py-0.5 rounded';
-        line.innerHTML = `<span class="text-slate-500">[${time}]</span> ${escapeHtml(msg)}`;
+        line.className = 'text-[var(--dp-color-read)] hover:bg-white/5 px-1 py-0.5 rounded';
+        line.innerHTML = `<span class="text-[var(--dp-color-meta)]">[${time}]</span> ${escapeHtml(msg)}`;
         container.appendChild(line);
       });
       container.scrollTop = container.scrollHeight;
@@ -1145,19 +1303,6 @@
       }
     }
 
-    async function toggleSymbol(symbol, enable) {
-      try {
-        await fetch(`${BACKEND_URL}/api/control/symbol_toggle`, {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({ symbol, enabled: enable })
-        });
-        fetchStatus();
-      } catch (err) {
-        alert(`Symbol update failed: ${err}`);
-      }
-    }
-
     async function emergencyFlatten() {
       if (!confirm('KILL SWITCH: Close ALL open positions and cancel ALL resting orders immediately?')) return;
       try {
@@ -1182,7 +1327,7 @@
           body: JSON.stringify({ product_id: productId, symbol })
         });
         const data = await res.json();
-        alert(data.message);
+        alert(data.message || 'Position closed');
         fetchStatus();
       } catch (err) {
         alert(`Failed: ${err}`);
@@ -1264,7 +1409,6 @@
     window.openSettingsModal = openSettingsModal;
     window.closeSettingsModal = closeSettingsModal;
     window.saveSettings = saveSettings;
-    window.toggleSymbol = toggleSymbol;
     window.closePosition = closePosition;
     window.cancelOrder = cancelOrder;
 
