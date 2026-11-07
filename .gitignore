@@ -63,6 +63,7 @@ logs/
 # Tenant & State data
 data/
 *.json.bak
+*wal_buffer.json
 
 .vercel
 .env*

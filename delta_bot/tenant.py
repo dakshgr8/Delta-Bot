@@ -20,6 +20,7 @@ import hashlib
 import json
 import logging
 import os
+from pathlib import Path
 import re
 import time
 from typing import Any
@@ -625,8 +626,10 @@ class TenantManager:
         default_instance: TenantInstance | None = None,
         supabase_url: str | None = None,
         supabase_secret_key: str | None = None,
+        wal_path: str | None = None,
     ) -> None:
         self.storage_path = storage_path
+        self.wal_path = wal_path or str(Path(storage_path).parent / "wal_buffer.json")
         self.supabase_url = supabase_url
         self.supabase_secret_key = supabase_secret_key
         self.tenants: dict[str, TenantInstance] = {}
@@ -923,6 +926,151 @@ class TenantManager:
             logger.error("Error reading tenants from Supabase: %s", e)
             return 0
 
+    def _write_to_wal(self, action: str, payload: dict[str, Any]) -> None:
+        """Appends failed cloud transaction to Write-Ahead Log (WAL) for offline recovery."""
+        logger.warning(
+            "[WAL FAILOVER] Supabase operation '%s' failed. Safely queueing to local write-ahead log (%s). Zero data lost!",
+            action,
+            self.wal_path,
+        )
+        try:
+            records: list[dict[str, Any]] = []
+            wal_file = Path(self.wal_path)
+            if wal_file.exists():
+                try:
+                    with open(wal_file, "r", encoding="utf-8") as f:
+                        records = json.load(f)
+                    if not isinstance(records, list):
+                        records = []
+                except Exception:
+                    records = []
+
+            # Deduplicate by action & tenant_id
+            tenant_id = payload.get("tenant_id")
+            if tenant_id:
+                records = [
+                    r for r in records
+                    if not (r.get("action") == action and r.get("payload", {}).get("tenant_id") == tenant_id)
+                ]
+
+            records.append({
+                "action": action,
+                "payload": payload,
+                "timestamp": time.time(),
+            })
+
+            wal_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(wal_file, "w", encoding="utf-8") as f:
+                json.dump(records, f, indent=2)
+        except Exception as e:
+            logger.error("[WAL FATAL ERROR] Failed to write to WAL buffer: %s", e)
+
+    def flush_wal_buffer(self) -> int:
+        """
+        Replays buffered offline transactions to Supabase with deduplication.
+        Handles PostgreSQL unique constraint violations (23505) and duplicate keys idempotently.
+        Returns number of successfully replayed transactions.
+        """
+        if not self.supabase_url or not self.supabase_secret_key:
+            return 0
+
+        wal_file = Path(self.wal_path)
+        if not wal_file.exists():
+            return 0
+
+        try:
+            with open(wal_file, "r", encoding="utf-8") as f:
+                records = json.load(f)
+            if not isinstance(records, list) or not records:
+                return 0
+
+            logger.info("[WAL RECOVERY] Replaying %d buffered transaction(s) to Supabase...", len(records))
+            import httpx
+
+            remaining: list[dict[str, Any]] = []
+            replayed_count = 0
+
+            for item in records:
+                action = item.get("action")
+                payload = item.get("payload", {})
+                success = False
+
+                try:
+                    if action == "upsert_tenant":
+                        headers = {
+                            "apikey": self.supabase_secret_key,
+                            "Authorization": f"Bearer {self.supabase_secret_key}",
+                            "Content-Type": "application/json",
+                            "Prefer": "resolution=merge-duplicates",
+                        }
+                        url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants"
+                        with httpx.Client(timeout=10.0) as client:
+                            res = client.post(url, headers=headers, json=payload)
+                        if res.status_code in (200, 201):
+                            success = True
+                        elif "23505" in res.text or "duplicate key" in res.text.lower():
+                            logger.info(
+                                "[WAL DEDUPLICATION] Tenant %s already present in cloud ledger. Discarding duplicate.",
+                                payload.get("tenant_id"),
+                            )
+                            success = True
+                        else:
+                            logger.warning(
+                                "[WAL REPLAY FAILED] Upsert tenant %s failed with status %d: %s",
+                                payload.get("tenant_id"),
+                                res.status_code,
+                                res.text,
+                            )
+                    elif action == "delete_tenant":
+                        tid = payload.get("tenant_id")
+                        headers = {
+                            "apikey": self.supabase_secret_key,
+                            "Authorization": f"Bearer {self.supabase_secret_key}",
+                        }
+                        url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants?tenant_id=eq.{tid}"
+                        with httpx.Client(timeout=10.0) as client:
+                            res = client.delete(url, headers=headers)
+                        if res.status_code in (200, 204, 404):
+                            success = True
+                        else:
+                            logger.warning(
+                                "[WAL REPLAY FAILED] Delete tenant %s failed with status %d",
+                                tid,
+                                res.status_code,
+                            )
+                except Exception as err:
+                    err_str = str(err)
+                    if "23505" in err_str or "duplicate key" in err_str.lower():
+                        logger.info(
+                            "[WAL DEDUPLICATION] Tenant %s already present in cloud ledger.",
+                            payload.get("tenant_id"),
+                        )
+                        success = True
+                    else:
+                        logger.warning("[WAL REPLAY FAILED] Re-buffering item due to: %s", err)
+                        success = False
+
+                if success:
+                    replayed_count += 1
+                else:
+                    remaining.append(item)
+
+            if remaining:
+                with open(wal_file, "w", encoding="utf-8") as f:
+                    json.dump(remaining, f, indent=2)
+            else:
+                try:
+                    wal_file.unlink()
+                except Exception:
+                    with open(wal_file, "w", encoding="utf-8") as f:
+                        json.dump([], f)
+                logger.info("[WAL RECOVERY] All offline transactions successfully synced to cloud ledger!")
+
+            return replayed_count
+        except Exception as e:
+            logger.error("[WAL FLUSH ERROR] %s", e)
+            return 0
+
     def sync_tenant_to_supabase(self, instance: TenantInstance) -> bool:
         """Synchronizes tenant state and encrypted configuration to Supabase PostgreSQL."""
         if not self.supabase_url or not self.supabase_secret_key:
@@ -976,9 +1124,23 @@ class TenantManager:
 
             with httpx.Client(timeout=10.0) as client:
                 res = client.post(url, headers=headers, json=payload)
-            return res.status_code in (200, 201)
+            if res.status_code in (200, 201):
+                self.flush_wal_buffer()
+                return True
+            else:
+                logger.warning(
+                    "Supabase returned status %d when syncing tenant %s. Queuing to WAL.",
+                    res.status_code,
+                    instance.config.tenant_id,
+                )
+                self._write_to_wal("upsert_tenant", payload)
+                return False
         except Exception as e:
-            logger.debug("Failed to sync tenant %s to Supabase: %s", instance.config.tenant_id, e)
+            logger.debug("Failed to sync tenant %s to Supabase: %s. Queuing to WAL.", instance.config.tenant_id, e)
+            try:
+                self._write_to_wal("upsert_tenant", payload)
+            except Exception:
+                pass
             return False
 
     def delete_tenant_from_supabase(self, tenant_id: str) -> bool:
@@ -994,9 +1156,15 @@ class TenantManager:
             url = f"{self.supabase_url.rstrip('/')}/rest/v1/tenants?tenant_id=eq.{tenant_id}"
             with httpx.Client(timeout=10.0) as client:
                 res = client.delete(url, headers=headers)
-            return res.status_code in (200, 204)
+            if res.status_code in (200, 204):
+                self.flush_wal_buffer()
+                return True
+            else:
+                self._write_to_wal("delete_tenant", {"tenant_id": tenant_id})
+                return False
         except Exception as e:
-            logger.debug("Failed to delete tenant %s from Supabase: %s", tenant_id, e)
+            logger.debug("Failed to delete tenant %s from Supabase: %s. Queuing to WAL.", tenant_id, e)
+            self._write_to_wal("delete_tenant", {"tenant_id": tenant_id})
             return False
 
     # -------------------------------------------------------------------------

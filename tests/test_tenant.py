@@ -488,3 +488,89 @@ async def test_multi_tenant_candle_close_fanout(multi_tenant_orchestrator: Tradi
     assert len(b_ord.client_order_id) <= 32
 
 
+def test_wal_failover_buffering_and_replay_recovery(tmp_path: Path) -> None:
+    """Verifies that Supabase network outages trigger local WAL buffering and recovery replays seamlessly."""
+    from unittest.mock import MagicMock, patch
+    import json
+    from delta_bot.tenant import TenantManager, TenantConfig
+
+    storage_file = tmp_path / "tenants.json"
+    wal_file = tmp_path / "wal_buffer.json"
+
+    mgr = TenantManager(
+        storage_path=str(storage_file),
+        wal_path=str(wal_file),
+        supabase_url="https://mock.supabase.co",
+        supabase_secret_key="mock_key",
+    )
+
+    t_cfg = TenantConfig(tenant_id="wal_tenant_1", name="WAL Tenant", mode="paper", initial_balance=5000.0)
+    instance = mgr.create_tenant(t_cfg)
+
+    # 1. Simulate Supabase HTTP 503 Outage during sync
+    mock_err_resp = MagicMock()
+    mock_err_resp.status_code = 503
+    mock_err_resp.text = "Service Unavailable"
+
+    with patch("httpx.Client.post", return_value=mock_err_resp):
+        success = mgr.sync_tenant_to_supabase(instance)
+        assert success is False
+
+    # 2. Verify transaction safely written to WAL buffer
+    assert wal_file.exists()
+    with open(wal_file, "r", encoding="utf-8") as f:
+        wal_data = json.load(f)
+    assert len(wal_data) == 1
+    assert wal_data[0]["action"] == "upsert_tenant"
+    assert wal_data[0]["payload"]["tenant_id"] == "wal_tenant_1"
+
+    # 3. Simulate recovery: flush WAL buffer with HTTP 201 Created
+    mock_ok_resp = MagicMock()
+    mock_ok_resp.status_code = 201
+
+    with patch("httpx.Client.post", return_value=mock_ok_resp):
+        replayed = mgr.flush_wal_buffer()
+        assert replayed == 1
+
+    # 4. Verify WAL file is flushed clean
+    if wal_file.exists():
+        with open(wal_file, "r", encoding="utf-8") as f:
+            clean_data = json.load(f)
+        assert len(clean_data) == 0
+
+
+def test_wal_deduplication_on_23505_cloud_conflict(tmp_path: Path) -> None:
+    """Verifies that duplicate key collisions (PostgreSQL code 23505) during WAL replay are gracefully reconciled."""
+    from unittest.mock import MagicMock, patch
+    import json
+    from delta_bot.tenant import TenantManager, TenantConfig
+
+    wal_file = tmp_path / "wal_buffer.json"
+    mgr = TenantManager(
+        storage_path=str(tmp_path / "tenants.json"),
+        wal_path=str(wal_file),
+        supabase_url="https://mock.supabase.co",
+        supabase_secret_key="mock_key",
+    )
+
+    # Pre-populate WAL with a record
+    mgr._write_to_wal("upsert_tenant", {"tenant_id": "existing_tenant", "name": "Existing"})
+    assert wal_file.exists()
+
+    # Simulate Postgres 23505 duplicate key error
+    mock_dup_resp = MagicMock()
+    mock_dup_resp.status_code = 409
+    mock_dup_resp.text = '{"code": "23505", "message": "duplicate key value violates unique constraint"}'
+
+    with patch("httpx.Client.post", return_value=mock_dup_resp):
+        replayed = mgr.flush_wal_buffer()
+        assert replayed == 1  # Deduplicated and treated as success!
+
+    # WAL buffer should now be clean
+    if wal_file.exists():
+        with open(wal_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        assert len(data) == 0
+
+
+
