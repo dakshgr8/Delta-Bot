@@ -545,6 +545,51 @@ class TradingStateManager:
                                 )
                                 break
 
+                # 3. Position Protection Audit: Ensure NO open position is left naked without SL
+                for pos in positions:
+                    if pos.size != 0:
+                        exit_side = "sell" if pos.size > 0 else "buy"
+                        has_sl = any(
+                            o.product_id == pos.product_id
+                            and o.side.lower() == exit_side
+                            and o.stop_price is not None
+                            for o in open_orders
+                        )
+                        tracked_intent = self.get_active_intent_for_product(pos.product_id)
+                        if not has_sl:
+                            sl_px = tracked_intent.initial_stop_loss if tracked_intent else None
+                            tp_px = tracked_intent.take_profit if tracked_intent else None
+                            if sl_px is None and pos.entry_price > 0:
+                                sl_px = round(pos.entry_price * (0.985 if pos.size > 0 else 1.015), 4)
+                                tp_px = round(pos.entry_price * (1.03 if pos.size > 0 else 0.97), 4)
+
+                            if sl_px is not None:
+                                logger.critical(
+                                    "🚨 NAKED POSITION DETECTED! %s (id=%d, size=%d) has NO active Stop Loss! Attaching protection bracket...",
+                                    pos.symbol,
+                                    pos.product_id,
+                                    pos.size,
+                                )
+                                try:
+                                    await self.client.set_position_bracket(
+                                        product_id=pos.product_id,
+                                        bracket_stop_loss_price=sl_px,
+                                        bracket_take_profit_price=tp_px,
+                                    )
+                                    report["naked_positions_repaired"] = report.get("naked_positions_repaired", 0) + 1
+                                    logger.info(
+                                        "🛡️ Repaired naked position for %s: Attached SL=%.4f, TP=%s",
+                                        pos.symbol,
+                                        sl_px,
+                                        tp_px,
+                                    )
+                                except Exception as patch_exc:
+                                    logger.error(
+                                        "Failed to attach position bracket to naked position %s: %s",
+                                        pos.symbol,
+                                        patch_exc,
+                                    )
+
             except Exception as exc:
                 logger.warning("REST open orders reconciliation error: %s", exc)
 

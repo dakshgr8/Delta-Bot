@@ -109,23 +109,31 @@ class AsyncHttpEngine:
         headers = response.headers
 
         # 1. Server Time Telemetry (Request-In-Time is epoch microseconds)
-        req_in_time_str = self._extract_header_ci(headers, "request-in-time")
-        if req_in_time_str:
-            try:
-                server_epoch_s = float(req_in_time_str) / 1_000_000.0
-                self._auth_engine.update_clock_offset(server_epoch_s, reception_epoch_s)
-            except (ValueError, TypeError) as ex:
-                logger.debug("Failed to parse Request-In-Time header %r: %s", req_in_time_str, ex)
-        else:
-            # Fallback to HTTP Date header
-            date_str = self._extract_header_ci(headers, "date")
-            if date_str:
+        # Guard against CDN-cached responses (e.g. CloudFront age header) where timestamps are stale
+        age_str = self._extract_header_ci(headers, "age")
+        try:
+            age_s = float(age_str) if age_str else 0.0
+        except (ValueError, TypeError):
+            age_s = 0.0
+
+        if age_s < 1.0:
+            req_in_time_str = self._extract_header_ci(headers, "request-in-time")
+            if req_in_time_str:
                 try:
-                    dt = parsedate_to_datetime(date_str)
-                    server_epoch_s = dt.timestamp()
+                    server_epoch_s = float(req_in_time_str) / 1_000_000.0
                     self._auth_engine.update_clock_offset(server_epoch_s, reception_epoch_s)
-                except Exception as ex:
-                    logger.debug("Failed to parse Date header %r: %s", date_str, ex)
+                except (ValueError, TypeError) as ex:
+                    logger.debug("Failed to parse Request-In-Time header %r: %s", req_in_time_str, ex)
+            else:
+                # Fallback to HTTP Date header
+                date_str = self._extract_header_ci(headers, "date")
+                if date_str:
+                    try:
+                        dt = parsedate_to_datetime(date_str)
+                        server_epoch_s = dt.timestamp()
+                        self._auth_engine.update_clock_offset(server_epoch_s, reception_epoch_s)
+                    except Exception as ex:
+                        logger.debug("Failed to parse Date header %r: %s", date_str, ex)
 
         # 2. Rate Limit Telemetry
         limit_val: int | None = None

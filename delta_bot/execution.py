@@ -260,7 +260,7 @@ class OrderRouter:
                     side,
                 )
                 fallback_cid = f"{client_order_id[:29]}_m" if client_order_id else None
-                return await self.client.place_order(
+                market_order = await self.client.place_order(
                     product_id=product_id,
                     size=size,
                     side=side,
@@ -271,7 +271,115 @@ class OrderRouter:
                     client_order_id=fallback_cid,
                     symbol=symbol,
                 )
+
+                # Ensure position is armed with SL and TP on exchange so it is never naked
+                await self.ensure_position_protection(
+                    product_id=product_id,
+                    symbol=symbol,
+                    side=side,
+                    size=size,
+                    stop_loss_price=bracket_stop_loss_price,
+                    take_profit_price=bracket_take_profit_price,
+                )
+                return market_order
             raise
+
+    async def ensure_position_protection(
+        self,
+        product_id: int,
+        symbol: str,
+        side: str,
+        size: int,
+        stop_loss_price: float | None = None,
+        take_profit_price: float | None = None,
+    ) -> bool:
+        """
+        Guarantees that an open position has active Stop Loss and Take Profit protection.
+        Attempts POST /v2/orders/bracket first, and falls back to native reduce-only child orders
+        if bracket attachment fails.
+        """
+        if self.config.execution_mode == ExecutionMode.DRY_RUN:
+            return True
+
+        if stop_loss_price is None and take_profit_price is None:
+            return False
+
+        attached = False
+        try:
+            await self.client.set_position_bracket(
+                product_id=product_id,
+                bracket_stop_loss_price=stop_loss_price,
+                bracket_take_profit_price=take_profit_price,
+            )
+            logger.info(
+                "[PROTECTION GUARD] Successfully armed position bracket for %s (product_id=%d): SL=%s, TP=%s",
+                symbol,
+                product_id,
+                stop_loss_price,
+                take_profit_price,
+            )
+            attached = True
+        except Exception as b_exc:
+            logger.warning(
+                "[PROTECTION GUARD] set_position_bracket failed for %s: %s. Falling back to native reduce-only child orders.",
+                symbol,
+                b_exc,
+            )
+
+        if not attached:
+            exit_side = "sell" if str(side).lower() == "buy" else "buy"
+            if stop_loss_price is not None:
+                try:
+                    sl_res = await self.client.place_order(
+                        product_id=product_id,
+                        size=size,
+                        side=exit_side,
+                        order_type="market_order",
+                        stop_price=stop_loss_price,
+                        stop_order_type="stop_loss_order",
+                        reduce_only=True,
+                        time_in_force="gtc",
+                        symbol=symbol,
+                    )
+                    logger.info(
+                        "[PROTECTION GUARD] Placed fallback child Stop Loss order ID=%d for %s at %.4f",
+                        sl_res.id,
+                        symbol,
+                        stop_loss_price,
+                    )
+                except Exception as sl_exc:
+                    logger.critical(
+                        "[PROTECTION GUARD] Failed to place child SL order for %s: %s! Position may be unprotected!",
+                        symbol,
+                        sl_exc,
+                    )
+
+            if take_profit_price is not None:
+                try:
+                    tp_res = await self.client.place_order(
+                        product_id=product_id,
+                        size=size,
+                        side=exit_side,
+                        order_type="limit_order",
+                        limit_price=take_profit_price,
+                        reduce_only=True,
+                        time_in_force="gtc",
+                        symbol=symbol,
+                    )
+                    logger.info(
+                        "[PROTECTION GUARD] Placed fallback child Take Profit order ID=%d for %s at %.4f",
+                        tp_res.id,
+                        symbol,
+                        take_profit_price,
+                    )
+                except Exception as tp_exc:
+                    logger.error(
+                        "[PROTECTION GUARD] Failed to place child TP order for %s: %s",
+                        symbol,
+                        tp_exc,
+                    )
+
+        return True
 
     async def cancel_order(self, product_id: int, order_id: int) -> dict[str, Any]:
         """Cancels a resting stop order via DELETE /v2/orders."""

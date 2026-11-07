@@ -20,7 +20,7 @@ import pytest
 from delta_bot.client import DeltaRestClient
 from delta_bot.config import BotConfig
 from delta_bot.exceptions import DeltaAPIError, InsufficientMarginError
-from delta_bot.execution import ExecutionConfig, OrderExecutionManager
+from delta_bot.execution import ExecutionConfig, OrderExecutionManager, OrderRouter
 from delta_bot.models import (
     ContractSpec,
     ExchangeOrder,
@@ -239,6 +239,78 @@ async def test_native_stop_order_immediate_execution_fallback_to_market(
     assert fallback_kwargs["bracket_stop_loss_price"] == 50600.0
     assert fallback_kwargs["bracket_take_profit_price"] == 51801.5
     assert fallback_kwargs["client_order_id"].endswith("_m")
+
+    # Verify set_position_bracket was called to arm the position on exchange
+    mock_client.set_position_bracket.assert_awaited_once_with(
+        product_id=139,
+        bracket_stop_loss_price=50600.0,
+        bracket_take_profit_price=51801.5,
+    )
+
+
+@pytest.mark.asyncio
+async def test_ensure_position_protection_falls_back_to_child_orders(
+    btc_global_spec: ContractSpec,
+) -> None:
+    """Verifies that if set_position_bracket fails, reduce-only SL and TP child orders are placed."""
+    mock_client = AsyncMock(spec=DeltaRestClient)
+    mock_client.get_cached_contract_spec.return_value = btc_global_spec
+    mock_client.config = BotConfig()
+    mock_client.set_position_bracket.side_effect = DeltaAPIError(
+        message="Bracket not supported",
+        status_code=400,
+        error_code="bracket_not_supported",
+    )
+    sl_child_order = ExchangeOrder(
+        id=9901,
+        client_order_id="sl_1",
+        product_id=139,
+        symbol="BTCUSDT",
+        side="sell",
+        order_type="market_order",
+        size=10,
+        stop_price=50000.0,
+        state="open",
+        created_at=1700000000.0,
+    )
+    tp_child_order = ExchangeOrder(
+        id=9902,
+        client_order_id="tp_1",
+        product_id=139,
+        symbol="BTCUSDT",
+        side="sell",
+        order_type="limit_order",
+        size=10,
+        limit_price=53000.0,
+        state="open",
+        created_at=1700000000.0,
+    )
+    mock_client.place_order.side_effect = [sl_child_order, tp_child_order]
+
+    router = OrderRouter(mock_client, BotConfig())
+    res = await router.ensure_position_protection(
+        product_id=139,
+        symbol="BTCUSDT",
+        side="buy",
+        size=10,
+        stop_loss_price=50000.0,
+        take_profit_price=53000.0,
+    )
+    assert res is True
+    assert mock_client.set_position_bracket.await_count == 1
+    assert mock_client.place_order.await_count == 2
+
+    # Verify SL order kwargs
+    sl_kwargs = mock_client.place_order.await_args_list[0].kwargs
+    assert sl_kwargs["side"] == "sell"
+    assert sl_kwargs["stop_price"] == 50000.0
+    assert sl_kwargs["reduce_only"] is True
+
+    # Verify TP order kwargs
+    tp_kwargs = mock_client.place_order.await_args_list[1].kwargs
+    assert tp_kwargs["side"] == "sell"
+    assert tp_kwargs["limit_price"] == 53000.0
+    assert tp_kwargs["reduce_only"] is True
 
 
 # -----------------------------------------------------------------------------
