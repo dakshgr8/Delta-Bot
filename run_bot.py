@@ -66,6 +66,11 @@ def print_startup_banner(
     web_url: str = "",
 ) -> None:
     """Prints the Delta-Bot launch banner with active operational parameters."""
+    collateral_display = (
+        "Real-Time Delta Exchange India Wallet"
+        if mode.upper() == "LIVE"
+        else f"${initial_balance:,.2f} USD (Paper Virtual)"
+    )
     banner = f"""
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                    DELTA-BOT QUANTITATIVE TRADING DAEMON                     ║
@@ -76,7 +81,7 @@ def print_startup_banner(
  Candle Timeframe        : {timeframe}
  Default Leverage        : {leverage}x
  Risk Per Trade          : {risk_pct:.2f}% of Account Equity
- Collateral Initializer  : ${initial_balance:,.2f} USD
+ Collateral Source       : {collateral_display}
  Flatten On Shutdown     : {'ENABLED (Market Close)' if flatten_on_shutdown else 'DISABLED (Preserve Brackets)'}
  Web Dashboard (Phase 7) : {web_url if web_enabled else 'DISABLED (Use --web)'}
  Python Runtime          : {sys.version.split()[0]} ({sys.platform})
@@ -95,13 +100,13 @@ def parse_cli_args() -> argparse.Namespace:
         "--mode",
         type=str,
         choices=["paper", "live"],
-        default=os.environ.get("EXECUTION_MODE", "paper").lower(),
-        help="Operational execution mode: 'paper' (virtual simulator) or 'live' (Delta Exchange)",
+        default=os.environ.get("EXECUTION_MODE", "live").lower(),
+        help="Operational execution mode: 'live' (Delta Exchange India) or 'paper' (virtual simulator)",
     )
     parser.add_argument(
         "--symbols",
         type=str,
-        default="BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,XAUTUSD",
+        default="BTCUSD,ETHUSD,SOLUSD,XRPUSD,XAUTUSD",
         help="Comma-separated target perpetual contracts to trade concurrently",
     )
     parser.add_argument(
@@ -155,7 +160,7 @@ def parse_cli_args() -> argparse.Namespace:
     parser.add_argument(
         "--initial-balance",
         type=float,
-        default=10000.0,
+        default=0.0,
         help="Starting virtual collateral balance for Paper trading mode",
     )
     parser.add_argument(

@@ -437,7 +437,7 @@ class BreakoutStrategyEngine:
         session_anchor: SessionAnchorData,
         contract_spec: ContractSpec,
         bar_cache: CircularBarCache,
-        account_equity: float = 10000.0,
+        account_equity: float = 0.0,
     ) -> OrderIntent | None:
         """
         Core lifecycle entry point invoked strictly on confirmed candle closes.

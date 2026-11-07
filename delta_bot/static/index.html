@@ -623,8 +623,8 @@
       <div class="grid grid-cols-2 md:grid-cols-4 gap-[var(--dp-spacing-gap)]">
         <div class="dp-panel p-4">
           <span class="mono-label block">Account Equity</span>
-          <span id="card-equity" class="text-xl font-mono text-white mt-1 block font-normal">$10,000.00</span>
-          <span class="mono-meta text-[11px]">Delta USD Balance</span>
+          <span id="card-equity" class="text-xl font-mono text-white mt-1 block font-normal">$0.00</span>
+          <span class="mono-meta text-[11px]">Delta India Live Collateral</span>
         </div>
         <div class="dp-panel p-4">
           <span class="mono-label block">Unrealized P&L</span>
@@ -1352,7 +1352,7 @@
       }
 
       // Equity & PnL
-      const eq = Number(col.equity ?? col.balance ?? 10000);
+      const eq = Number(col.equity ?? col.balance ?? 0);
       const upnl = Number(col.unrealized_pnl ?? 0);
       const rpnl = Number(col.realized_pnl ?? 0);
 

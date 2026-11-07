@@ -420,12 +420,13 @@
           </div>
         </div>
 
-        <div id="landing-tickers" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[var(--dp-spacing-gap)]">
+        <div id="landing-tickers" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-[var(--dp-spacing-gap)]">
           <!-- Populated by JS -->
-          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading BTC/USDT...</div>
-          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading ETH/USDT...</div>
-          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading SOL/USDT...</div>
-          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading XRP/USDT...</div>
+          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading BTC/USD...</div>
+          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading ETH/USD...</div>
+          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading SOL/USD...</div>
+          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading XRP/USD...</div>
+          <div class="dp-panel p-4 font-mono text-xs text-[var(--dp-color-meta)]">Loading XAUT/USD...</div>
         </div>
       </div>
     </section>
@@ -622,8 +623,8 @@
       <div class="grid grid-cols-2 md:grid-cols-4 gap-[var(--dp-spacing-gap)]">
         <div class="dp-panel p-4">
           <span class="mono-label block">Account Equity</span>
-          <span id="card-equity" class="text-xl font-mono text-white mt-1 block font-normal">$10,000.00</span>
-          <span class="mono-meta text-[11px]">Delta USD Balance</span>
+          <span id="card-equity" class="text-xl font-mono text-white mt-1 block font-normal">$0.00</span>
+          <span class="mono-meta text-[11px]">Delta India Live Collateral</span>
         </div>
         <div class="dp-panel p-4">
           <span class="mono-label block">Unrealized P&L</span>
@@ -648,7 +649,7 @@
           <span class="mono-label">Active Perpetual Markets</span>
           <span class="mono-meta">Live Delta Quotes</span>
         </div>
-        <div id="dash-market-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[var(--dp-spacing-gap)]">
+        <div id="dash-market-cards" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-[var(--dp-spacing-gap)]">
           <!-- Populated by JS -->
         </div>
       </div>
@@ -805,7 +806,14 @@
             <span>Default Leverage:</span>
             <span id="label-leverage" class="text-white font-medium">5x</span>
           </div>
-          <input type="range" id="input-leverage" min="1" max="20" step="1" value="5" class="w-full accent-white" oninput="document.getElementById('label-leverage').textContent = this.value + 'x'">
+          <input type="range" id="input-leverage" min="1" max="100" step="1" value="5" class="w-full accent-white" oninput="document.getElementById('label-leverage').textContent = this.value + 'x'">
+          <div class="flex justify-between gap-1 pt-1.5">
+            <button type="button" onclick="setLeveragePreset(5)" class="px-2 py-0.5 text-[10px] rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-bg)] hover:bg-white/10 text-[var(--dp-color-read)] hover:text-white font-mono">5x</button>
+            <button type="button" onclick="setLeveragePreset(10)" class="px-2 py-0.5 text-[10px] rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-bg)] hover:bg-white/10 text-[var(--dp-color-read)] hover:text-white font-mono">10x</button>
+            <button type="button" onclick="setLeveragePreset(25)" class="px-2 py-0.5 text-[10px] rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-bg)] hover:bg-white/10 text-[var(--dp-color-read)] hover:text-white font-mono">25x</button>
+            <button type="button" onclick="setLeveragePreset(50)" class="px-2 py-0.5 text-[10px] rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-bg)] hover:bg-white/10 text-[var(--dp-color-read)] hover:text-white font-mono">50x</button>
+            <button type="button" onclick="setLeveragePreset(100)" class="px-2 py-0.5 text-[10px] rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-bg)] hover:bg-white/10 text-[var(--dp-color-read)] hover:text-white font-mono">100x</button>
+          </div>
         </div>
 
         <div>
@@ -850,6 +858,21 @@
     try {
       if (typeof window.supabase !== 'undefined' && window.supabase.createClient) {
         supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        supabaseClient.auth.onAuthStateChange(async (event, session) => {
+          if (session && session.access_token) {
+            currentUser = session.user;
+            currentTenantId = session.user.id;
+            localStorage.setItem('token', session.access_token);
+            localStorage.setItem('tenant_id', currentTenantId);
+            updateNavUser();
+          } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+            currentUser = null;
+            currentTenantId = 'default';
+            localStorage.removeItem('token');
+            localStorage.removeItem('tenant_id');
+            updateNavUser();
+          }
+        });
       }
     } catch (e) {
       console.warn('Supabase init:', e);
@@ -859,6 +882,8 @@
     let currentTenantId = 'default';
     let isRunning = false;
     let ws = null;
+    let wsReconnectTimer = null;
+    let wsPingTimer = null;
     let pollInterval = null;
     let latestStateData = null;
 
@@ -1086,6 +1111,21 @@
     async function forceFetchStatus() {
       try {
         const res = await fetch(`${BACKEND_URL}/api/status`, { headers: getAuthHeaders() });
+        if (res.status === 401 && localStorage.getItem('token')) {
+          console.warn('[HTTP AUTH] 401 Unauthorized received. Refreshing or purging session.');
+          localStorage.removeItem('token');
+          if (supabaseClient) {
+            try {
+              const { data: { session } } = await supabaseClient.auth.refreshSession();
+              if (session && session.access_token) {
+                setSession(session);
+                return;
+              }
+            } catch (_) {}
+          }
+          setSession(null);
+          return;
+        }
         if (res.ok) {
           const data = await res.json();
           renderDashboard(data);
@@ -1104,14 +1144,55 @@
       await forceFetchStatus();
     }
 
-    function initWs() {
-      if (ws) { try { ws.close(); } catch (_) {} }
-      const token = localStorage.getItem('token') || '';
-      const qs = token ? `?token=${token}&tenant_id=${currentTenantId}` : '';
+    async function initWs() {
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = null;
+      }
+      if (wsPingTimer) {
+        clearInterval(wsPingTimer);
+        wsPingTimer = null;
+      }
+      if (ws) {
+        try {
+          ws.onclose = null;
+          ws.onerror = null;
+          ws.close();
+        } catch (_) {}
+        ws = null;
+      }
+      let token = localStorage.getItem('token') || '';
+      if (supabaseClient) {
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          if (session && session.access_token) {
+            token = session.access_token;
+            localStorage.setItem('token', token);
+            if (session.user) {
+              currentUser = session.user;
+              currentTenantId = session.user.id;
+            }
+          } else {
+            localStorage.removeItem('token');
+            token = '';
+          }
+        } catch (_) {}
+      }
+      const qs = token ? `?token=${encodeURIComponent(token)}&tenant_id=${encodeURIComponent(currentTenantId)}` : `?tenant_id=${encodeURIComponent(currentTenantId)}`;
       try {
         ws = new WebSocket(`${WS_BASE}/ws/live${qs}`);
         ws.onopen = () => {
           console.debug('WS connected');
+          if (wsReconnectTimer) {
+            clearTimeout(wsReconnectTimer);
+            wsReconnectTimer = null;
+          }
+          if (wsPingTimer) clearInterval(wsPingTimer);
+          wsPingTimer = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              try { ws.send('ping'); } catch (_) {}
+            }
+          }, 25000); // 25s keepalive to prevent Render 55s proxy timeout
           if (document.hidden && ws.readyState === WebSocket.OPEN) {
             try { ws.send(JSON.stringify({ action: 'pause' })); } catch (_) {}
           }
@@ -1119,13 +1200,45 @@
         ws.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data);
+            if (data.type === 'auth_notice' && data.status === 'expired') {
+              console.warn('[WS AUTH] Server reported token expired. Resetting session to guest mode.');
+              localStorage.removeItem('token');
+              currentUser = null;
+              currentTenantId = 'default';
+              updateNavUser();
+            }
             renderDashboard(data);
             if (data.tickers) renderLandingTickers(data.tickers);
           } catch (_) {}
         };
-        ws.onclose = () => {
-          console.debug('WS closed, fallback to polling');
-          setTimeout(initWs, 5000);
+        ws.onclose = async (event) => {
+          console.debug('WS closed:', event ? event.code : 'unknown');
+          if (wsPingTimer) {
+            clearInterval(wsPingTimer);
+            wsPingTimer = null;
+          }
+          if (wsReconnectTimer) {
+            clearTimeout(wsReconnectTimer);
+            wsReconnectTimer = null;
+          }
+          if (event && event.code === 1008) {
+            console.warn('[WS AUTH] 1008 Unauthorized: token invalid or expired. Purging dead token.');
+            localStorage.removeItem('token');
+            if (supabaseClient) {
+              try {
+                const { data: { session } } = await supabaseClient.auth.refreshSession();
+                if (session && session.access_token) {
+                  setSession(session);
+                  wsReconnectTimer = setTimeout(initWs, 1500);
+                  return;
+                }
+              } catch (_) {}
+            }
+            currentUser = null;
+            currentTenantId = 'default';
+            updateNavUser();
+          }
+          wsReconnectTimer = setTimeout(initWs, 5000);
         };
       } catch (_) {}
     }
@@ -1141,7 +1254,7 @@
       } else {
         if (ws && ws.readyState === WebSocket.OPEN) {
           try { ws.send(JSON.stringify({ action: 'resume' })); } catch (_) {}
-        } else {
+        } else if (!ws || ws.readyState === WebSocket.CLOSED) {
           initWs();
         }
         if (pollInterval) clearInterval(pollInterval);
@@ -1156,11 +1269,11 @@
     function renderLandingTickers(tickers) {
       const container = document.getElementById('landing-tickers');
       if (!container) return;
-      const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+      const symbols = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'XAUTUSD'];
       container.replaceChildren();
 
       symbols.forEach(sym => {
-        const t = tickers[sym] || {};
+        const t = tickers[sym] || tickers[sym.replace('USD', 'USDT')] || {};
         const price = Number(t.mark_price || t.close || 0);
         const chg = Number(t.change_24h || 0);
         const isUp = chg >= 0;
@@ -1169,7 +1282,7 @@
         card.className = 'dp-panel p-4 flex flex-col justify-between';
         card.innerHTML = `
           <div class="flex items-center justify-between text-xs font-mono text-[var(--dp-color-meta)]">
-            <span class="font-medium text-white">${sym.replace('USDT', '/USDT')}</span>
+            <span class="font-medium text-white">${sym.replace('USDT', '/USDT').replace('USD', '/USD')}</span>
             <span class="${isUp ? 'text-white' : 'text-[var(--dp-color-meta)]'}">${isUp ? '+' : ''}${chg.toFixed(2)}%</span>
           </div>
           <div class="text-xl font-mono text-[var(--dp-color-bright)] mt-3">
@@ -1239,7 +1352,7 @@
       }
 
       // Equity & PnL
-      const eq = Number(col.equity ?? col.balance ?? 10000);
+      const eq = Number(col.equity ?? col.balance ?? 0);
       const upnl = Number(col.unrealized_pnl ?? 0);
       const rpnl = Number(col.realized_pnl ?? 0);
 
@@ -1276,11 +1389,11 @@
     function renderMarketCards(tickers, indicators) {
       const container = document.getElementById('dash-market-cards');
       if (!container) return;
-      const symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'];
+      const symbols = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'XRPUSD', 'XAUTUSD'];
       container.replaceChildren();
 
       symbols.forEach(sym => {
-        const t = tickers[sym] || {};
+        const t = tickers[sym] || tickers[sym.replace('USD', 'USDT')] || {};
         const mark = Number(t.mark_price || 0);
         const chg = Number(t.change_24h || 0);
         const isUp = chg >= 0;
@@ -1289,7 +1402,7 @@
         card.className = 'dp-panel p-4 flex flex-col justify-between';
         card.innerHTML = `
           <div class="flex items-center justify-between">
-            <span class="mono-label">${sym.replace('USDT', '/USDT')}</span>
+            <span class="mono-label">${sym.replace('USDT', '/USDT').replace('USD', '/USD')}</span>
             <span class="signal-live" title="Active Feed"></span>
           </div>
           <div class="mt-3">
@@ -1393,9 +1506,12 @@
     // -------------------------------------------------------------------------
     async function toggleEngine() {
       const action = isRunning ? 'stop' : 'start';
+      const activeTenant = (currentTenantId && currentTenantId !== 'default') 
+        ? currentTenantId 
+        : (localStorage.getItem('tenant_id') || 'default');
       try {
-        const endpoint = (currentTenantId && currentTenantId !== 'default')
-          ? `${BACKEND_URL}/api/tenants/${currentTenantId}/control/${action}`
+        const endpoint = (activeTenant && activeTenant !== 'default')
+          ? `${BACKEND_URL}/api/tenants/${activeTenant}/control/${action}`
           : `${BACKEND_URL}/api/control/${action}`;
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -1410,10 +1526,13 @@
     }
 
     async function emergencyFlatten() {
-      if (!confirm('KILL SWITCH: Close ALL open positions and cancel ALL resting orders immediately?')) return;
+      if (!confirm('KILL SWITCH: Close ALL open positions and cancel ALL resting orders immediately for this desk?')) return;
+      const activeTenant = (currentTenantId && currentTenantId !== 'default') 
+        ? currentTenantId 
+        : (localStorage.getItem('tenant_id') || 'default');
       try {
-        const endpoint = (currentTenantId && currentTenantId !== 'default')
-          ? `${BACKEND_URL}/api/tenants/${currentTenantId}/control/flatten`
+        const endpoint = (activeTenant && activeTenant !== 'default')
+          ? `${BACKEND_URL}/api/tenants/${activeTenant}/control/flatten`
           : `${BACKEND_URL}/api/control/flatten`;
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -1488,6 +1607,33 @@
         if (keyInput) keyInput.placeholder = 'Enter API Key...';
         if (secretInput) secretInput.placeholder = 'Enter API Secret...';
       }
+
+      // Populate slider values from current tenant / status
+      const curLev = tenant.leverage || status.default_leverage || status.leverage || 5;
+      const curRisk = tenant.risk_pct || status.default_risk_pct || status.risk_pct || 1.0;
+      const curMaxDd = tenant.max_drawdown_pct || status.max_drawdown_pct || 4.0;
+
+      const inputLev = document.getElementById('input-leverage');
+      const labelLev = document.getElementById('label-leverage');
+      if (inputLev) inputLev.value = curLev;
+      if (labelLev) labelLev.textContent = curLev + 'x';
+
+      const inputRisk = document.getElementById('input-risk');
+      const labelRisk = document.getElementById('label-risk');
+      if (inputRisk) inputRisk.value = curRisk;
+      if (labelRisk) labelRisk.textContent = Number(curRisk).toFixed(1) + '%';
+
+      const inputMaxDd = document.getElementById('input-maxdd');
+      const labelMaxDd = document.getElementById('label-maxdd');
+      if (inputMaxDd) inputMaxDd.value = curMaxDd;
+      if (labelMaxDd) labelMaxDd.textContent = Number(curMaxDd).toFixed(1) + '%';
+    }
+
+    function setLeveragePreset(val) {
+      const input = document.getElementById('input-leverage');
+      const label = document.getElementById('label-leverage');
+      if (input) input.value = val;
+      if (label) label.textContent = val + 'x';
     }
 
     function closeSettingsModal() {
@@ -1597,6 +1743,7 @@
     window.emergencyFlatten = emergencyFlatten;
     window.openSettingsModal = openSettingsModal;
     window.closeSettingsModal = closeSettingsModal;
+    window.setLeveragePreset = setLeveragePreset;
     window.saveSettings = saveSettings;
     window.resetApiKeys = resetApiKeys;
     window.closePosition = closePosition;
@@ -1623,7 +1770,14 @@
       if (supabaseClient) {
         try {
           const { data: { session } } = await supabaseClient.auth.getSession();
-          if (session) setSession(session);
+          if (session) {
+            setSession(session);
+          } else {
+            localStorage.removeItem('token');
+            localStorage.removeItem('tenant_id');
+            currentUser = null;
+            currentTenantId = 'default';
+          }
         } catch (_) {}
       }
 

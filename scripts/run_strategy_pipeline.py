@@ -53,7 +53,7 @@ def print_banner(title: str) -> None:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Delta-Bot Strategy Pipeline Verification")
-    parser.add_argument("--symbol", type=str, default="BTCUSDT", help="Contract symbol (default: BTCUSDT)")
+    parser.add_argument("--symbol", type=str, default="BTCUSD", help="Contract symbol (default: BTCUSD)")
     parser.add_argument("--bars", type=int, default=60, help="Number of historical bars to fetch (default: 60)")
     parser.add_argument("--equity", type=float, default=10000.0, help="Account equity USD (default: 10000.0)")
     parser.add_argument("--trailing", action="store_true", help="Enable trailing stop ratchet")

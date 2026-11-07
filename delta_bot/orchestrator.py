@@ -101,7 +101,7 @@ class TradingBotOrchestrator:
         )
         self.risk_manager: RiskManager = risk_manager or RiskManager(
             config=risk_cfg,
-            initial_equity=10000.0,
+            initial_equity=0.0 if self.mode == ExecutionMode.LIVE else 10000.0,
         )
 
         # Execution Engine based on Mode
@@ -159,7 +159,7 @@ class TradingBotOrchestrator:
         init_bal = (
             self.paper_simulator.wallet.initial_balance
             if self.paper_simulator and hasattr(self.paper_simulator, "wallet")
-            else 10000.0
+            else (0.0 if self.mode == ExecutionMode.LIVE else 10000.0)
         )
         default_cfg = TenantConfig(
             tenant_id="default",
@@ -1067,16 +1067,20 @@ class TradingBotOrchestrator:
 
         try:
             balances = await self.rest_client.get_wallet_balances()
-            # Default to USDT or USD collateral
-            for b in balances:
-                if b.asset_symbol in ("USDT", "USD"):
-                    return b.balance
+            # Search for positive INR, USD, USDT collateral on Delta Exchange India
+            for sym in ("INR", "USD", "USDT"):
+                b = next((x for x in balances if x.asset_symbol.upper() == sym), None)
+                if b and float(b.balance) > 0:
+                    return float(b.balance)
             if balances:
-                return balances[0].balance
+                pos_bals = [x for x in balances if float(x.balance) > 0]
+                if pos_bals:
+                    return float(pos_bals[0].balance)
+                return float(balances[0].balance)
         except Exception as e:
             logger.debug("Failed to retrieve live wallet balance for equity: %s", e)
 
-        return 10000.0
+        return 0.0
 
     def get_active_positions_count(self) -> int:
         """Counts current active positions across target products."""
@@ -1107,10 +1111,17 @@ class TradingBotOrchestrator:
             total_trades = paper_stats["total_trades"]
             winning_trades = paper_stats["winning_trades"]
         else:
-            balance = 10000.0
-            equity = 10000.0
-            realized_pnl = 0.0
-            unrealized_pnl = 0.0
+            def_t = self.tenant_manager.get_tenant("default") if hasattr(self, "tenant_manager") else None
+            if def_t and def_t.last_sync_time > 0:
+                balance = def_t.live_balance
+                equity = def_t.live_equity
+                realized_pnl = def_t.live_realized_pnl
+                unrealized_pnl = def_t.live_unrealized_pnl
+            else:
+                balance = 0.0
+                equity = 0.0
+                realized_pnl = 0.0
+                unrealized_pnl = 0.0
             win_rate = 0.0
             drawdown = 0.0
             total_trades = 0

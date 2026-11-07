@@ -54,7 +54,7 @@ def print_banner(title: str) -> None:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Delta-Bot Phase 5 State Reconciliation & Private WS Verification")
-    parser.add_argument("--symbol", default="BTCUSDT", help="Target contract symbol (default: BTCUSDT)")
+    parser.add_argument("--symbol", default="BTCUSD", help="Target contract symbol (default: BTCUSD)")
     parser.add_argument("--equity", type=float, default=10000.0, help="Account equity for sizing (default: 10000.0)")
     parser.add_argument("--leverage", type=int, default=5, help="Configured order leverage (default: 5)")
     args = parser.parse_args()

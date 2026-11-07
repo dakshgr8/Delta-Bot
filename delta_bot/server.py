@@ -156,7 +156,7 @@ class TenantCreateRequest(BaseModel):
     tenant_id: str | None = Field(default=None, description="Custom unique tenant slug/ID")
     name: str = Field(description="Display name for the tenant (e.g. Alpha Desk)")
     mode: str = Field(default="live", description="Execution mode: 'live'")
-    initial_balance: float = Field(default=10000.0, ge=100.0, description="Virtual starting collateral in USD")
+    initial_balance: float = Field(default=0.0, ge=0.0, description="Collateral balance in USD")
     delta_api_key: str = Field(default="", description="Delta Exchange API Key")
     delta_api_secret: str = Field(default="", description="Delta Exchange API Secret")
     delta_base_url: str = Field(default="https://api.india.delta.exchange", description="Delta Exchange India REST API URL")
@@ -733,7 +733,7 @@ def get_full_state_packet(
                 equity = tenant.live_equity
                 available_margin = tenant.live_available_margin
             else:
-                balance = tenant.config.initial_balance
+                balance = 0.0 if tenant.mode == ExecutionMode.LIVE else tenant.config.initial_balance
                 equity = balance
                 available_margin = balance
             realized_pnl = tenant.live_realized_pnl
@@ -769,15 +769,23 @@ def get_full_state_packet(
             winning_trades = p_stats["winning_trades"]
             available_margin = p_stats["available_margin"]
         else:
-            balance = 10000.0
-            equity = 10000.0
-            realized_pnl = 0.0
-            unrealized_pnl = 0.0
+            def_t = orchestrator.tenant_manager.get_tenant("default") if hasattr(orchestrator, "tenant_manager") else None
+            if def_t and def_t.last_sync_time > 0:
+                balance = def_t.live_balance
+                equity = def_t.live_equity
+                available_margin = def_t.live_available_margin
+                realized_pnl = def_t.live_realized_pnl
+                unrealized_pnl = def_t.live_unrealized_pnl
+            else:
+                balance = 0.0
+                equity = 0.0
+                available_margin = 0.0
+                realized_pnl = 0.0
+                unrealized_pnl = 0.0
             win_rate = 0.0
             drawdown = 0.0
             total_trades = 0
             winning_trades = 0
-            available_margin = 10000.0
 
         positions = get_all_positions_summary(orchestrator)
         orders = get_all_orders_summary(orchestrator)

@@ -562,21 +562,26 @@ class ExecutionManager:
         available_margin = available_margin_override
         if available_margin is None:
             if self.config.execution_mode == ExecutionMode.DRY_RUN or not self.client.config.has_valid_credentials():
-                available_margin = account_equity * 0.95
+                available_margin = account_equity * 0.95 if account_equity > 0 else 0.0
             else:
                 try:
                     balances = await self.client.get_wallet_balances()
                     target_symbol = spec.quoting_symbol or self.config.default_collateral_symbol
-                    matched = [b for b in balances if b.asset_symbol.upper() == target_symbol.upper()]
+                    priority_symbols = [target_symbol.upper(), "INR", "USD", "USDT"]
+                    matched = [b for b in balances if b.asset_symbol.upper() in priority_symbols and float(b.available_balance) > 0]
                     if matched:
-                        available_margin = matched[0].available_balance
+                        available_margin = float(matched[0].available_balance)
                     elif balances:
-                        available_margin = balances[0].available_balance
+                        pos_bals = [b for b in balances if float(b.available_balance) > 0]
+                        available_margin = float(pos_bals[0].available_balance) if pos_bals else float(balances[0].available_balance)
                     else:
                         available_margin = 0.0
                 except Exception as exc:
                     logger.warning("Failed to fetch live wallet balances (%s), falling back to equity.", exc)
-                    available_margin = account_equity * 0.95
+                    available_margin = account_equity * 0.95 if account_equity > 0 else 0.0
+
+        if account_equity <= 0 and available_margin is not None and available_margin > 0:
+            account_equity = available_margin
 
         return self.risk_manager.size_position(
             spec=spec,
@@ -594,7 +599,7 @@ class ExecutionManager:
     async def execute_signal(
         self,
         order_intent: OrderIntent,
-        account_equity: float = 10000.0,
+        account_equity: float = 0.0,
         available_margin_override: float | None = None,
     ) -> ExchangeOrder | None:
         """

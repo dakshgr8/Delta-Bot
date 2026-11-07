@@ -128,7 +128,7 @@ class RiskManager:
     and daily drawdown circuit breakers.
     """
 
-    def __init__(self, config: RiskConfig | None = None, initial_equity: float = 10000.0) -> None:
+    def __init__(self, config: RiskConfig | None = None, initial_equity: float = 0.0) -> None:
         self.config: RiskConfig = config or RiskConfig()
         self.circuit_breaker: CircuitBreakerState = CircuitBreakerState(
             session_start_equity=initial_equity,
@@ -154,6 +154,9 @@ class RiskManager:
         Updates daily equity watermark and tests against the daily maximum drawdown limit.
         Returns True if safe, False if circuit breaker tripped.
         """
+        if current_equity <= 0:
+            return True
+
         if self.circuit_breaker.session_start_equity <= 0:
             self.circuit_breaker.session_start_equity = current_equity
             self.circuit_breaker.peak_daily_equity = current_equity
@@ -164,9 +167,6 @@ class RiskManager:
         # Drawdown measured against starting equity of current session
         start_eq = self.circuit_breaker.session_start_equity
         if start_eq > 0 and current_equity < start_eq:
-            # If current equity is 0 and was never funded (unfunded live account), do not trip
-            if current_equity <= 0 and start_eq == 10000.0:
-                return True
             drawdown_pct = ((start_eq - current_equity) / start_eq) * 100.0
             self.circuit_breaker.current_drawdown_pct = round(drawdown_pct, 2)
 
@@ -243,6 +243,17 @@ class RiskManager:
         Guarantees that final contract lots never exceed initial margin limits or trigger
         exchange insufficient_margin rejections.
         """
+        if account_equity <= 0 or available_margin <= 0:
+            return MarginCheckResult(
+                is_margin_sufficient=False,
+                required_margin=0.0,
+                available_margin=max(0.0, available_margin),
+                risk_based_lots=0,
+                margin_based_lots=0,
+                final_lots=0,
+                rejection_reason="Insufficient collateral: account equity or available margin is $0.00",
+            )
+
         leverage = float(self.config.max_leverage)
         safety_buf = self.config.margin_safety_buffer
         risk_pct = risk_pct_override or self.config.max_account_risk_pct

@@ -47,7 +47,7 @@ def print_banner(title: str) -> None:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Delta-Bot Order Execution & Lifecycle Verification")
-    parser.add_argument("--symbol", type=str, default="BTCUSDT", help="Contract symbol (default: BTCUSDT)")
+    parser.add_argument("--symbol", type=str, default="BTCUSD", help="Contract symbol (default: BTCUSD)")
     parser.add_argument("--leverage", type=int, default=5, help="Leverage tier (default: 5)")
     parser.add_argument("--equity", type=float, default=10000.0, help="Account equity USD (default: 10000.0)")
     parser.add_argument("--dry-run", action="store_true", default=True, help="Run in DRY_RUN simulated mode")

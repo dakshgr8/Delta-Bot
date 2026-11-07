@@ -139,7 +139,7 @@ class TenantConfig(BaseModel):
     user_id: str | None = None
     name: str
     mode: str = "live"  # Exclusively "live" for real trading
-    initial_balance: float = 10000.0
+    initial_balance: float = 0.0
     delta_api_key: str = ""
     delta_api_secret: str = ""
     delta_base_url: str = "https://api.india.delta.exchange"
@@ -864,7 +864,7 @@ class TenantManager:
             user_id=user_id,
             name=f"{name_part}'s Trading Desk",
             mode="live",
-            initial_balance=10000.0,
+            initial_balance=0.0,
             delta_base_url="https://api.india.delta.exchange",
             delta_ws_url="wss://socket.india.delta.exchange",
             leverage=5,
@@ -1113,8 +1113,8 @@ class TenantManager:
                     tenant_id=t_id,
                     user_id=str(row["user_id"]) if row.get("user_id") else None,
                     name=row.get("name", t_id),
-                    mode=row.get("mode", "paper"),
-                    initial_balance=float(row.get("initial_balance", 10000.0)),
+                    mode=row.get("mode", "live"),
+                    initial_balance=float(row.get("initial_balance", 0.0)),
                     delta_api_key=raw_k,
                     delta_api_secret=raw_s,
                     delta_base_url=row.get("delta_base_url") or "https://api.india.delta.exchange",
