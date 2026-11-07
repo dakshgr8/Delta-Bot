@@ -2174,6 +2174,12 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                         target_tenant = t_inst.config.tenant_id
                     else:
                         target_tenant = f"user-{user_id[:8]}"
+                elif tenant_id is not None:
+                    logger.info(
+                        "[WS AUTH] Web client provided unverified/expired token. Connecting as guest on tenant 'default'"
+                    )
+                    user_id = None
+                    target_tenant = "default"
                 elif expected_token:
                     logger.warning("[WS AUTH] WebSocket connection rejected: invalid Supabase token under protected dashboard")
                     try:
@@ -2187,6 +2193,10 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                     )
                     user_id = None
                     target_tenant = "default"
+            elif tenant_id is not None:
+                # Web dashboard client connecting without token (guest / unauthenticated landing page)
+                user_id = None
+                target_tenant = "default"
             elif expected_token:
                 logger.warning("[WS AUTH] WebSocket connection rejected: invalid or missing authentication token")
                 try:

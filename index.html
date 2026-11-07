@@ -850,6 +850,21 @@
     try {
       if (typeof window.supabase !== 'undefined' && window.supabase.createClient) {
         supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        supabaseClient.auth.onAuthStateChange(async (event, session) => {
+          if (session && session.access_token) {
+            currentUser = session.user;
+            currentTenantId = session.user.id;
+            localStorage.setItem('token', session.access_token);
+            localStorage.setItem('tenant_id', currentTenantId);
+            updateNavUser();
+          } else if (event === 'SIGNED_OUT' || event === 'USER_DELETED') {
+            currentUser = null;
+            currentTenantId = 'default';
+            localStorage.removeItem('token');
+            localStorage.removeItem('tenant_id');
+            updateNavUser();
+          }
+        });
       }
     } catch (e) {
       console.warn('Supabase init:', e);
@@ -859,6 +874,8 @@
     let currentTenantId = 'default';
     let isRunning = false;
     let ws = null;
+    let wsReconnectTimer = null;
+    let wsPingTimer = null;
     let pollInterval = null;
     let latestStateData = null;
 
@@ -1086,6 +1103,21 @@
     async function forceFetchStatus() {
       try {
         const res = await fetch(`${BACKEND_URL}/api/status`, { headers: getAuthHeaders() });
+        if (res.status === 401 && localStorage.getItem('token')) {
+          console.warn('[HTTP AUTH] 401 Unauthorized received. Refreshing or purging session.');
+          localStorage.removeItem('token');
+          if (supabaseClient) {
+            try {
+              const { data: { session } } = await supabaseClient.auth.refreshSession();
+              if (session && session.access_token) {
+                setSession(session);
+                return;
+              }
+            } catch (_) {}
+          }
+          setSession(null);
+          return;
+        }
         if (res.ok) {
           const data = await res.json();
           renderDashboard(data);
@@ -1104,14 +1136,55 @@
       await forceFetchStatus();
     }
 
-    function initWs() {
-      if (ws) { try { ws.close(); } catch (_) {} }
-      const token = localStorage.getItem('token') || '';
-      const qs = token ? `?token=${token}&tenant_id=${currentTenantId}` : '';
+    async function initWs() {
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = null;
+      }
+      if (wsPingTimer) {
+        clearInterval(wsPingTimer);
+        wsPingTimer = null;
+      }
+      if (ws) {
+        try {
+          ws.onclose = null;
+          ws.onerror = null;
+          ws.close();
+        } catch (_) {}
+        ws = null;
+      }
+      let token = localStorage.getItem('token') || '';
+      if (supabaseClient) {
+        try {
+          const { data: { session } } = await supabaseClient.auth.getSession();
+          if (session && session.access_token) {
+            token = session.access_token;
+            localStorage.setItem('token', token);
+            if (session.user) {
+              currentUser = session.user;
+              currentTenantId = session.user.id;
+            }
+          } else {
+            localStorage.removeItem('token');
+            token = '';
+          }
+        } catch (_) {}
+      }
+      const qs = token ? `?token=${encodeURIComponent(token)}&tenant_id=${encodeURIComponent(currentTenantId)}` : `?tenant_id=${encodeURIComponent(currentTenantId)}`;
       try {
         ws = new WebSocket(`${WS_BASE}/ws/live${qs}`);
         ws.onopen = () => {
           console.debug('WS connected');
+          if (wsReconnectTimer) {
+            clearTimeout(wsReconnectTimer);
+            wsReconnectTimer = null;
+          }
+          if (wsPingTimer) clearInterval(wsPingTimer);
+          wsPingTimer = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              try { ws.send('ping'); } catch (_) {}
+            }
+          }, 25000); // 25s keepalive to prevent Render 55s proxy timeout
           if (document.hidden && ws.readyState === WebSocket.OPEN) {
             try { ws.send(JSON.stringify({ action: 'pause' })); } catch (_) {}
           }
@@ -1119,13 +1192,45 @@
         ws.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data);
+            if (data.type === 'auth_notice' && data.status === 'expired') {
+              console.warn('[WS AUTH] Server reported token expired. Resetting session to guest mode.');
+              localStorage.removeItem('token');
+              currentUser = null;
+              currentTenantId = 'default';
+              updateNavUser();
+            }
             renderDashboard(data);
             if (data.tickers) renderLandingTickers(data.tickers);
           } catch (_) {}
         };
-        ws.onclose = () => {
-          console.debug('WS closed, fallback to polling');
-          setTimeout(initWs, 5000);
+        ws.onclose = async (event) => {
+          console.debug('WS closed:', event ? event.code : 'unknown');
+          if (wsPingTimer) {
+            clearInterval(wsPingTimer);
+            wsPingTimer = null;
+          }
+          if (wsReconnectTimer) {
+            clearTimeout(wsReconnectTimer);
+            wsReconnectTimer = null;
+          }
+          if (event && event.code === 1008) {
+            console.warn('[WS AUTH] 1008 Unauthorized: token invalid or expired. Purging dead token.');
+            localStorage.removeItem('token');
+            if (supabaseClient) {
+              try {
+                const { data: { session } } = await supabaseClient.auth.refreshSession();
+                if (session && session.access_token) {
+                  setSession(session);
+                  wsReconnectTimer = setTimeout(initWs, 1500);
+                  return;
+                }
+              } catch (_) {}
+            }
+            currentUser = null;
+            currentTenantId = 'default';
+            updateNavUser();
+          }
+          wsReconnectTimer = setTimeout(initWs, 5000);
         };
       } catch (_) {}
     }
@@ -1141,7 +1246,7 @@
       } else {
         if (ws && ws.readyState === WebSocket.OPEN) {
           try { ws.send(JSON.stringify({ action: 'resume' })); } catch (_) {}
-        } else {
+        } else if (!ws || ws.readyState === WebSocket.CLOSED) {
           initWs();
         }
         if (pollInterval) clearInterval(pollInterval);
@@ -1623,7 +1728,14 @@
       if (supabaseClient) {
         try {
           const { data: { session } } = await supabaseClient.auth.getSession();
-          if (session) setSession(session);
+          if (session) {
+            setSession(session);
+          } else {
+            localStorage.removeItem('token');
+            localStorage.removeItem('tenant_id');
+            currentUser = null;
+            currentTenantId = 'default';
+          }
         } catch (_) {}
       }
 

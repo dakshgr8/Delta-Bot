@@ -14,7 +14,11 @@ services:
       - key: WEB_ENABLED
         value: "true"
       - key: DASHBOARD_AUTH_TOKEN
-        generateValue: true
+        sync: false
+      - key: SUPABASE_URL
+        value: https://clkkzwgpumbnbtvsxkmw.supabase.co
+      - key: SUPABASE_KEY
+        value: sb_publishable_rvcmboPnre20bT51oz82qQ_q3SvnIZY
       - key: DELTA_API_KEY
         sync: false
       - key: DELTA_API_SECRET
