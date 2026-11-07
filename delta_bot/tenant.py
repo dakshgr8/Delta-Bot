@@ -520,6 +520,19 @@ class TenantInstance:
         old_mode = self.mode
         self.mode = new_mode
         self.config.mode = new_mode.value.lower()
+
+        # Instantly reset transient metrics cache so previous desk figures never bleed
+        self.last_sync_time = 0.0
+        self.last_sync_error = None
+        self.live_balance = 0.0
+        self.live_equity = 0.0
+        self.live_available_margin = 0.0
+        self.live_unrealized_pnl = 0.0
+        self.live_realized_pnl = 0.0
+        self.live_positions = []
+        if hasattr(self, "state_manager") and hasattr(self.state_manager, "_open_positions"):
+            self.state_manager._open_positions.clear()
+
         self.reload_credentials()
         if hasattr(self, "tenant_manager") and self.tenant_manager is not None:
             try:
@@ -730,12 +743,6 @@ class TenantInstance:
                 self.config.tenant_id,
                 e,
             )
-        finally:
-            if hasattr(self, "tenant_manager") and self.tenant_manager is not None:
-                try:
-                    self.tenant_manager.sync_tenant_to_supabase(self)
-                except Exception as sync_e:
-                    logger.debug("Background auto-sync to Supabase failed: %s", sync_e)
 
     async def emergency_flatten(self) -> dict[str, Any]:
         """Emergency market-closes all active positions and cancels resting orders for this tenant."""
@@ -873,9 +880,15 @@ class TenantManager:
             self.active_tenant_id = default_instance.config.tenant_id
 
     def get_tenant(self, tenant_id: str | None = None) -> TenantInstance | None:
-        """Retrieves tenant instance by ID or user ID, falling back to active or default tenant."""
-        if not tenant_id:
-            tenant_id = self.active_tenant_id
+        """Retrieves tenant instance by ID or user ID."""
+        if not tenant_id or str(tenant_id).strip() in ("", "default"):
+            if "default" in self.tenants:
+                return self.tenants["default"]
+            if self.active_tenant_id in self.tenants:
+                return self.tenants[self.active_tenant_id]
+            if self.tenants:
+                return next(iter(self.tenants.values()))
+            return None
 
         clean_id = str(tenant_id).strip()
         if clean_id in self.tenants:
@@ -886,10 +899,6 @@ class TenantManager:
         if by_user:
             return by_user
 
-        if "default" in self.tenants:
-            return self.tenants["default"]
-        if self.tenants:
-            return next(iter(self.tenants.values()))
         return None
 
     def get_tenant_by_user_id(self, user_id: str) -> TenantInstance | None:
@@ -897,12 +906,18 @@ class TenantManager:
         if not user_id:
             return None
         clean_uid = str(user_id).strip()
+        raw_uid = clean_uid[5:] if clean_uid.startswith("user-") else clean_uid
         for t in self.tenants.values():
-            if t.config.user_id == clean_uid:
+            if t.config.user_id and (
+                t.config.user_id == clean_uid
+                or t.config.user_id == raw_uid
+                or t.config.user_id.startswith(raw_uid)
+                or raw_uid.startswith(t.config.user_id)
+            ):
                 return t
         prefix = f"user-{clean_uid[:8]}"
         for t_id, t in self.tenants.items():
-            if t_id == clean_uid or t_id == prefix:
+            if t_id == clean_uid or t_id == prefix or (raw_uid and t_id.startswith(f"user-{raw_uid[:8]}")):
                 t.config.user_id = clean_uid
                 return t
         return None
@@ -1670,6 +1685,14 @@ class TenantManager:
         except Exception as e:
             logger.error("[WAL FLUSH ERROR] %s", e)
             return 0
+
+    def sync_tenant_to_supabase_async(self, instance: TenantInstance) -> None:
+        """Schedules Supabase sync non-blockingly without freezing the asyncio event loop."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.run_in_executor(None, self.sync_tenant_to_supabase, instance)
+        except RuntimeError:
+            self.sync_tenant_to_supabase(instance)
 
     def sync_tenant_to_supabase(self, instance: TenantInstance) -> bool:
         """Synchronizes tenant state and encrypted configuration to separated real_tenants and demo_tenants tables."""

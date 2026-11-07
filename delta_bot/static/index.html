@@ -1723,25 +1723,40 @@
 
     async function switchExecutionMode(targetMode) {
       const modeClean = targetMode.toLowerCase();
+      const isDemo = (modeClean === 'demo' || modeClean === 'paper' || modeClean === 'testnet');
       const btnReal = document.getElementById('btn-mode-real');
       const btnDemo = document.getElementById('btn-mode-demo');
+      const endpointBadge = document.getElementById('endpoint-badge-text');
 
-      if (modeClean === 'demo') {
+      // 1. Instant optimistic visual feedback
+      if (isDemo) {
         if (btnReal) btnReal.className = 'px-2.5 py-1 rounded text-[var(--dp-color-meta)] hover:text-white transition cursor-pointer flex items-center gap-1.5 opacity-60';
         if (btnDemo) btnDemo.className = 'px-2.5 py-1 rounded text-white font-medium bg-amber-500/20 border border-amber-500/40 text-amber-300 transition cursor-pointer flex items-center gap-1.5';
+        if (endpointBadge) {
+          endpointBadge.textContent = 'Delta Testnet (cdn-ind.testnet.deltaex.org)';
+          endpointBadge.className = 'text-amber-400 font-mono font-medium';
+        }
       } else {
         if (btnReal) btnReal.className = 'px-2.5 py-1 rounded text-white font-medium bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 transition cursor-pointer flex items-center gap-1.5';
         if (btnDemo) btnDemo.className = 'px-2.5 py-1 rounded text-[var(--dp-color-meta)] hover:text-white transition cursor-pointer flex items-center gap-1.5 opacity-60';
+        if (endpointBadge) {
+          endpointBadge.textContent = 'Delta India Prod (api.india.delta.exchange)';
+          endpointBadge.className = 'text-emerald-400 font-mono font-medium';
+        }
       }
 
       try {
-        const endpoint = (currentTenantId && currentTenantId !== 'default')
-          ? `${BACKEND_URL}/api/tenants/${currentTenantId}/update`
-          : `${BACKEND_URL}/api/control/mode`;
-        const res = await fetch(endpoint, {
+        const activeTenant = (currentTenantId && currentTenantId !== 'default')
+          ? currentTenantId
+          : (localStorage.getItem('tenant_id') || undefined);
+
+        const res = await fetch(`${BACKEND_URL}/api/control/mode`, {
           method: 'POST',
           headers: getAuthHeaders(),
-          body: JSON.stringify({ mode: modeClean })
+          body: JSON.stringify({
+            mode: isDemo ? 'demo' : 'real',
+            tenant_id: activeTenant
+          })
         });
         const data = await res.json();
         if (!res.ok) {

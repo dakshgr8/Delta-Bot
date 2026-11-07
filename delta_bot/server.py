@@ -144,6 +144,7 @@ class ModeSwitchRequest(BaseModel):
     """Payload schema for switching execution mode between REAL and DEMO."""
 
     mode: str = Field(description="Target operational mode: 'real' or 'demo' (also accepts 'live' or 'paper')")
+    tenant_id: str | None = Field(default=None, description="Optional tenant ID to switch mode for")
 
 
 class SymbolToggleRequest(BaseModel):
@@ -1285,17 +1286,26 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         if not hasattr(orchestrator, "tenant_manager"):
             raise HTTPException(status_code=500, detail="TenantManager is not initialized.")
         tenant = orchestrator.tenant_manager.get_tenant(tenant_id)
+        if not tenant and auth.auth_type == "user" and auth.user_id:
+            tenant = orchestrator.tenant_manager.get_tenant_by_user_id(auth.user_id)
         if not tenant:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
         if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         try:
             updates = payload.model_dump(exclude_unset=True)
-            if "delta_base_url" not in updates or not updates.get("delta_base_url"):
-                updates["delta_base_url"] = "https://api.india.delta.exchange"
-                updates["delta_ws_url"] = "wss://socket.india.delta.exchange"
-            elif "india" in str(updates.get("delta_base_url")).lower():
-                updates["delta_ws_url"] = "wss://socket.india.delta.exchange"
+            if "delta_base_url" in updates and updates.get("delta_base_url"):
+                if "india" in str(updates.get("delta_base_url")).lower():
+                    updates["delta_ws_url"] = "wss://socket.india.delta.exchange"
+
+            # Validate API keys when explicitly requesting Real mode
+            if updates.get("mode") in ("real", "live"):
+                has_k = bool(tenant.config.delta_api_key.strip() or updates.get("delta_api_key"))
+                if not has_k:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Cannot switch to REAL mode: Delta Exchange India API key & secret are not configured. Please add them in Settings.",
+                    )
 
             updated = orchestrator.tenant_manager.update_tenant(tenant.config.tenant_id, updates)
 
@@ -1316,24 +1326,13 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                     orchestrator.config.delta_demo_api_key = SecretStr(dk_str)
                     orchestrator.config.delta_demo_api_secret = SecretStr(ds_str)
 
-            # Sync metrics immediately if keys were provided or updated
+            # Trigger live metrics in background so response returns instantly!
             active_k = updated.config.get_active_api_key()
             if active_k:
-                try:
-                    await updated.sync_live_metrics()
-                    if hasattr(orchestrator, "tenant_manager"):
-                        orchestrator.tenant_manager.sync_tenant_to_supabase(updated)
-                except Exception as sync_e:
-                    logger.warning("[TENANT %s] Immediate live metrics sync error: %s", updated.config.tenant_id, sync_e)
+                asyncio.create_task(updated.sync_live_metrics())
 
-            if updated.last_sync_error:
-                conn_msg = f"⚠️ Delta Notice: {updated.last_sync_error}"
-            elif updated.last_sync_time > 0:
-                mode_lbl = "Delta Testnet (Demo)" if updated.config.is_demo else "Delta Exchange India (Real)"
-                conn_msg = f"Connected to {mode_lbl}! Balance: ${updated.live_balance:,.2f} USDT"
-            else:
-                conn_msg = f"Tenant '{tenant.config.tenant_id}' updated successfully."
-
+            mode_lbl = "Delta Testnet (Demo)" if updated.config.is_demo else "Delta Exchange India (Real)"
+            conn_msg = f"Switched to {mode_lbl} successfully."
             return JSONResponse(
                 content={
                     "status": "success",
@@ -1343,6 +1342,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             )
         except KeyError:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
@@ -1385,6 +1386,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         auth: AuthIdentity = Depends(get_current_auth),
     ) -> ControlActionResponse:
         tenant = resolve_tenant(orchestrator, tenant_id)
+        if not tenant and auth.auth_type == "user" and auth.user_id and hasattr(orchestrator, "tenant_manager"):
+            tenant = orchestrator.tenant_manager.get_tenant_by_user_id(auth.user_id)
         if not tenant:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
         if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
@@ -1394,7 +1397,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         if hasattr(orchestrator, "tenant_manager"):
             orchestrator.tenant_manager.save_to_disk()
             orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
-        logger.info("[TENANT %s] Signal evaluation STARTED", tenant_id)
+        logger.info("[TENANT %s] Signal evaluation STARTED", tenant.config.tenant_id)
         return ControlActionResponse(status="success", action="start", message=f"Tenant '{tenant.config.name}' trading resumed.")
 
     @app.post(
@@ -1407,6 +1410,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         auth: AuthIdentity = Depends(get_current_auth),
     ) -> ControlActionResponse:
         tenant = resolve_tenant(orchestrator, tenant_id)
+        if not tenant and auth.auth_type == "user" and auth.user_id and hasattr(orchestrator, "tenant_manager"):
+            tenant = orchestrator.tenant_manager.get_tenant_by_user_id(auth.user_id)
         if not tenant:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
         if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
@@ -1416,7 +1421,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         if hasattr(orchestrator, "tenant_manager"):
             orchestrator.tenant_manager.save_to_disk()
             orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
-        logger.warning("[TENANT %s] Signal evaluation PAUSED", tenant_id)
+        logger.warning("[TENANT %s] Signal evaluation PAUSED", tenant.config.tenant_id)
         return ControlActionResponse(status="success", action="stop", message=f"Tenant '{tenant.config.name}' trading paused.")
 
     @app.post(
@@ -1429,6 +1434,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         auth: AuthIdentity = Depends(get_current_auth),
     ) -> ControlActionResponse:
         tenant = resolve_tenant(orchestrator, tenant_id)
+        if not tenant and auth.auth_type == "user" and auth.user_id and hasattr(orchestrator, "tenant_manager"):
+            tenant = orchestrator.tenant_manager.get_tenant_by_user_id(auth.user_id)
         if not tenant:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
         if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
@@ -1562,6 +1569,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             else:
                 target_t = auth.tenant_id
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if not tenant and auth.user_id:
+                tenant = orchestrator.tenant_manager.get_tenant_by_user_id(auth.user_id)
             if tenant:
                 tenant.is_running = True
                 tenant.config.is_active = True
@@ -1645,6 +1654,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             else:
                 target_t = auth.tenant_id
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if not tenant and auth.user_id:
+                tenant = orchestrator.tenant_manager.get_tenant_by_user_id(auth.user_id)
             if tenant:
                 tenant.is_running = False
                 tenant.config.is_active = False
@@ -1723,8 +1734,13 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             else:
                 target_t = auth.tenant_id
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if not tenant and auth.user_id:
+                tenant = orchestrator.tenant_manager.get_tenant_by_user_id(auth.user_id)
             if tenant:
                 res = await tenant.emergency_flatten()
+                if hasattr(orchestrator, "tenant_manager"):
+                    orchestrator.tenant_manager.save_to_disk()
+                    orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
                 return ControlActionResponse(
                     status="success",
                     action="flatten",
@@ -1949,39 +1965,62 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid execution mode '{payload.mode}'. Must be 'real' or 'demo'.",
             )
-        try:
-            from delta_bot.exceptions import ConfigurationError
-            new_mode = orchestrator.set_execution_mode(target_mode)
-            if auth.auth_type == "user" and auth.tenant_id and hasattr(orchestrator, "tenant_manager"):
-                req_t = tenant_id or x_tenant_id or auth.tenant_id
-                t = orchestrator.tenant_manager.get_tenant(req_t)
-                if t:
-                    t.set_execution_mode(new_mode)
-                    orchestrator.tenant_manager.save_to_disk()
-                    orchestrator.tenant_manager.sync_tenant_to_supabase(t)
-            elif hasattr(orchestrator, "tenant_manager"):
-                target_t = tenant_id or x_tenant_id or "default"
-                t = orchestrator.tenant_manager.get_tenant(target_t)
-                if t:
-                    t.set_execution_mode(new_mode)
-                    orchestrator.tenant_manager.save_to_disk()
-                    orchestrator.tenant_manager.sync_tenant_to_supabase(t)
-            logger.warning("[CONTROL API] Switched execution mode to %s", new_mode.value.upper())
+        parsed_mode = ExecutionMode.from_str(target_mode)
+        is_real = parsed_mode.is_real
+
+        target_t = payload.tenant_id or tenant_id or x_tenant_id
+        t = None
+        if hasattr(orchestrator, "tenant_manager"):
+            if auth.auth_type == "user" and auth.user_id:
+                if target_t and target_t != "default":
+                    t = resolve_tenant(orchestrator, target_t)
+                if t is None:
+                    t = orchestrator.tenant_manager.get_tenant_by_user_id(auth.user_id)
+                if t is None and auth.tenant_id:
+                    t = orchestrator.tenant_manager.get_tenant(auth.tenant_id)
+            elif target_t and target_t != "default":
+                t = resolve_tenant(orchestrator, target_t)
+            else:
+                t = orchestrator.tenant_manager.get_tenant("default")
+
+        if t is not None:
+            if is_real:
+                real_key = t.config.delta_api_key.strip()
+                if not real_key:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Cannot switch to REAL / LIVE mode: Delta Exchange India API key & secret are not configured. Please add them in Settings.",
+                    )
+            new_mode = t.set_execution_mode(parsed_mode)
+            if t.config.tenant_id == "default":
+                try:
+                    orchestrator.set_execution_mode(parsed_mode)
+                except Exception:
+                    pass
+            logger.warning("[CONTROL API] Switched execution mode to %s for tenant %s", new_mode.value.upper(), t.config.tenant_id)
             return ControlActionResponse(
                 status="success",
                 action="mode_switch",
                 message=f"Switched execution mode to {new_mode.value.upper()}.",
             )
-        except ConfigurationError as ce:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(ce),
-            ) from ce
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to switch execution mode: {e}",
-            ) from e
+        else:
+            if is_real:
+                rk = orchestrator.config.delta_api_key.get_secret_value().strip() if orchestrator.config.delta_api_key else ""
+                if not rk:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Cannot switch to REAL / LIVE mode: Delta Exchange India API key & secret are not configured.",
+                    )
+            try:
+                new_mode = orchestrator.set_execution_mode(parsed_mode)
+            except Exception as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+            logger.warning("[CONTROL API] Switched global execution mode to %s", new_mode.value.upper())
+            return ControlActionResponse(
+                status="success",
+                action="mode_switch",
+                message=f"Switched execution mode to {new_mode.value.upper()}.",
+            )
 
     @app.post(
         "/api/control/symbol_toggle",
