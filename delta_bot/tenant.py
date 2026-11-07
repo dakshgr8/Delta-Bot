@@ -73,9 +73,10 @@ class TenantConfig(BaseModel):
     def safe_dict(self) -> dict[str, Any]:
         """Provides a sanitized dictionary view masking private credentials."""
         d = self.model_dump()
-        if d.get("delta_api_key"):
-            k = d["delta_api_key"]
-            d["delta_api_key_masked"] = f"{k[:4]}...{k[-4:]}" if len(k) >= 8 else "********"
+        k = d.get("delta_api_key")
+        if k:
+            k_str = k.get_secret_value() if hasattr(k, "get_secret_value") else str(k)
+            d["delta_api_key_masked"] = f"{k_str[:4]}...{k_str[-4:]}" if len(k_str) >= 8 else "********"
             d["has_api_key"] = True
         else:
             d["delta_api_key_masked"] = ""

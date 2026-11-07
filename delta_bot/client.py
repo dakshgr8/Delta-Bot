@@ -15,6 +15,7 @@ import time
 from typing import Any
 
 import httpx
+from pydantic import SecretStr
 
 from delta_bot.auth import DeltaAuthEngine
 from delta_bot.config import BotConfig
@@ -78,6 +79,24 @@ class DeltaRestClient:
     def rate_limit_state(self) -> RateLimitState:
         """Current rate limit quota status."""
         return self._http_engine.rate_limit_state
+
+    def update_credentials(
+        self,
+        api_key: SecretStr | str,
+        api_secret: SecretStr | str,
+        base_url: str | None = None,
+    ) -> None:
+        """Updates API credentials and base URL for REST requests at runtime."""
+        k = api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
+        s = api_secret if isinstance(api_secret, SecretStr) else SecretStr(api_secret)
+        self._config.delta_api_key = k
+        self._config.delta_api_secret = s
+        if base_url:
+            clean_url = str(base_url).strip().rstrip("/")
+            self._config.delta_base_url = clean_url
+            self._http_engine._base_url = clean_url
+            self._http_engine._client = None
+        self._auth_engine.update_credentials(k, s)
 
     async def get_server_time(self) -> ServerTimeInfo:
         """

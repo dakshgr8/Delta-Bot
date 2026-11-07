@@ -670,4 +670,46 @@ def test_server_control_alias_endpoints(client: TestClient, test_orchestrator: T
     assert 1 not in test_orchestrator.paper_simulator._open_positions
 
 
+def test_server_api_keys_configure_and_reset(
+    client: TestClient, test_orchestrator: TradingBotOrchestrator
+) -> None:
+    """Verifies that Delta API credentials can be dynamically configured and reset via REST."""
+    from pydantic import SecretStr
+
+    # 1. Initially no keys
+    test_orchestrator.config.delta_api_key = SecretStr("")
+    test_orchestrator.config.delta_api_secret = SecretStr("")
+    res_status = client.get("/api/status")
+    assert res_status.status_code == 200
+    assert res_status.json()["status"]["has_api_key"] is False
+
+    # 2. Configure keys via /api/config
+    payload = {
+        "delta_api_key": "my_test_delta_key_12345",
+        "delta_api_secret": "my_test_delta_secret_67890",
+        "delta_base_url": "https://api.india.delta.exchange",
+    }
+    res_cfg = client.post("/api/config", json=payload)
+    assert res_cfg.status_code == 200
+    assert test_orchestrator.config.api_key_str == "my_test_delta_key_12345"
+    assert test_orchestrator.config.api_secret_str == "my_test_delta_secret_67890"
+    assert test_orchestrator.config.delta_base_url == "https://api.india.delta.exchange"
+
+    # Status reflects configured keys
+    res_status2 = client.get("/api/status")
+    assert res_status2.json()["status"]["has_api_key"] is True
+    assert "my_t...2345" in res_status2.json()["status"]["delta_api_key_masked"]
+
+    # 3. Reset keys via /api/config/reset-keys
+    res_reset = client.post("/api/config/reset-keys")
+    assert res_reset.status_code == 200
+    assert res_reset.json()["status"] == "success"
+    assert test_orchestrator.config.api_key_str == ""
+    assert test_orchestrator.config.api_secret_str == ""
+
+    # Status reflects reset keys
+    res_status3 = client.get("/api/status")
+    assert res_status3.json()["status"]["has_api_key"] is False
+
+
 

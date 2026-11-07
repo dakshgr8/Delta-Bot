@@ -45,6 +45,11 @@ class DeltaAuthEngine:
         """Current estimated delta between exchange server time and host local time in seconds."""
         return self._clock_offset_s
 
+    def update_credentials(self, api_key: SecretStr | str, api_secret: SecretStr | str) -> None:
+        """Updates API key and secret for subsequent signature generation."""
+        self._api_key = api_key if isinstance(api_key, SecretStr) else SecretStr(api_key)
+        self._api_secret = api_secret if isinstance(api_secret, SecretStr) else SecretStr(api_secret)
+
     def update_clock_offset(self, server_epoch_s: float, local_epoch_s: float) -> float:
         """
         Updates clock offset estimation using round-trip synchronized server telemetry.

@@ -110,6 +110,22 @@ class ConfigUpdateRequest(BaseModel):
         le=20,
         description="TTL expiration bars for pending resting stop breakout orders",
     )
+    delta_api_key: str | None = Field(
+        default=None,
+        description="Delta Exchange API Key",
+    )
+    delta_api_secret: str | None = Field(
+        default=None,
+        description="Delta Exchange API Secret",
+    )
+    delta_base_url: str | None = Field(
+        default=None,
+        description="Delta Exchange Base API URL (e.g. https://api.delta.exchange or https://cdn.india.delta.exchange)",
+    )
+    reset_keys: bool | None = Field(
+        default=False,
+        description="Wipe configured API credentials and reset to clean paper state",
+    )
 
 
 class ModeSwitchRequest(BaseModel):
@@ -704,7 +720,17 @@ def get_full_state_packet(
         orders = get_all_orders_summary(orchestrator)
         max_dd = orchestrator.risk_manager.config.daily_max_drawdown_pct
         circuit_tripped = bool(orchestrator.risk_manager.is_circuit_breaker_tripped)
-        current_tenant_dict = {"tenant_id": "default", "name": "Default Account", "mode": mode_str}
+        def_key = orchestrator.config.delta_api_key.get_secret_value() if orchestrator.config.delta_api_key else ""
+        has_key_def = bool(def_key and def_key.strip())
+        masked_key_def = f"{def_key[:4]}...{def_key[-4:]}" if len(def_key) > 8 else ("****" if has_key_def else "")
+        current_tenant_dict = {
+            "tenant_id": "default",
+            "name": "Default Account",
+            "mode": mode_str,
+            "has_api_key": has_key_def,
+            "delta_api_key_masked": masked_key_def,
+            "delta_base_url": orchestrator.config.delta_base_url,
+        }
 
     indicators = {}
     for sym in orchestrator.target_symbols:
@@ -756,6 +782,9 @@ def get_full_state_packet(
             "enabled_symbols": enabled_symbols,
             "timeframe": timeframe,
             "has_auth_token": bool(orchestrator.config.dashboard_auth_token_str),
+            "has_api_key": current_tenant_dict.get("has_api_key", False),
+            "delta_api_key_masked": current_tenant_dict.get("delta_api_key_masked", ""),
+            "delta_base_url": orchestrator.config.delta_base_url,
             "config": {
                 "risk_pct": risk_pct,
                 "leverage": lev,
@@ -1851,11 +1880,92 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 s.config = s.config.model_copy(update={"max_pending_bars": payload.max_pending_bars})
             updated.append(f"max_pending_bars={payload.max_pending_bars}")
 
+        # Handle API keys update or reset
+        if payload.reset_keys:
+            from pydantic import SecretStr
+            orchestrator.config.delta_api_key = SecretStr("")
+            orchestrator.config.delta_api_secret = SecretStr("")
+            orchestrator.rest_client.update_credentials(SecretStr(""), SecretStr(""))
+            if hasattr(orchestrator, "tenant_manager"):
+                default_t = orchestrator.tenant_manager.get_tenant("default")
+                if default_t:
+                    default_t.config.delta_api_key = ""
+                    default_t.config.delta_api_secret = ""
+            updated.append("api_keys=RESET")
+            logger.info("[CONFIG] Delta API keys have been reset and removed.")
+        elif payload.delta_api_key is not None or payload.delta_api_secret is not None:
+            from pydantic import SecretStr
+            new_key = payload.delta_api_key.strip() if payload.delta_api_key else orchestrator.config.api_key_str
+            new_secret = payload.delta_api_secret.strip() if payload.delta_api_secret else orchestrator.config.api_secret_str
+            base_url = payload.delta_base_url.strip() if payload.delta_base_url else None
+
+            orchestrator.config.delta_api_key = SecretStr(new_key)
+            orchestrator.config.delta_api_secret = SecretStr(new_secret)
+            if base_url:
+                orchestrator.config.delta_base_url = base_url
+
+            orchestrator.rest_client.update_credentials(
+                SecretStr(new_key), SecretStr(new_secret), base_url=base_url
+            )
+            if hasattr(orchestrator, "tenant_manager"):
+                default_t = orchestrator.tenant_manager.get_tenant("default")
+                if default_t:
+                    default_t.config.delta_api_key = new_key
+                    default_t.config.delta_api_secret = new_secret
+                    if base_url:
+                        default_t.config.delta_base_url = base_url
+            updated.append("api_keys=CONFIGURED")
+            logger.info("[CONFIG] Delta API keys updated successfully.")
+
         logger.info("[CONTROL API] Hot-reloaded configuration: %s", ", ".join(updated))
         return ControlActionResponse(
             status="success",
             action="config_update",
             message=f"Configuration hot-reloaded: {', '.join(updated)}",
+        )
+
+    @app.post(
+        "/api/config/reset-keys",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+    )
+    @app.post(
+        "/api/keys/reset",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+        include_in_schema=False,
+    )
+    async def reset_api_keys_endpoint(
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> ControlActionResponse:
+        """Wipes configured Delta API credentials and resets to clean paper state."""
+        from pydantic import SecretStr
+        target_t = tenant_id or x_tenant_id or (auth.tenant_id if auth.auth_type == "user" else "default")
+        if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
+            t = orchestrator.tenant_manager.get_tenant(target_t)
+            if t:
+                t.config.delta_api_key = ""
+                t.config.delta_api_secret = ""
+                return ControlActionResponse(
+                    status="success",
+                    action="reset_keys",
+                    message=f"API keys reset for tenant '{t.config.name}'.",
+                )
+        orchestrator.config.delta_api_key = SecretStr("")
+        orchestrator.config.delta_api_secret = SecretStr("")
+        orchestrator.rest_client.update_credentials(SecretStr(""), SecretStr(""))
+        if hasattr(orchestrator, "tenant_manager"):
+            default_t = orchestrator.tenant_manager.get_tenant("default")
+            if default_t:
+                default_t.config.delta_api_key = ""
+                default_t.config.delta_api_secret = ""
+        logger.info("[CONFIG] API keys successfully reset and removed.")
+        return ControlActionResponse(
+            status="success",
+            action="reset_keys",
+            message="Delta API keys have been reset and removed.",
         )
 
     # -------------------------------------------------------------------------

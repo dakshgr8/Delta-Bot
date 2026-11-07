@@ -737,6 +737,20 @@
         <button type="button" onclick="closeSettingsModal()" class="text-[var(--dp-color-meta)] hover:text-white text-lg cursor-pointer">&times;</button>
       </div>
 
+      <!-- API Key Status and Reset Controls -->
+      <div id="cfg-key-status-box" class="p-3 rounded border border-[var(--dp-color-hairline)] bg-[var(--dp-color-panel)] flex items-center justify-between">
+        <div class="space-y-0.5">
+          <span class="mono-label">Delta API Status</span>
+          <div class="text-xs font-mono font-medium text-white flex items-center gap-1.5">
+            <span id="cfg-modal-status-dot" class="signal-muted"></span>
+            <span id="cfg-modal-status-text">Keys Needed</span>
+          </div>
+        </div>
+        <button type="button" id="btn-reset-keys" onclick="resetApiKeys()" class="hidden btn-secondary text-[11px] py-1 px-2.5 text-red-400 hover:text-red-300 border-red-500/30">
+          Reset Keys
+        </button>
+      </div>
+
       <!-- API Keys -->
       <div class="space-y-3">
         <div>
@@ -754,6 +768,7 @@
           <select id="cfg-api-url" class="dp-input cursor-pointer">
             <option value="https://api.delta.exchange">Delta Global (api.delta.exchange)</option>
             <option value="https://cdn.india.delta.exchange">Delta India (cdn.india.delta.exchange)</option>
+            <option value="https://api.india.delta.exchange">Delta India API (api.india.delta.exchange)</option>
           </select>
         </div>
       </div>
@@ -828,6 +843,7 @@
     let isRunning = false;
     let ws = null;
     let pollInterval = null;
+    let latestStateData = null;
 
     // -------------------------------------------------------------------------
     // View Routing
@@ -1145,6 +1161,7 @@
 
     function renderDashboard(data) {
       if (!data) return;
+      latestStateData = data;
       const status = data.status || {};
       const col = data.collateral || {};
       const tenant = data.current_tenant || {};
@@ -1168,7 +1185,8 @@
       }
 
       // Delta API Key Status
-      const hasKey = Boolean(tenant.has_api_key || tenant.delta_api_key_masked);
+      const hasKey = Boolean(tenant.has_api_key || status.has_api_key || tenant.delta_api_key_masked);
+      const maskedKey = tenant.delta_api_key_masked || status.delta_api_key_masked || '';
       const banner = document.getElementById('banner-api-needed');
       const apiBadgeText = document.getElementById('api-badge-text');
       const apiSignal = document.getElementById('api-status-signal');
@@ -1177,7 +1195,7 @@
         banner.classList.toggle('hidden', hasKey);
       }
       if (apiBadgeText) {
-        apiBadgeText.textContent = hasKey ? 'Keys Configured' : 'Keys Needed';
+        apiBadgeText.textContent = hasKey ? (maskedKey ? `Keys Configured (${maskedKey})` : 'Keys Configured') : 'Keys Needed';
       }
       if (apiSignal) {
         apiSignal.className = hasKey ? 'signal-live' : 'signal-muted';
@@ -1405,11 +1423,76 @@
     // Settings Modal (Delta API Credentials & Risk)
     // -------------------------------------------------------------------------
     function openSettingsModal() {
-      document.getElementById('modal-settings').classList.remove('hidden');
+      const modal = document.getElementById('modal-settings');
+      if (!modal) return;
+      modal.classList.remove('hidden');
+
+      const tenant = (latestStateData && latestStateData.current_tenant) || {};
+      const status = (latestStateData && latestStateData.status) || {};
+      const hasKey = Boolean(tenant.has_api_key || status.has_api_key || tenant.delta_api_key_masked);
+      const maskedKey = tenant.delta_api_key_masked || status.delta_api_key_masked || '';
+
+      const dot = document.getElementById('cfg-modal-status-dot');
+      const txt = document.getElementById('cfg-modal-status-text');
+      const btnReset = document.getElementById('btn-reset-keys');
+      const keyInput = document.getElementById('cfg-api-key');
+      const secretInput = document.getElementById('cfg-api-secret');
+      const urlSelect = document.getElementById('cfg-api-url');
+
+      if (urlSelect && (tenant.delta_base_url || status.delta_base_url)) {
+        urlSelect.value = tenant.delta_base_url || status.delta_base_url;
+      }
+
+      if (hasKey) {
+        if (dot) dot.className = 'signal-live';
+        if (txt) txt.textContent = maskedKey ? `Keys Configured (${maskedKey})` : 'Keys Configured';
+        if (btnReset) btnReset.classList.remove('hidden');
+        if (keyInput) keyInput.placeholder = 'Leave blank to retain current key, or enter new...';
+        if (secretInput) secretInput.placeholder = 'Leave blank to retain current secret, or enter new...';
+      } else {
+        if (dot) dot.className = 'signal-muted';
+        if (txt) txt.textContent = 'No Keys Configured (Paper Simulation Active)';
+        if (btnReset) btnReset.classList.add('hidden');
+        if (keyInput) keyInput.placeholder = 'Enter API Key...';
+        if (secretInput) secretInput.placeholder = 'Enter API Secret...';
+      }
     }
 
     function closeSettingsModal() {
       document.getElementById('modal-settings').classList.add('hidden');
+    }
+
+    async function resetApiKeys() {
+      if (!confirm('Are you sure you want to reset and remove your configured Delta API keys? The engine will return to unauthenticated / paper mode.')) {
+        return;
+      }
+      try {
+        const endpoint = (currentTenantId && currentTenantId !== 'default')
+          ? `${BACKEND_URL}/api/tenants/${currentTenantId}/update`
+          : `${BACKEND_URL}/api/config/reset-keys`;
+
+        const payload = (currentTenantId && currentTenantId !== 'default')
+          ? { delta_api_key: "", delta_api_secret: "" }
+          : { reset_keys: true };
+
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+        alert(data.message || 'Delta API keys have been reset and removed.');
+        document.getElementById('cfg-api-key').value = '';
+        document.getElementById('cfg-api-secret').value = '';
+        closeSettingsModal();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try { ws.send(JSON.stringify({ action: 'resume' })); } catch (_) {}
+        }
+        await fetchStatus();
+      } catch (err) {
+        alert(`Reset failed: ${err}`);
+      }
     }
 
     async function saveSettings() {
@@ -1445,7 +1528,10 @@
         document.getElementById('cfg-api-key').value = '';
         document.getElementById('cfg-api-secret').value = '';
         closeSettingsModal();
-        fetchStatus();
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try { ws.send(JSON.stringify({ action: 'resume' })); } catch (_) {}
+        }
+        await fetchStatus();
       } catch (err) {
         alert(`Settings error: ${err}`);
       }
@@ -1463,6 +1549,7 @@
     window.openSettingsModal = openSettingsModal;
     window.closeSettingsModal = closeSettingsModal;
     window.saveSettings = saveSettings;
+    window.resetApiKeys = resetApiKeys;
     window.closePosition = closePosition;
     window.cancelOrder = cancelOrder;
 
