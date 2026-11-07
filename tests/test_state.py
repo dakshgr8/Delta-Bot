@@ -376,7 +376,7 @@ async def test_liquidation_proximity_guard_triggering() -> None:
         liquidation_price=48000.0,
     )
     await state_mgr.handle_position_update(pos)
-    await state_mgr.update_market_context("BTCUSDT", mark_price=49800.0, atr=1000.0)
+    await state_mgr.update_market_context("BTCUSDT", mark_price=49800.0, atr=1000.0, high=50100.0, low=49700.0)
 
     assert len(alerts) == 0
     mock_exec_mgr.emergency_flatten.assert_not_awaited()

@@ -387,9 +387,15 @@ class ChannelMultiplexer:
         # 5. Level 2 Orderbook (l2_orderbook)
         if msg_type == "l2_orderbook":
             symbol = str(data.get("symbol", "")).upper()
+            action = data.get("action")
             seq_no = data.get("last_sequence_no")
             has_gap = False
-            if seq_no is not None:
+            dropped = 0
+            if action == "snapshot":
+                self.sequence_tracker.reset(f"ob:{symbol}")
+                if seq_no is not None:
+                    self.sequence_tracker.track_sequence(f"ob:{symbol}", int(seq_no))
+            elif seq_no is not None:
                 has_gap, dropped = self.sequence_tracker.track_sequence(f"ob:{symbol}", int(seq_no))
 
             orderbook = OrderBook.from_api_dict(data)
@@ -772,9 +778,16 @@ class DeltaWebSocketClient:
     async def _handle_orderbook_resync(self, symbol: str) -> None:
         """
         Triggered when a sequence gap corrupts the Level 2 orderbook.
-        Requests a fresh snapshot from Delta Exchange by re-issuing subscription.
+        Requests a fresh snapshot from Delta Exchange by re-issuing subscription with rate limiting.
         """
         clean_symbol = symbol.strip().upper()
+        now = time.time()
+        if not hasattr(self, "_last_resync_time"):
+            self._last_resync_time: dict[str, float] = {}
+        if now - self._last_resync_time.get(clean_symbol, 0.0) < 5.0:
+            return
+        self._last_resync_time[clean_symbol] = now
+
         logger.warning("Orderbook sequence gap detected on [%s]. Re-synchronizing ladder...", clean_symbol)
         if self.is_connected:
             self._sequence_tracker.reset(f"ob:{clean_symbol}")

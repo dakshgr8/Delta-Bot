@@ -336,6 +336,25 @@ class TradingBotOrchestrator:
         spec = self.contract_specs.get(clean_symbol)
 
         if not strategy or not spec:
+            if not spec and self.rest_client:
+                try:
+                    spec = await self.rest_client.get_contract_spec(clean_symbol)
+                    if spec:
+                        self.contract_specs[clean_symbol] = spec
+                except Exception as e:
+                    logger.debug("Lazy load ContractSpec for %s failed: %s", clean_symbol, e)
+
+            if not strategy:
+                strat_cfg = BreakoutStrategyConfig(
+                    symbol=clean_symbol,
+                    resolution=self.timeframe,
+                    risk_per_trade_pct=self.config.default_risk_pct,
+                )
+                strategy = BreakoutStrategyEngine(config=strat_cfg)
+                self._register_strategy_callbacks(strategy)
+                self.strategies[clean_symbol] = strategy
+
+        if not strategy or not spec:
             logger.debug("Candle close received for untracked symbol: %s", symbol)
             return
 

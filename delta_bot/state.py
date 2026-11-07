@@ -165,6 +165,9 @@ class TradingStateManager:
         symbol: str,
         mark_price: float,
         atr: float | None = None,
+        high: float | None = None,
+        low: float | None = None,
+        **kwargs: Any,
     ) -> LiquidationAlert | None:
         """Updates real-time mark price and ATR for liquidation proximity evaluation."""
         clean_symbol = symbol.strip().upper()
