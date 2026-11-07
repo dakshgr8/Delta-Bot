@@ -60,8 +60,8 @@ class TenantConfig(BaseModel):
     initial_balance: float = 10000.0
     delta_api_key: str = ""
     delta_api_secret: str = ""
-    delta_base_url: str = "https://api.delta.exchange"
-    delta_ws_url: str = "wss://socket.delta.exchange"
+    delta_base_url: str = "https://api.india.delta.exchange"
+    delta_ws_url: str = "wss://socket.india.delta.exchange"
     risk_pct: float = 1.0
     leverage: int = 5
     timeframe: str = "1m"
@@ -76,8 +76,13 @@ class TenantConfig(BaseModel):
         k = d.get("delta_api_key")
         if k:
             k_str = k.get_secret_value() if hasattr(k, "get_secret_value") else str(k)
-            d["delta_api_key_masked"] = f"{k_str[:4]}...{k_str[-4:]}" if len(k_str) >= 8 else "********"
-            d["has_api_key"] = True
+            k_clean = k_str.strip()
+            if k_clean:
+                d["delta_api_key_masked"] = f"{k_clean[:4]}...{k_clean[-4:]}" if len(k_clean) >= 8 else "********"
+                d["has_api_key"] = True
+            else:
+                d["delta_api_key_masked"] = ""
+                d["has_api_key"] = False
         else:
             d["delta_api_key_masked"] = ""
             d["has_api_key"] = False
@@ -255,6 +260,11 @@ class TenantInstance:
 
     def reload_credentials(self) -> None:
         """Re-initializes REST client and ExecutionManager when user API keys change."""
+        base_u = self.config.delta_base_url or "https://api.india.delta.exchange"
+        ws_u = "wss://socket.india.delta.exchange" if "india" in base_u.lower() else self.config.delta_ws_url
+        self.config.delta_base_url = base_u
+        self.config.delta_ws_url = ws_u
+
         self.bot_config = BotConfig(
             delta_api_key=self.config.delta_api_key,
             delta_api_secret=self.config.delta_api_secret,
@@ -281,6 +291,12 @@ class TenantInstance:
             logger.info("[TENANT %s] Live execution manager activated with user API credentials", self.config.tenant_id)
         else:
             self.execution_manager = None
+            self.mode = ExecutionMode.PAPER
+            self.config.mode = "paper"
+            if self.paper_simulator is None:
+                self.paper_simulator = PaperExchangeSimulator(initial_balance=self.config.initial_balance)
+                for spec in self.contract_specs.values():
+                    self.paper_simulator.register_contract_spec(spec)
 
     async def emergency_flatten(self) -> dict[str, Any]:
         """Emergency market-closes all active positions and cancels resting orders for this tenant."""
@@ -333,9 +349,13 @@ class TenantInstance:
             win_rate = 0.0
             drawdown = 0.0
             open_pos = len(self.state_manager.get_all_positions())
-            resting_orders = (
-                len(self.execution_manager.registry.active_orders()) if self.execution_manager else 0
+            act_src = (
+                getattr(self.execution_manager.registry, "active_orders", [])
+                if self.execution_manager and hasattr(self.execution_manager, "registry")
+                else []
             )
+            act_list = act_src() if callable(act_src) else (act_src or [])
+            resting_orders = len(act_list)
             avail_margin = bal
 
         return {
@@ -382,13 +402,19 @@ class TenantManager:
             self.active_tenant_id = default_instance.config.tenant_id
 
     def get_tenant(self, tenant_id: str | None = None) -> TenantInstance | None:
-        """Retrieves tenant instance by ID, falling back to active or default tenant."""
+        """Retrieves tenant instance by ID or user ID, falling back to active or default tenant."""
         if not tenant_id:
             tenant_id = self.active_tenant_id
 
-        clean_id = tenant_id.strip()
+        clean_id = str(tenant_id).strip()
         if clean_id in self.tenants:
             return self.tenants[clean_id]
+
+        # Check by user_id or slug prefix
+        by_user = self.get_tenant_by_user_id(clean_id)
+        if by_user:
+            return by_user
+
         if "default" in self.tenants:
             return self.tenants["default"]
         if self.tenants:
@@ -432,6 +458,8 @@ class TenantManager:
             name=f"{name_part}'s Trading Desk",
             mode="live",
             initial_balance=10000.0,
+            delta_base_url="https://api.india.delta.exchange",
+            delta_ws_url="wss://socket.india.delta.exchange",
             leverage=5,
             risk_pct=1.0,
             timeframe="1m",
@@ -489,6 +517,12 @@ class TenantManager:
         if not tenant:
             raise KeyError(f"Tenant '{tenant_id}' not found.")
 
+        # Ensure Delta India regional settings
+        if "delta_base_url" in updates and updates["delta_base_url"]:
+            base_u = str(updates["delta_base_url"]).strip()
+            if "india" in base_u.lower():
+                updates["delta_ws_url"] = "wss://socket.india.delta.exchange"
+
         # Update configuration model
         current = tenant.config.model_dump()
         for k, v in updates.items():
@@ -517,7 +551,7 @@ class TenantManager:
 
         self.save_to_disk()
         self.sync_tenant_to_supabase(tenant)
-        logger.info("[TENANT UPDATED] Updated settings for tenant ID '%s'", tenant_id)
+        logger.info("[TENANT UPDATED] Updated settings for tenant ID '%s'", tenant.config.tenant_id)
         return tenant
 
     async def delete_tenant(self, tenant_id: str) -> bool:

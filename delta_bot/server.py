@@ -553,8 +553,10 @@ def get_all_orders_summary(
                 "created_at": o.created_at,
                 "mode": "PAPER",
             })
-    elif target_exec is not None:
-        for ao in target_exec.registry.active_orders():
+    elif target_exec is not None and hasattr(target_exec, "registry"):
+        active_src = getattr(target_exec.registry, "active_orders", [])
+        active_list = active_src() if callable(active_src) else (active_src or [])
+        for ao in active_list:
             b_el, ttl_b, ttl_rem = get_order_ttl(ao.symbol)
             orders_list.append({
                 "order_id": ao.id,
@@ -692,7 +694,14 @@ def get_full_state_packet(
     include_logs: bool = True,
 ) -> dict[str, Any]:
     """Generates the unified 500ms broadcast state packet for clients."""
-    tenant = resolve_tenant(orchestrator, tenant_id)
+    tenant = None
+    if hasattr(orchestrator, "tenant_manager"):
+        if tenant_id and tenant_id != "default":
+            tenant = orchestrator.tenant_manager.get_tenant(tenant_id)
+        if tenant is None and user_id:
+            tenant = orchestrator.tenant_manager.get_tenant_by_user_id(user_id)
+        if tenant is None:
+            tenant = orchestrator.tenant_manager.get_tenant(tenant_id or "default")
 
     if tenant is not None:
         uptime = max(0.0, time.time() - tenant.start_time)
@@ -1205,11 +1214,29 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         try:
             updates = payload.model_dump(exclude_unset=True)
-            updated = orchestrator.tenant_manager.update_tenant(tenant_id, updates)
+            if "delta_base_url" not in updates or not updates.get("delta_base_url"):
+                updates["delta_base_url"] = "https://api.india.delta.exchange"
+                updates["delta_ws_url"] = "wss://socket.india.delta.exchange"
+            elif "india" in str(updates.get("delta_base_url")).lower():
+                updates["delta_ws_url"] = "wss://socket.india.delta.exchange"
+
+            updated = orchestrator.tenant_manager.update_tenant(tenant.config.tenant_id, updates)
+
+            # Sync orchestrator global credentials if updating default tenant
+            if tenant.config.tenant_id == "default" and updates.get("delta_api_key") is not None:
+                from pydantic import SecretStr
+                k_str = str(updates["delta_api_key"]).strip()
+                s_str = str(updates.get("delta_api_secret", "")).strip()
+                b_str = str(updates.get("delta_base_url", "https://api.india.delta.exchange")).strip()
+                orchestrator.config.delta_api_key = SecretStr(k_str)
+                orchestrator.config.delta_api_secret = SecretStr(s_str)
+                orchestrator.config.delta_base_url = b_str
+                orchestrator.rest_client.update_credentials(SecretStr(k_str), SecretStr(s_str), base_url=b_str)
+
             return JSONResponse(
                 content={
                     "status": "success",
-                    "message": f"Tenant '{tenant_id}' updated successfully.",
+                    "message": f"Tenant '{tenant.config.tenant_id}' updated successfully.",
                     "tenant": updated.get_summary(),
                 }
             )
@@ -1960,18 +1987,29 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 if default_t:
                     default_t.config.delta_api_key = ""
                     default_t.config.delta_api_secret = ""
+                    default_t.reload_credentials()
+                if auth.auth_type == "user" and auth.tenant_id:
+                    user_t = orchestrator.tenant_manager.get_tenant(auth.tenant_id)
+                    if user_t:
+                        user_t.config.delta_api_key = ""
+                        user_t.config.delta_api_secret = ""
+                        user_t.reload_credentials()
+                orchestrator.tenant_manager.save_to_disk()
             updated.append("api_keys=RESET")
             logger.info("[CONFIG] Delta API keys have been reset and removed.")
         elif payload.delta_api_key is not None or payload.delta_api_secret is not None:
             from pydantic import SecretStr
             new_key = payload.delta_api_key.strip() if payload.delta_api_key else orchestrator.config.api_key_str
             new_secret = payload.delta_api_secret.strip() if payload.delta_api_secret else orchestrator.config.api_secret_str
-            base_url = payload.delta_base_url.strip() if payload.delta_base_url else None
+            base_url = payload.delta_base_url.strip() if payload.delta_base_url else "https://api.india.delta.exchange"
+            ws_url = "wss://socket.india.delta.exchange" if "india" in base_url.lower() else None
 
             orchestrator.config.delta_api_key = SecretStr(new_key)
             orchestrator.config.delta_api_secret = SecretStr(new_secret)
             if base_url:
                 orchestrator.config.delta_base_url = base_url
+            if ws_url:
+                orchestrator.config.delta_ws_url = ws_url
 
             orchestrator.rest_client.update_credentials(
                 SecretStr(new_key), SecretStr(new_secret), base_url=base_url
@@ -1981,8 +2019,22 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 if default_t:
                     default_t.config.delta_api_key = new_key
                     default_t.config.delta_api_secret = new_secret
-                    if base_url:
-                        default_t.config.delta_base_url = base_url
+                    default_t.config.delta_base_url = base_url
+                    if ws_url:
+                        default_t.config.delta_ws_url = ws_url
+                    default_t.reload_credentials()
+
+                if auth.auth_type == "user" and auth.tenant_id:
+                    user_t = orchestrator.tenant_manager.get_tenant(auth.tenant_id)
+                    if user_t:
+                        user_t.config.delta_api_key = new_key
+                        user_t.config.delta_api_secret = new_secret
+                        user_t.config.delta_base_url = base_url
+                        if ws_url:
+                            user_t.config.delta_ws_url = ws_url
+                        user_t.reload_credentials()
+
+                orchestrator.tenant_manager.save_to_disk()
             updated.append("api_keys=CONFIGURED")
             logger.info("[CONFIG] Delta API keys updated successfully.")
 
@@ -2012,16 +2064,19 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         """Wipes configured Delta API credentials and resets to clean paper state."""
         from pydantic import SecretStr
         target_t = tenant_id or x_tenant_id or (auth.tenant_id if auth.auth_type == "user" else "default")
-        if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
+        if hasattr(orchestrator, "tenant_manager"):
             t = orchestrator.tenant_manager.get_tenant(target_t)
             if t:
                 t.config.delta_api_key = ""
                 t.config.delta_api_secret = ""
-                return ControlActionResponse(
-                    status="success",
-                    action="reset_keys",
-                    message=f"API keys reset for tenant '{t.config.name}'.",
-                )
+                t.reload_credentials()
+                orchestrator.tenant_manager.save_to_disk()
+                if t.config.tenant_id != "default":
+                    return ControlActionResponse(
+                        status="success",
+                        action="reset_keys",
+                        message=f"API keys reset for tenant '{t.config.name}'.",
+                    )
         orchestrator.config.delta_api_key = SecretStr("")
         orchestrator.config.delta_api_secret = SecretStr("")
         orchestrator.rest_client.update_credentials(SecretStr(""), SecretStr(""))
@@ -2030,6 +2085,14 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             if default_t:
                 default_t.config.delta_api_key = ""
                 default_t.config.delta_api_secret = ""
+                default_t.reload_credentials()
+            orchestrator.tenant_manager.save_to_disk()
+        logger.info("[CONFIG] API keys successfully reset and removed.")
+        return ControlActionResponse(
+            status="success",
+            action="reset_keys",
+            message="Delta API keys have been reset and removed.",
+        )
         logger.info("[CONFIG] API keys successfully reset and removed.")
         return ControlActionResponse(
             status="success",

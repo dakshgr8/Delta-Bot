@@ -764,12 +764,15 @@
         </div>
 
         <div>
-          <label class="block mono-label mb-1">Regional Endpoint</label>
-          <select id="cfg-api-url" class="dp-input cursor-pointer">
-            <option value="https://api.delta.exchange">Delta Global (api.delta.exchange)</option>
-            <option value="https://cdn.india.delta.exchange">Delta India (cdn.india.delta.exchange)</option>
-            <option value="https://api.india.delta.exchange">Delta India API (api.india.delta.exchange)</option>
-          </select>
+          <label class="block mono-label mb-1">Exchange Region (India Only)</label>
+          <div class="dp-input flex items-center justify-between text-xs text-white bg-[var(--dp-color-hairline)] cursor-default">
+            <span class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+              Delta Exchange India (api.india.delta.exchange)
+            </span>
+            <span class="text-[10px] text-[var(--dp-color-meta)] uppercase font-mono">India Only</span>
+          </div>
+          <input type="hidden" id="cfg-api-url" value="https://api.india.delta.exchange">
         </div>
       </div>
 
@@ -1018,12 +1021,15 @@
         localStorage.setItem('tenant_id', currentTenantId);
         updateNavUser();
         initWs();
+        forceFetchStatus();
       } else {
         currentUser = null;
         currentTenantId = 'default';
         localStorage.removeItem('token');
         localStorage.removeItem('tenant_id');
         updateNavUser();
+        initWs();
+        forceFetchStatus();
       }
     }
 
@@ -1063,11 +1069,7 @@
     // -------------------------------------------------------------------------
     // Backend API & Data Polling
     // -------------------------------------------------------------------------
-    async function fetchStatus() {
-      // Bandwidth optimization: if WebSocket is actively streaming, skip redundant HTTP poll
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        return;
-      }
+    async function forceFetchStatus() {
       try {
         const res = await fetch(`${BACKEND_URL}/api/status`, { headers: getAuthHeaders() });
         if (res.ok) {
@@ -1076,8 +1078,16 @@
           if (data.tickers) renderLandingTickers(data.tickers);
         }
       } catch (e) {
-        console.debug('Status fetch:', e);
+        console.debug('Status fetch error:', e);
       }
+    }
+
+    async function fetchStatus() {
+      // Bandwidth optimization: if WebSocket is actively streaming, skip redundant HTTP poll
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        return;
+      }
+      await forceFetchStatus();
     }
 
     function initWs() {
@@ -1166,6 +1176,10 @@
       const col = data.collateral || {};
       const tenant = data.current_tenant || {};
 
+      if (tenant.tenant_id && (!currentTenantId || currentTenantId === 'default')) {
+        currentTenantId = tenant.tenant_id;
+      }
+
       // Engine Running State
       isRunning = Boolean(status.is_running);
       const btnLabel = document.getElementById('btn-engine-label');
@@ -1185,7 +1199,7 @@
       }
 
       // Delta API Key Status
-      const hasKey = Boolean(tenant.has_api_key || status.has_api_key || tenant.delta_api_key_masked);
+      const hasKey = Boolean(tenant.has_api_key || status.has_api_key || tenant.delta_api_key_masked || status.delta_api_key_masked);
       const maskedKey = tenant.delta_api_key_masked || status.delta_api_key_masked || '';
       const banner = document.getElementById('banner-api-needed');
       const apiBadgeText = document.getElementById('api-badge-text');
@@ -1429,7 +1443,7 @@
 
       const tenant = (latestStateData && latestStateData.current_tenant) || {};
       const status = (latestStateData && latestStateData.status) || {};
-      const hasKey = Boolean(tenant.has_api_key || status.has_api_key || tenant.delta_api_key_masked);
+      const hasKey = Boolean(tenant.has_api_key || status.has_api_key || tenant.delta_api_key_masked || status.delta_api_key_masked);
       const maskedKey = tenant.delta_api_key_masked || status.delta_api_key_masked || '';
 
       const dot = document.getElementById('cfg-modal-status-dot');
@@ -1437,11 +1451,6 @@
       const btnReset = document.getElementById('btn-reset-keys');
       const keyInput = document.getElementById('cfg-api-key');
       const secretInput = document.getElementById('cfg-api-secret');
-      const urlSelect = document.getElementById('cfg-api-url');
-
-      if (urlSelect && (tenant.delta_base_url || status.delta_base_url)) {
-        urlSelect.value = tenant.delta_base_url || status.delta_base_url;
-      }
 
       if (hasKey) {
         if (dot) dot.className = 'signal-live';
@@ -1482,6 +1491,9 @@
         });
 
         const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || data.message || `Server error (${res.status})`);
+        }
         alert(data.message || 'Delta API keys have been reset and removed.');
         document.getElementById('cfg-api-key').value = '';
         document.getElementById('cfg-api-secret').value = '';
@@ -1489,16 +1501,16 @@
         if (ws && ws.readyState === WebSocket.OPEN) {
           try { ws.send(JSON.stringify({ action: 'resume' })); } catch (_) {}
         }
-        await fetchStatus();
+        await forceFetchStatus();
       } catch (err) {
-        alert(`Reset failed: ${err}`);
+        alert(`Reset failed: ${err.message || err}`);
       }
     }
 
     async function saveSettings() {
       const apiKey = document.getElementById('cfg-api-key').value.trim();
       const apiSecret = document.getElementById('cfg-api-secret').value.trim();
-      const baseUrl = document.getElementById('cfg-api-url').value.trim();
+      const baseUrl = 'https://api.india.delta.exchange';
       const risk = parseFloat(document.getElementById('input-risk').value);
       const leverage = parseInt(document.getElementById('input-leverage').value, 10);
       const maxDd = parseFloat(document.getElementById('input-maxdd').value);
@@ -1506,11 +1518,11 @@
       const payload = {
         risk_pct: risk,
         leverage: leverage,
-        max_drawdown_pct: maxDd
+        max_drawdown_pct: maxDd,
+        delta_base_url: baseUrl
       };
       if (apiKey) payload.delta_api_key = apiKey;
       if (apiSecret) payload.delta_api_secret = apiSecret;
-      if (baseUrl) payload.delta_base_url = baseUrl;
 
       try {
         const endpoint = (currentTenantId && currentTenantId !== 'default')
@@ -1524,16 +1536,30 @@
         });
 
         const data = await res.json();
-        alert(apiKey || apiSecret ? 'Delta Exchange API Keys saved and activated!' : (data.message || 'Settings saved'));
+        if (!res.ok) {
+          throw new Error(data.detail || data.message || `Server error (${res.status})`);
+        }
+
+        if (apiKey) {
+          const masked = apiKey.length >= 8 ? `${apiKey.slice(0,4)}...${apiKey.slice(-4)}` : '****';
+          const badge = document.getElementById('api-badge-text');
+          const sig = document.getElementById('api-status-signal');
+          const banner = document.getElementById('banner-api-needed');
+          if (badge) badge.textContent = `Keys Configured (${masked})`;
+          if (sig) sig.className = 'signal-live';
+          if (banner) banner.classList.add('hidden');
+        }
+
+        alert(apiKey || apiSecret ? 'Delta India API Keys saved and activated!' : (data.message || 'Settings saved'));
         document.getElementById('cfg-api-key').value = '';
         document.getElementById('cfg-api-secret').value = '';
         closeSettingsModal();
         if (ws && ws.readyState === WebSocket.OPEN) {
           try { ws.send(JSON.stringify({ action: 'resume' })); } catch (_) {}
         }
-        await fetchStatus();
+        await forceFetchStatus();
       } catch (err) {
-        alert(`Settings error: ${err}`);
+        alert(`Settings error: ${err.message || err}`);
       }
     }
 
