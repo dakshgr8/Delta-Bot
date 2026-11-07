@@ -188,3 +188,71 @@ def test_max_concurrent_positions_guard(risk_manager: RiskManager) -> None:
     can_open_3, reason_3 = risk_manager.can_open_new_position()
     assert can_open_3 is True
     assert reason_3 is None
+
+
+# -----------------------------------------------------------------------------
+# 4. Prop Firm & Risk Protection Safeguards (Feature D)
+# -----------------------------------------------------------------------------
+
+def test_minimum_lot_risk_gatekeeper(risk_manager: RiskManager, btc_spec: ContractSpec) -> None:
+    """Verifies that trades are rejected if 1 minimum lot exceeds the allowed risk allocation."""
+    # Equity = $200, 1% risk budget = $2.00
+    # Trigger = 50,000, SL = 45,000 -> SL distance = $5,000
+    # 1 contract of BTCUSDT (0.001 BTC) risks 1 * 0.001 * 5000 = $5.00
+    # $5.00 > $2.00 * 1.05 tolerance -> Must reject!
+    res = risk_manager.size_position(
+        spec=btc_spec,
+        trigger_price=50000.0,
+        stop_loss_price=45000.0,
+        account_equity=200.0,
+        available_margin=500.0,
+    )
+    assert res.is_margin_sufficient is False
+    assert "exceeds risk allocation" in str(res.rejection_reason)
+
+
+def test_revenge_trading_breaker_quarantine(risk_manager: RiskManager) -> None:
+    """Verifies that 2 rapid stop-outs trigger quarantine for that symbol."""
+    sym = "BTCUSDT"
+
+    # Loss 1: First stop out
+    risk_manager.record_trade_exit(pnl=-40.0, current_equity=9960.0, symbol=sym)
+    can_open, _ = risk_manager.can_open_new_position(symbol=sym)
+    assert can_open is True  # 1 loss is tolerated
+
+    # Loss 2: Second stop out within 15 minutes
+    risk_manager.record_trade_exit(pnl=-50.0, current_equity=9910.0, symbol=sym)
+
+    # Symbol BTCUSDT must now be quarantined
+    can_open_btc, reason_btc = risk_manager.can_open_new_position(symbol=sym)
+    assert can_open_btc is False
+    assert "[REVENGE BREAKER]" in str(reason_btc)
+    assert "quarantined" in str(reason_btc)
+
+    # Other symbols (e.g. ETHUSDT) remain unblocked
+    can_open_eth, _ = risk_manager.can_open_new_position(symbol="ETHUSDT")
+    assert can_open_eth is True
+
+
+def test_daily_rollover_spread_spike_shield(risk_manager: RiskManager) -> None:
+    """Verifies that new orders are blocked during daily rollover window (21:58 - 22:10 UTC)."""
+    from datetime import datetime, timezone
+
+    # 1. During 21:58 UTC -> Blocked
+    dt_rollover_1 = datetime(2026, 11, 7, 21, 59, 0, tzinfo=timezone.utc)
+    can_open_1, reason_1 = risk_manager.can_open_new_position(now_utc=dt_rollover_1)
+    assert can_open_1 is False
+    assert "[ROLLOVER SHIELD]" in str(reason_1)
+
+    # 2. During 22:05 UTC -> Blocked
+    dt_rollover_2 = datetime(2026, 11, 7, 22, 5, 0, tzinfo=timezone.utc)
+    can_open_2, reason_2 = risk_manager.can_open_new_position(now_utc=dt_rollover_2)
+    assert can_open_2 is False
+    assert "[ROLLOVER SHIELD]" in str(reason_2)
+
+    # 3. Normal trading hours (14:30 UTC) -> Allowed
+    dt_normal = datetime(2026, 11, 7, 14, 30, 0, tzinfo=timezone.utc)
+    can_open_3, reason_3 = risk_manager.can_open_new_position(now_utc=dt_normal)
+    assert can_open_3 is True
+    assert reason_3 is None
+

@@ -316,6 +316,7 @@ class TradingBotOrchestrator:
         self.risk_manager.record_trade_exit(
             pnl=intent.realized_pnl or 0.0,
             current_equity=equity,
+            symbol=intent.symbol,
         )
 
     # -------------------------------------------------------------------------
@@ -397,7 +398,7 @@ class TradingBotOrchestrator:
 
         # Pre-trade Risk Limit Verification
         active_pos_count = self.get_active_positions_count()
-        can_open, reject_reason = self.risk_manager.can_open_new_position(active_pos_count)
+        can_open, reject_reason = self.risk_manager.can_open_new_position(active_pos_count, symbol=clean_symbol)
         if not can_open:
             logger.warning(
                 "[%s] Order Intent %s rejected by RiskManager: %s",
@@ -522,7 +523,7 @@ class TradingBotOrchestrator:
         tenant.risk_manager.update_daily_equity(t_equity)
 
         active_count = tenant.get_active_positions_count()
-        can_open, reject_reason = tenant.risk_manager.can_open_new_position(active_count)
+        can_open, reject_reason = tenant.risk_manager.can_open_new_position(active_count, symbol=clean_symbol)
         if not can_open:
             logger.warning("[TENANT %s:%s] Order rejected by RiskManager: %s", t_id, clean_symbol, reject_reason)
             order_intent.cancel(reject_reason or "RiskManager rejection", OrderStatus.CANCELLED_MANUAL)

@@ -14,6 +14,7 @@ Enforces:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import logging
 import time
 from typing import Any
@@ -63,6 +64,22 @@ class RiskConfig(BaseModel):
     default_collateral_symbol: str = Field(
         default="USDT",
         description="Primary quote/collateral asset symbol for margin balance verification",
+    )
+    enable_rollover_shield: bool = Field(
+        default=True,
+        description="Halt new orders during daily rollover window 21:58-22:10 UTC",
+    )
+    enable_revenge_breaker: bool = Field(
+        default=True,
+        description="Quarantine symbol after 2 rapid stop-outs within 15 minutes",
+    )
+    revenge_cooldown_sec: float = Field(
+        default=1800.0,
+        description="Quarantine duration in seconds for revenge trading breaker (default: 30m)",
+    )
+    min_lot_risk_tolerance: float = Field(
+        default=1.05,
+        description="Max allowed risk / budget ratio to prevent oversized min-lot positions (default: 1.05)",
     )
 
 
@@ -116,6 +133,8 @@ class RiskManager:
         )
         self.daily_realized_pnl: float = 0.0
         self.active_positions_count: int = 0
+        self.symbol_loss_history: dict[str, list[float]] = {}
+        self.symbol_cooldown_expiry: dict[str, float] = {}
 
     @property
     def is_circuit_breaker_tripped(self) -> bool:
@@ -155,13 +174,42 @@ class RiskManager:
 
         return not self.circuit_breaker.is_tripped
 
-    def can_open_new_position(self, active_positions: int | None = None) -> tuple[bool, str | None]:
+    def can_open_new_position(
+        self,
+        active_positions: int | None = None,
+        symbol: str | None = None,
+        now_utc: datetime | None = None,
+    ) -> tuple[bool, str | None]:
         """
-        Pre-trade check: Verifies circuit breaker and max concurrent position limit (strictly 1).
-        Returns (True, None) if permitted, or (False, reason) if rejected.
+        Pre-trade check:
+        1. Verifies circuit breaker state.
+        2. Daily rollover spread shield (21:58 - 22:10 UTC).
+        3. Revenge trading breaker (symbol cooldown after consecutive stop-outs).
+        4. Max concurrent position limit (strictly 1).
         """
         if self.circuit_breaker.is_tripped:
             return False, f"Circuit breaker is TRIPPED: {self.circuit_breaker.trip_reason}"
+
+        # Daily Rollover Spread Shield (21:58 - 22:10 UTC)
+        if self.config.enable_rollover_shield:
+            curr_dt = now_utc or datetime.now(timezone.utc)
+            if (curr_dt.hour == 21 and curr_dt.minute >= 58) or (curr_dt.hour == 22 and curr_dt.minute <= 10):
+                return (
+                    False,
+                    "[ROLLOVER SHIELD] Order rejected: Trading frozen between 21:58-22:10 UTC during daily settlement rollover.",
+                )
+
+        # Revenge Trading Breaker (Symbol Quarantine)
+        if self.config.enable_revenge_breaker and symbol:
+            clean_sym = symbol.strip().upper()
+            cooldown = self.symbol_cooldown_expiry.get(clean_sym, 0.0)
+            now_ts = time.time()
+            if now_ts < cooldown:
+                remaining_m = (cooldown - now_ts) / 60.0
+                return (
+                    False,
+                    f"[REVENGE BREAKER] Symbol {clean_sym} quarantined for another {remaining_m:.1f}m due to rapid stop-outs.",
+                )
 
         pos_count = active_positions if active_positions is not None else self.active_positions_count
         if pos_count >= self.config.max_concurrent_positions:
@@ -223,7 +271,21 @@ class RiskManager:
         )
         rejection_reason = None
 
-        if not is_sufficient:
+        # Minimum Lot Risk Gatekeeper (Prop firm & capital preservation)
+        min_1_lot_risk = 1 * spec.contract_value * per_unit_risk
+        max_allowed_risk = risk_budget_usd * self.config.min_lot_risk_tolerance
+        if (final_lots >= 1 and (final_lots * spec.contract_value * per_unit_risk) > max_allowed_risk) or (
+            final_lots < 1 and min_1_lot_risk > max_allowed_risk
+        ):
+            is_sufficient = False
+            actual_loss_at_sl = (final_lots if final_lots >= 1 else 1) * spec.contract_value * per_unit_risk
+            excess_pct = ((actual_loss_at_sl / risk_budget_usd) - 1.0) * 100.0
+            rejection_reason = (
+                f"Position risk (${actual_loss_at_sl:.2f}) exceeds risk allocation (${risk_budget_usd:.2f}) "
+                f"by {excess_pct:.1f}% (Minimum lot size too large for risk allocation). Aborting trade."
+            )
+
+        if not is_sufficient and rejection_reason is None:
             if available_margin <= 0:
                 rejection_reason = f"Zero available margin ({available_margin:.2f} USD)"
             elif margin_based_lots < 1:
@@ -263,12 +325,27 @@ class RiskManager:
             rejection_reason=rejection_reason,
         )
 
-    def record_trade_exit(self, pnl: float, current_equity: float) -> None:
-        """Records realized PnL and tests daily drawdown limits."""
+    def record_trade_exit(self, pnl: float, current_equity: float, symbol: str = "") -> None:
+        """Records realized PnL, tests daily drawdown limits, and tracks stop-out loss streaks."""
         self.daily_realized_pnl += pnl
         self.update_daily_equity(current_equity)
         if self.active_positions_count > 0:
             self.active_positions_count -= 1
+
+        # Revenge Trading Breaker tracking
+        if self.config.enable_revenge_breaker and symbol and pnl < 0:
+            clean_sym = symbol.strip().upper()
+            now_ts = time.time()
+            hist = self.symbol_loss_history.setdefault(clean_sym, [])
+            hist.append(now_ts)
+            self.symbol_loss_history[clean_sym] = [t for t in hist if now_ts - t <= 900.0]
+            if len(self.symbol_loss_history[clean_sym]) >= 2:
+                self.symbol_cooldown_expiry[clean_sym] = now_ts + self.config.revenge_cooldown_sec
+                logger.warning(
+                    "🛑 [REVENGE TRADING BREAKER] %s experienced 2 rapid stop-outs within 15 minutes. Quarantining symbol for %.1f minutes!",
+                    clean_sym,
+                    self.config.revenge_cooldown_sec / 60.0,
+                )
 
     def record_trade_entry(self) -> None:
         """Increments active position count."""

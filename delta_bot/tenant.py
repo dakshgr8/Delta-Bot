@@ -310,6 +310,7 @@ class TenantInstance:
         self.risk_manager.record_trade_exit(
             pnl=intent.realized_pnl or 0.0,
             current_equity=equity,
+            symbol=intent.symbol,
         )
 
     def register_contract_spec(self, spec: ContractSpec) -> None:
@@ -1249,7 +1250,7 @@ class TenantManager:
 
             # Pre-trade Risk Limit Verification for this tenant
             active_pos_count = tenant.get_active_positions_count()
-            can_open, reject_reason = tenant.risk_manager.can_open_new_position(active_pos_count)
+            can_open, reject_reason = tenant.risk_manager.can_open_new_position(active_pos_count, symbol=clean_symbol)
             if not can_open:
                 logger.warning(
                     "[TENANT %s:%s] Order intent rejected by RiskManager: %s",
@@ -1371,7 +1372,7 @@ class TenantManager:
 
             # Pre-trade Risk Limit Verification
             active_pos_count = tenant.get_active_positions_count()
-            can_open, reject_reason = tenant.risk_manager.can_open_new_position(active_pos_count)
+            can_open, reject_reason = tenant.risk_manager.can_open_new_position(active_pos_count, symbol=clean_symbol)
             if not can_open:
                 logger.warning(
                     "[FANOUT %s:%s] Order rejected by RiskManager: %s",

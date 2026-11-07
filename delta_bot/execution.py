@@ -647,7 +647,7 @@ class ExecutionManager:
                 return None
 
         # 1. Circuit breaker & position limits
-        can_open, reject_reason = self.risk_manager.can_open_new_position()
+        can_open, reject_reason = self.risk_manager.can_open_new_position(symbol=order_intent.symbol)
         if not can_open:
             logger.warning(
                 "Order intent %s for %s rejected by RiskManager: %s",
