@@ -166,13 +166,22 @@ class OrderRouter:
         self.config: ExecutionConfig = config
 
     @staticmethod
-    def generate_client_order_id(symbol: str) -> str:
+    def generate_client_order_id(
+        symbol: str,
+        tenant_id: str | None = None,
+        base_signal_id: str | None = None,
+    ) -> str:
         """
         Generates a deterministic, unique client_order_id adhering strictly to
-        Delta Exchange's 32-character maximum constraint:
-            Format: DBOT_{SYMBOL}_{EPOCH_MS}
-            Example: DBOT_BTCUSDT_1712750400123 (27 characters)
+        Delta Exchange's 32-character maximum constraint.
+        When base_signal_id and tenant_id are present, utilizes uuid.uuid5 to ensure
+        unique yet deterministic mapping per tenant across fan-outs.
+            Format with tenant fan-out: D_{30_hex_of_uuid5} (32 characters)
+            Standard format: DBOT_{SYMBOL}_{EPOCH_MS} (<= 32 characters)
         """
+        if base_signal_id and tenant_id:
+            raw_uuid = uuid.uuid5(uuid.NAMESPACE_OID, f"{base_signal_id}:{tenant_id}").hex
+            return f"D_{raw_uuid[:30]}"
         epoch_ms = int(time.time() * 1000)
         clean_symbol = symbol.replace("/", "").replace("-", "").upper()
         raw_id = f"DBOT_{clean_symbol[:10]}_{epoch_ms}"
@@ -639,7 +648,15 @@ class ExecutionManager:
         order_intent.leverage = self.config.leverage
 
         side = "buy" if order_intent.signal_type == SignalType.BULLISH_BREAKOUT else "sell"
-        client_order_id = self.order_router.generate_client_order_id(spec.symbol)
+        client_order_id = (
+            order_intent.client_order_id
+            or self.order_router.generate_client_order_id(
+                spec.symbol,
+                tenant_id=getattr(self.config, "tenant_id", None),
+                base_signal_id=order_intent.base_signal_id,
+            )
+        )
+        order_intent.client_order_id = client_order_id
 
         # 5. Dispatch native stop order with brackets
         exchange_order = await self.order_router.submit_native_stop_order(

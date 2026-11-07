@@ -119,6 +119,8 @@ class OrderIntent(BaseModel):
     """
 
     intent_id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])
+    base_signal_id: str | None = Field(default=None, description="Parent signal ID for multi-tenant fan-out traceability")
+    client_order_id: str | None = Field(default=None, description="Deterministic exchange client order ID")
     symbol: str = Field(description="Target contract symbol")
     signal_type: SignalType = Field(description="Signal direction (BULLISH_BREAKOUT or BEARISH_BREAKDOWN)")
     status: OrderStatus = Field(default=OrderStatus.PENDING)

@@ -550,6 +550,13 @@ class TradingBotOrchestrator:
             order_intent.product_id = spec.product_id
             order_intent.leverage = tenant.config.leverage
 
+            from delta_bot.tenant import generate_deterministic_client_order_id
+            base_signal_id = order_intent.base_signal_id or f"SIG_{clean_symbol}_{int(time.time())}"
+            det_client_id = generate_deterministic_client_order_id(base_signal_id, t_id)
+            order_intent.base_signal_id = base_signal_id
+            order_intent.client_order_id = det_client_id
+            tenant.order_to_base_id[det_client_id] = base_signal_id
+
             side = "buy" if order_intent.signal_type == SignalType.BULLISH_BREAKOUT else "sell"
             v_order = tenant.paper_simulator.submit_stop_order(
                 product_id=spec.product_id,
@@ -561,6 +568,7 @@ class TradingBotOrchestrator:
                 bracket_take_profit_price=order_intent.take_profit,
                 leverage=tenant.config.leverage,
                 intent_id=order_intent.intent_id,
+                client_order_id=det_client_id,
             )
             order_intent.exchange_order_id = v_order.id
             tenant.state_manager.register_intent(order_intent)

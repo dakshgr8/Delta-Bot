@@ -23,13 +23,14 @@ import os
 import re
 import time
 from typing import Any
+import uuid
 
 from pydantic import BaseModel, Field
 
 from delta_bot.client import DeltaRestClient
 from delta_bot.config import BotConfig
 from delta_bot.exceptions import AuthenticationError, ConfigurationError
-from delta_bot.execution import ExecutionConfig, ExecutionManager
+from delta_bot.execution import ExecutionConfig, ExecutionManager, OrderRouter
 from delta_bot.models import (
     Candle,
     ContractSpec,
@@ -109,6 +110,27 @@ def decrypt_secret(val: str | None) -> str:
         return ""
 
 
+# -----------------------------------------------------------------------------
+# Deterministic Multi-Tenant Order ID Fan-Out & Traceability (UUIDv5)
+# -----------------------------------------------------------------------------
+
+def generate_deterministic_tenant_order_id(base_signal_id: str, tenant_id: str) -> str:
+    """
+    Generates deterministic UUIDv5 mapping master signal to an isolated tenant order.
+    Ensures zero primary key collisions in cloud ledger across concurrent tenants.
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_OID, f"{base_signal_id}:{tenant_id}"))
+
+
+def generate_deterministic_client_order_id(base_signal_id: str, tenant_id: str, max_len: int = 32) -> str:
+    """
+    Generates deterministic exchange client_order_id (<= 32 chars) for Delta Exchange.
+    Format: 'D_' + 30 hex characters of uuid5 digest.
+    """
+    hex_digest = uuid.uuid5(uuid.NAMESPACE_OID, f"{base_signal_id}:{tenant_id}").hex
+    return f"D_{hex_digest[:max_len - 2]}"
+
+
 class TenantConfig(BaseModel):
     """Data specification and serialized configuration for an isolated tenant."""
 
@@ -180,6 +202,7 @@ class TenantInstance:
         self.live_positions: list[dict[str, Any]] = []
         self.last_sync_time: float = 0.0
         self.last_sync_error: str | None = None
+        self.order_to_base_id: dict[str, str] = {}
 
         # BotConfig wrapper for rest client / live credentials
         self.bot_config = BotConfig(
@@ -1030,6 +1053,8 @@ class TenantManager:
         if not spec:
             return
 
+        base_signal_id = f"SIG_{clean_symbol}_{int(candle.timestamp)}"
+
         for tenant in list(self.tenants.values()):
             if not tenant.is_running or clean_symbol not in tenant.enabled_symbols:
                 continue
@@ -1044,6 +1069,12 @@ class TenantManager:
             order_intent = strategy.on_candle_close(candle)
             if order_intent is None:
                 continue
+
+            # Deterministic multi-tenant order ID mapping (UUIDv5)
+            order_intent.base_signal_id = base_signal_id
+            det_client_id = generate_deterministic_client_order_id(base_signal_id, tenant.config.tenant_id)
+            order_intent.client_order_id = det_client_id
+            tenant.order_to_base_id[det_client_id] = base_signal_id
 
             account_equity = await tenant.get_account_equity()
 
@@ -1100,6 +1131,7 @@ class TenantManager:
                         bracket_take_profit_price=order_intent.take_profit,
                         leverage=tenant.config.leverage,
                         intent_id=order_intent.intent_id,
+                        client_order_id=det_client_id,
                     )
                     order_intent.exchange_order_id = v_order.id
                     tenant.state_manager.register_intent(order_intent)
@@ -1134,6 +1166,156 @@ class TenantManager:
                         clean_symbol,
                         e,
                     )
+
+    async def fanout_order_intent(
+        self,
+        base_signal_id: str,
+        master_intent: OrderIntent,
+        spec: ContractSpec,
+    ) -> list[str]:
+        """
+        Fans out a master breakout order intent across all active tenants using deterministic UUIDv5.
+        Applies tenant-specific risk limits, leverage, and available margin constraints.
+        Returns list of tenant IDs that executed the order.
+        """
+        executed_tenants: list[str] = []
+        clean_symbol = spec.symbol.strip().upper()
+
+        for tenant in list(self.tenants.values()):
+            if not tenant.is_running or clean_symbol not in tenant.enabled_symbols:
+                continue
+
+            tenant.register_contract_spec(spec)
+            account_equity = await tenant.get_account_equity()
+
+            # Pre-trade Risk Limit Verification
+            active_pos_count = tenant.get_active_positions_count()
+            can_open, reject_reason = tenant.risk_manager.can_open_new_position(active_pos_count)
+            if not can_open:
+                logger.warning(
+                    "[FANOUT %s:%s] Order rejected by RiskManager: %s",
+                    tenant.config.tenant_id,
+                    clean_symbol,
+                    reject_reason,
+                )
+                continue
+
+            # Deterministic multi-tenant order ID mapping (UUIDv5)
+            det_client_id = generate_deterministic_client_order_id(base_signal_id, tenant.config.tenant_id)
+            tenant_intent = master_intent.model_copy()
+            tenant_intent.intent_id = uuid.uuid4().hex[:12]
+            tenant_intent.base_signal_id = base_signal_id
+            tenant_intent.client_order_id = det_client_id
+            tenant.order_to_base_id[det_client_id] = base_signal_id
+
+            if tenant.mode == ExecutionMode.PAPER and tenant.paper_simulator is not None:
+                try:
+                    avail_margin = (
+                        tenant.paper_simulator.wallet.available_balance
+                        if tenant.paper_simulator.wallet.available_balance > 0
+                        else account_equity
+                    )
+                    margin_res = tenant.risk_manager.size_position(
+                        spec=spec,
+                        trigger_price=tenant_intent.trigger_price,
+                        stop_loss_price=tenant_intent.initial_stop_loss,
+                        account_equity=account_equity,
+                        available_margin=avail_margin,
+                        risk_pct_override=tenant.config.risk_pct,
+                    )
+                    if not margin_res.is_margin_sufficient or margin_res.final_lots < 1:
+                        logger.warning(
+                            "[FANOUT %s:%s] Paper sizing rejected by margin check: %s",
+                            tenant.config.tenant_id,
+                            clean_symbol,
+                            margin_res.rejection_reason,
+                        )
+                        continue
+
+                    tenant_intent.contract_lots = margin_res.final_lots
+                    tenant_intent.product_id = spec.product_id
+                    tenant_intent.leverage = tenant.config.leverage
+
+                    side = "buy" if tenant_intent.signal_type == SignalType.BULLISH_BREAKOUT else "sell"
+                    v_order = tenant.paper_simulator.submit_stop_order(
+                        product_id=spec.product_id,
+                        symbol=spec.symbol,
+                        side=side,
+                        size=tenant_intent.contract_lots,
+                        stop_price=tenant_intent.trigger_price,
+                        bracket_stop_loss_price=tenant_intent.initial_stop_loss,
+                        bracket_take_profit_price=tenant_intent.take_profit,
+                        leverage=tenant.config.leverage,
+                        intent_id=tenant_intent.intent_id,
+                        client_order_id=det_client_id,
+                    )
+                    tenant_intent.exchange_order_id = v_order.id
+                    tenant.state_manager.register_intent(tenant_intent)
+                    tenant.state_manager.bind_exchange_order_id(tenant_intent.intent_id, v_order.id)
+                    tenant.risk_manager.record_trade_entry()
+                    executed_tenants.append(tenant.config.tenant_id)
+                    logger.info(
+                        "[FANOUT %s:%s] Placed paper breakout order #%d | ClientID=%s (Lots=%d, Stop=%.4f)",
+                        tenant.config.tenant_id,
+                        clean_symbol,
+                        v_order.id,
+                        det_client_id,
+                        v_order.size,
+                        v_order.stop_price,
+                    )
+                except Exception as e:
+                    logger.error("[FANOUT %s:%s] Paper order failed: %s", tenant.config.tenant_id, clean_symbol, e)
+            elif tenant.mode == ExecutionMode.LIVE and tenant.execution_manager is not None:
+                try:
+                    await tenant.execution_manager.execute_signal(
+                        order_intent=tenant_intent,
+                        account_equity=account_equity,
+                    )
+                    executed_tenants.append(tenant.config.tenant_id)
+                except Exception as e:
+                    logger.error("[FANOUT %s:%s] Live order failed: %s", tenant.config.tenant_id, clean_symbol, e)
+            elif tenant.paper_simulator is not None:
+                # Fallback to paper simulator if live credentials are not yet configured
+                try:
+                    avail_margin = (
+                        tenant.paper_simulator.wallet.available_balance
+                        if tenant.paper_simulator.wallet.available_balance > 0
+                        else account_equity
+                    )
+                    margin_res = tenant.risk_manager.size_position(
+                        spec=spec,
+                        trigger_price=tenant_intent.trigger_price,
+                        stop_loss_price=tenant_intent.initial_stop_loss,
+                        account_equity=account_equity,
+                        available_margin=avail_margin,
+                        risk_pct_override=tenant.config.risk_pct,
+                    )
+                    if margin_res.is_margin_sufficient and margin_res.final_lots >= 1:
+                        tenant_intent.contract_lots = margin_res.final_lots
+                        tenant_intent.product_id = spec.product_id
+                        tenant_intent.leverage = tenant.config.leverage
+                        side = "buy" if tenant_intent.signal_type == SignalType.BULLISH_BREAKOUT else "sell"
+                        v_order = tenant.paper_simulator.submit_stop_order(
+                            product_id=spec.product_id,
+                            symbol=spec.symbol,
+                            side=side,
+                            size=tenant_intent.contract_lots,
+                            stop_price=tenant_intent.trigger_price,
+                            bracket_stop_loss_price=tenant_intent.initial_stop_loss,
+                            bracket_take_profit_price=tenant_intent.take_profit,
+                            leverage=tenant.config.leverage,
+                            intent_id=tenant_intent.intent_id,
+                            client_order_id=det_client_id,
+                        )
+                        tenant_intent.exchange_order_id = v_order.id
+                        tenant.state_manager.register_intent(tenant_intent)
+                        tenant.state_manager.bind_exchange_order_id(tenant_intent.intent_id, v_order.id)
+                        tenant.risk_manager.record_trade_entry()
+                        executed_tenants.append(tenant.config.tenant_id)
+                except Exception as e:
+                    logger.error("[FANOUT %s:%s] Fallback paper order failed: %s", tenant.config.tenant_id, clean_symbol, e)
+
+        return executed_tenants
 
     async def handle_session_rollover(self, symbol: str, session: SessionAnchorData) -> None:
         """Resets daily circuit breaker for all tenants at 00:00 UTC."""

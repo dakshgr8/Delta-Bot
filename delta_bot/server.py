@@ -541,6 +541,7 @@ def get_all_orders_summary(
             orders_list.append({
                 "order_id": oid,
                 "client_order_id": o.client_order_id,
+                "base_signal_id": (tenant.order_to_base_id.get(o.client_order_id) if tenant else None),
                 "product_id": o.product_id,
                 "symbol": o.symbol,
                 "side": o.side.upper(),
@@ -563,6 +564,7 @@ def get_all_orders_summary(
             orders_list.append({
                 "order_id": ao.id,
                 "client_order_id": ao.client_order_id,
+                "base_signal_id": (tenant.order_to_base_id.get(ao.client_order_id) if tenant else None),
                 "product_id": ao.product_id,
                 "symbol": ao.symbol,
                 "side": ao.side.upper(),

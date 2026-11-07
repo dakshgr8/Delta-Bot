@@ -26,6 +26,8 @@ from delta_bot.tenant import (
     TenantManager,
     decrypt_secret,
     encrypt_secret,
+    generate_deterministic_client_order_id,
+    generate_deterministic_tenant_order_id,
 )
 
 
@@ -396,4 +398,93 @@ async def test_live_metrics_synchronization(multi_tenant_orchestrator: TradingBo
     assert col["available_margin"] == 4800.00
     assert len(packet["positions"]) == 1
     assert packet["positions"][0]["symbol"] == "BTCUSDT"
+
+
+def test_deterministic_tenant_order_id_generation() -> None:
+    """Verifies Feature A: Deterministic UUIDv5 Multi-Tenant Order ID Fan-Out."""
+    base_signal_id = "SIG_BTCUSDT_1712750400"
+    tenant_alice = "tenant_alice_123"
+    tenant_bob = "tenant_bob_456"
+
+    # Determinism: same input produces identical output
+    alice_order_id1 = generate_deterministic_tenant_order_id(base_signal_id, tenant_alice)
+    alice_order_id2 = generate_deterministic_tenant_order_id(base_signal_id, tenant_alice)
+    assert alice_order_id1 == alice_order_id2
+
+    # Isolation: different tenants produce different order IDs
+    bob_order_id = generate_deterministic_tenant_order_id(base_signal_id, tenant_bob)
+    assert alice_order_id1 != bob_order_id
+
+    # Client order ID constraints (<= 32 characters for Delta Exchange)
+    alice_cid = generate_deterministic_client_order_id(base_signal_id, tenant_alice)
+    bob_cid = generate_deterministic_client_order_id(base_signal_id, tenant_bob)
+    assert len(alice_cid) <= 32
+    assert len(bob_cid) <= 32
+    assert alice_cid.startswith("D_")
+    assert bob_cid.startswith("D_")
+    assert alice_cid != bob_cid
+
+
+@pytest.mark.asyncio
+async def test_multi_tenant_candle_close_fanout(multi_tenant_orchestrator: TradingBotOrchestrator) -> None:
+    """Verifies that candle close breakouts fan out with deterministic per-tenant order IDs."""
+    from delta_bot.strategy import OrderIntent, SignalType
+
+    mgr = multi_tenant_orchestrator.tenant_manager
+    alice = mgr.create_tenant(
+        TenantConfig(tenant_id="fanout_alice", name="Alice", initial_balance=20000.0),
+        contract_specs=multi_tenant_orchestrator.contract_specs,
+    )
+    bob = mgr.create_tenant(
+        TenantConfig(tenant_id="fanout_bob", name="Bob", initial_balance=10000.0),
+        contract_specs=multi_tenant_orchestrator.contract_specs,
+    )
+
+    btc_spec = multi_tenant_orchestrator.contract_specs["BTCUSDT"]
+
+    master_intent = OrderIntent(
+        symbol="BTCUSDT",
+        signal_type=SignalType.BULLISH_BREAKOUT,
+        trigger_price=68000.0,
+        initial_stop_loss=67500.0,
+        current_stop_loss=67500.0,
+        take_profit=69000.0,
+        contract_lots=2,
+        target_asset_qty=0.002,
+        capital_at_risk_usd=100.0,
+        signal_candle_high=67900.0,
+        signal_candle_low=67400.0,
+        signal_candle_close=67850.0,
+        signal_bar_time=2000.0,
+        created_at_epoch_s=2000.0,
+    )
+
+    base_sig = "SIG_BTCUSDT_2000"
+    executed = await mgr.fanout_order_intent(base_sig, master_intent, btc_spec)
+
+    assert "fanout_alice" in executed
+    assert "fanout_bob" in executed
+
+    alice_orders = list(alice.paper_simulator._pending_orders.values())
+    bob_orders = list(bob.paper_simulator._pending_orders.values())
+
+    assert len(alice_orders) == 1
+    assert len(bob_orders) == 1
+
+    a_ord = alice_orders[0]
+    b_ord = bob_orders[0]
+
+    # Both orders derive from the same base signal
+    assert a_ord.client_order_id in alice.order_to_base_id
+    assert b_ord.client_order_id in bob.order_to_base_id
+    assert alice.order_to_base_id[a_ord.client_order_id] == base_sig
+    assert bob.order_to_base_id[b_ord.client_order_id] == base_sig
+
+    # Zero collision: Alice and Bob have unique client_order_ids
+    assert a_ord.client_order_id != b_ord.client_order_id
+    assert a_ord.client_order_id.startswith("D_")
+    assert b_ord.client_order_id.startswith("D_")
+    assert len(a_ord.client_order_id) <= 32
+    assert len(b_ord.client_order_id) <= 32
+
 
