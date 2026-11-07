@@ -845,6 +845,7 @@ def get_full_state_packet(
             "has_auth_token": bool(orchestrator.config.dashboard_auth_token_str),
             "has_api_key": current_tenant_dict.get("has_api_key", False),
             "delta_api_key_masked": current_tenant_dict.get("delta_api_key_masked", ""),
+            "last_sync_error": tenant.last_sync_error if tenant else None,
             "delta_base_url": orchestrator.config.delta_base_url,
             "config": {
                 "risk_pct": risk_pct,
@@ -1247,11 +1248,12 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 except Exception as sync_e:
                     logger.warning("[TENANT %s] Immediate live metrics sync error: %s", updated.config.tenant_id, sync_e)
 
-            conn_msg = (
-                f"Connected to Delta Exchange India! Real Balance: ${updated.live_balance:,.2f} USDT"
-                if updated.mode == ExecutionMode.LIVE and updated.last_sync_time > 0
-                else f"Tenant '{tenant.config.tenant_id}' updated successfully."
-            )
+            if updated.mode == ExecutionMode.LIVE and updated.last_sync_error:
+                conn_msg = f"⚠️ Delta Notice: {updated.last_sync_error}"
+            elif updated.mode == ExecutionMode.LIVE and updated.last_sync_time > 0:
+                conn_msg = f"Connected to Delta Exchange India! Real Balance: ${updated.live_balance:,.2f} USDT"
+            else:
+                conn_msg = f"Tenant '{tenant.config.tenant_id}' updated successfully."
 
             return JSONResponse(
                 content={

@@ -179,6 +179,7 @@ class TenantInstance:
         self.live_realized_pnl: float = 0.0
         self.live_positions: list[dict[str, Any]] = []
         self.last_sync_time: float = 0.0
+        self.last_sync_error: str | None = None
 
         # BotConfig wrapper for rest client / live credentials
         self.bot_config = BotConfig(
@@ -466,6 +467,7 @@ class TenantInstance:
                 self.live_equity = round(self.live_balance + self.live_unrealized_pnl, 4)
 
             self.last_sync_time = time.time()
+            self.last_sync_error = None
             logger.info(
                 "[TENANT %s] Synced real Delta India metrics: Balance=%.2f, Equity=%.2f, Positions=%d",
                 self.config.tenant_id,
@@ -474,12 +476,27 @@ class TenantInstance:
                 len(self.live_positions),
             )
         except AuthenticationError as auth_err:
+            err_code = getattr(auth_err, "error_code", "")
+            resp_body = getattr(auth_err, "response_body", {}) or {}
+            client_ip = (resp_body.get("context") or {}).get("client_ip")
+            if err_code == "ip_not_whitelisted_for_api_key" or "ip_not_whitelisted" in str(auth_err):
+                self.last_sync_error = (
+                    f"Render IP ({client_ip or '74.220.49.18'}) is not whitelisted. "
+                    f"Please remove IP restriction or add {client_ip or '74.220.49.18'} in Delta Exchange API settings."
+                )
+            elif err_code in ("invalid_api_key", "unauthorized", "signature_mismatch"):
+                self.last_sync_error = "Invalid API Key or Secret. Please verify your Delta Exchange India credentials."
+            else:
+                self.last_sync_error = f"Delta Authentication Failed: {getattr(auth_err, 'message', '') or err_code}"
+
             logger.error(
-                "[TENANT %s] Delta Exchange authentication failed (check API key and secret): %s",
+                "[TENANT %s] Delta Exchange authentication failed: %s | Hint: %s",
                 self.config.tenant_id,
                 auth_err,
+                self.last_sync_error,
             )
         except Exception as e:
+            self.last_sync_error = f"Live Sync Error: {e}"
             logger.warning(
                 "[TENANT %s] Failed to sync live wallet metrics from Delta Exchange: %s",
                 self.config.tenant_id,
@@ -572,6 +589,7 @@ class TenantInstance:
             "symbols": list(self.enabled_symbols),
             "created_at": self.config.created_at,
             "has_api_key": bool(self.config.delta_api_key),
+            "last_sync_error": self.last_sync_error,
         }
 
 
