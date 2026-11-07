@@ -766,4 +766,48 @@ def test_server_api_keys_configure_and_reset(
     assert res_status3.json()["status"]["has_api_key"] is False
 
 
+def test_server_tenant_control_syncs_to_supabase(client: TestClient, test_orchestrator: TradingBotOrchestrator) -> None:
+    """Verifies that tenant start/stop/flatten endpoints sync state to Supabase in real-time."""
+    from unittest.mock import patch
+    from delta_bot.tenant import TenantConfig
+
+    # Retrieve or register tenant
+    t_id = "server_sync_t"
+    if t_id in test_orchestrator.tenant_manager.tenants:
+        tenant = test_orchestrator.tenant_manager.tenants[t_id]
+    else:
+        t_cfg = TenantConfig(
+            tenant_id=t_id,
+            name="Server Sync Tenant",
+            mode="demo",
+            is_active=True,
+        )
+        tenant = test_orchestrator.tenant_manager.create_tenant(t_cfg)
+    tenant.is_running = True
+    tenant.config.is_active = True
+
+    try:
+        sync_calls = []
+        with patch.object(test_orchestrator.tenant_manager, "sync_tenant_to_supabase", side_effect=lambda inst: sync_calls.append(inst)):
+            # 1. Stop tenant
+            res_stop = client.post(f"/api/tenants/{t_id}/control/stop")
+            assert res_stop.status_code == 200
+            assert tenant.is_running is False
+            assert tenant.config.is_active is False
+            assert len(sync_calls) >= 1
+            assert sync_calls[-1].config.tenant_id == t_id
+
+            # 2. Start tenant
+            sync_calls.clear()
+            res_start = client.post(f"/api/tenants/{t_id}/control/start")
+            assert res_start.status_code == 200
+            assert tenant.is_running is True
+            assert tenant.config.is_active is True
+            assert len(sync_calls) >= 1
+            assert sync_calls[-1].config.tenant_id == t_id
+    finally:
+        test_orchestrator.tenant_manager.tenants.pop(t_id, None)
+        test_orchestrator.tenant_manager.save_to_disk()
+
+
 

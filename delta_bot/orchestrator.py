@@ -253,6 +253,8 @@ class TradingBotOrchestrator:
             def_t = self.tenant_manager.get_tenant("default")
             if def_t:
                 def_t.set_execution_mode(new_mode)
+                self.tenant_manager.save_to_disk()
+                self.tenant_manager.sync_tenant_to_supabase(def_t)
 
         logger.info("[OPERATIONAL MODE] Switched to %s mode (%s)", self.mode.value, active_base)
         return self.mode

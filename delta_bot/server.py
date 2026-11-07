@@ -734,7 +734,7 @@ def get_full_state_packet(
     if tenant is not None:
         uptime = max(0.0, time.time() - tenant.start_time)
         mode_str = tenant.mode.value.upper()
-        is_running = tenant.is_running
+        is_running = bool(tenant.is_running and tenant.config.is_active)
         lev = tenant.config.leverage
         risk_pct = tenant.config.risk_pct
         timeframe = tenant.config.timeframe
@@ -1107,7 +1107,15 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
     ) -> JSONResponse:
         """Returns high-level daemon telemetry, operational mode, and collateral."""
         if auth.auth_type == "user" and auth.tenant_id:
-            target_t = auth.tenant_id
+            req_t = tenant_id or x_tenant_id
+            if req_t and req_t != auth.tenant_id:
+                t = resolve_tenant(orchestrator, req_t)
+                if not t or (t.config.user_id and t.config.user_id != auth.user_id):
+                    target_t = auth.tenant_id
+                else:
+                    target_t = req_t
+            else:
+                target_t = auth.tenant_id
             packet = get_full_state_packet(orchestrator, tenant_id=target_t, user_id=auth.user_id)
         else:
             target_t = tenant_id or x_tenant_id
@@ -1369,6 +1377,9 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         tenant.is_running = True
         tenant.config.is_active = True
+        if hasattr(orchestrator, "tenant_manager"):
+            orchestrator.tenant_manager.save_to_disk()
+            orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
         logger.info("[TENANT %s] Signal evaluation STARTED", tenant_id)
         return ControlActionResponse(status="success", action="start", message=f"Tenant '{tenant.config.name}' trading resumed.")
 
@@ -1388,6 +1399,9 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         tenant.is_running = False
         tenant.config.is_active = False
+        if hasattr(orchestrator, "tenant_manager"):
+            orchestrator.tenant_manager.save_to_disk()
+            orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
         logger.warning("[TENANT %s] Signal evaluation PAUSED", tenant_id)
         return ControlActionResponse(status="success", action="stop", message=f"Tenant '{tenant.config.name}' trading paused.")
 
@@ -1406,6 +1420,9 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         res = await tenant.emergency_flatten()
+        if hasattr(orchestrator, "tenant_manager"):
+            orchestrator.tenant_manager.save_to_disk()
+            orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
         return ControlActionResponse(
             status="success",
             action="flatten",
@@ -1534,6 +1551,9 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             if tenant:
                 tenant.is_running = True
                 tenant.config.is_active = True
+                if hasattr(orchestrator, "tenant_manager"):
+                    orchestrator.tenant_manager.save_to_disk()
+                    orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
                 logger.info("[USER %s TENANT %s] Signal evaluation STARTED", auth.user_id, target_t)
                 return ControlActionResponse(
                     status="success",
@@ -1559,6 +1579,9 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             if tenant:
                 tenant.is_running = True
                 tenant.config.is_active = True
+                if hasattr(orchestrator, "tenant_manager"):
+                    orchestrator.tenant_manager.save_to_disk()
+                    orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
                 logger.info("[TENANT %s] Signal evaluation STARTED", target_t)
                 return ControlActionResponse(
                     status="success",
@@ -1566,6 +1589,13 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                     message=f"Tenant '{tenant.config.name}' trading resumed.",
                 )
         orchestrator.is_running = True
+        if hasattr(orchestrator, "tenant_manager"):
+            def_t = orchestrator.tenant_manager.get_tenant("default")
+            if def_t:
+                def_t.is_running = True
+                def_t.config.is_active = True
+                orchestrator.tenant_manager.save_to_disk()
+                orchestrator.tenant_manager.sync_tenant_to_supabase(def_t)
         logger.info("[CONTROL API] Trading loop STARTED via web interface")
         return ControlActionResponse(
             status="success",
@@ -1604,6 +1634,9 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             if tenant:
                 tenant.is_running = False
                 tenant.config.is_active = False
+                if hasattr(orchestrator, "tenant_manager"):
+                    orchestrator.tenant_manager.save_to_disk()
+                    orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
                 logger.warning("[USER %s TENANT %s] Signal evaluation PAUSED", auth.user_id, target_t)
                 return ControlActionResponse(
                     status="success",
@@ -1629,6 +1662,9 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             if tenant:
                 tenant.is_running = False
                 tenant.config.is_active = False
+                if hasattr(orchestrator, "tenant_manager"):
+                    orchestrator.tenant_manager.save_to_disk()
+                    orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
                 logger.warning("[TENANT %s] Signal evaluation PAUSED", target_t)
                 return ControlActionResponse(
                     status="success",
@@ -1636,6 +1672,13 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                     message=f"Tenant '{tenant.config.name}' trading paused.",
                 )
         orchestrator.is_running = False
+        if hasattr(orchestrator, "tenant_manager"):
+            def_t = orchestrator.tenant_manager.get_tenant("default")
+            if def_t:
+                def_t.is_running = False
+                def_t.config.is_active = False
+                orchestrator.tenant_manager.save_to_disk()
+                orchestrator.tenant_manager.sync_tenant_to_supabase(def_t)
         logger.warning("[CONTROL API] Trading loop STOPPED/PAUSED via web interface")
         return ControlActionResponse(
             status="success",
@@ -1879,7 +1922,12 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         response_model=ControlActionResponse,
         dependencies=[Depends(verify_dashboard_auth)],
     )
-    async def control_switch_mode(payload: ModeSwitchRequest) -> ControlActionResponse:
+    async def control_switch_mode(
+        payload: ModeSwitchRequest,
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> ControlActionResponse:
         """Switches execution mode between REAL and DEMO with safety validation."""
         target_mode = payload.mode.strip().lower()
         if target_mode not in ("real", "live", "demo", "paper", "testnet"):
@@ -1890,6 +1938,20 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         try:
             from delta_bot.exceptions import ConfigurationError
             new_mode = orchestrator.set_execution_mode(target_mode)
+            if auth.auth_type == "user" and auth.tenant_id and hasattr(orchestrator, "tenant_manager"):
+                req_t = tenant_id or x_tenant_id or auth.tenant_id
+                t = orchestrator.tenant_manager.get_tenant(req_t)
+                if t:
+                    t.set_execution_mode(new_mode)
+                    orchestrator.tenant_manager.save_to_disk()
+                    orchestrator.tenant_manager.sync_tenant_to_supabase(t)
+            elif hasattr(orchestrator, "tenant_manager"):
+                target_t = tenant_id or x_tenant_id or "default"
+                t = orchestrator.tenant_manager.get_tenant(target_t)
+                if t:
+                    t.set_execution_mode(new_mode)
+                    orchestrator.tenant_manager.save_to_disk()
+                    orchestrator.tenant_manager.sync_tenant_to_supabase(t)
             logger.warning("[CONTROL API] Switched execution mode to %s", new_mode.value.upper())
             return ControlActionResponse(
                 status="success",

@@ -517,10 +517,17 @@ class TenantInstance:
     def set_execution_mode(self, mode: ExecutionMode | str) -> ExecutionMode:
         """Dynamically switches tenant between REAL and DEMO execution modes."""
         new_mode = ExecutionMode.from_str(mode) if isinstance(mode, str) else mode
+        old_mode = self.mode
         self.mode = new_mode
         self.config.mode = new_mode.value.lower()
         self.reload_credentials()
-        logger.info("[TENANT %s] Switched to %s mode", self.config.tenant_id, self.mode.value)
+        if hasattr(self, "tenant_manager") and self.tenant_manager is not None:
+            try:
+                self.tenant_manager.save_to_disk()
+                self.tenant_manager.sync_tenant_to_supabase(self)
+            except Exception as sync_e:
+                logger.debug("Mode switch auto-sync failed: %s", sync_e)
+        logger.info("[TENANT %s] Switched from %s to %s mode", self.config.tenant_id, old_mode.value, self.mode.value)
         return self.mode
 
     def reload_credentials(self) -> None:
@@ -752,6 +759,13 @@ class TenantInstance:
             self.paper_simulator.cancel_all_orders()
             self.paper_simulator.flatten_all()
 
+        if hasattr(self, "tenant_manager") and self.tenant_manager is not None:
+            try:
+                self.tenant_manager.save_to_disk()
+                self.tenant_manager.sync_tenant_to_supabase(self)
+            except Exception as sync_e:
+                logger.debug("Emergency flatten auto-sync failed: %s", sync_e)
+
         logger.warning(
             "[TENANT %s] EMERGENCY FLATTEN EXECUTED: Cancelled %d orders, Closed %d positions",
             self.config.tenant_id,
@@ -812,7 +826,7 @@ class TenantInstance:
             "name": self.config.name,
             "mode": self.mode.value.upper(),
             "is_demo": self.config.is_demo,
-            "is_running": self.is_running,
+            "is_running": bool(self.is_running and self.config.is_active),
             "equity": round(eq, 2),
             "balance": round(bal, 2),
             "unrealized_pnl": round(upnl, 2),
@@ -1203,7 +1217,9 @@ class TenantManager:
         for t in self.tenants.values():
             t.is_running = False
             t.config.is_active = False
+            self.sync_tenant_to_supabase(t)
             count += 1
+        self.save_to_disk()
         logger.warning("[TENANT MANAGER] Paused signal evaluation across all %d tenants", count)
         return count
 
@@ -1213,7 +1229,9 @@ class TenantManager:
         for t in self.tenants.values():
             t.is_running = True
             t.config.is_active = True
+            self.sync_tenant_to_supabase(t)
             count += 1
+        self.save_to_disk()
         logger.info("[TENANT MANAGER] Resumed signal evaluation across all %d tenants", count)
         return count
 
@@ -1417,13 +1435,43 @@ class TenantManager:
                 risk = float(r_row.get("risk_pct") or d_row.get("risk_pct") or 1.0)
                 tf = r_row.get("timeframe") or d_row.get("timeframe") or "1m"
                 max_dd = float(r_row.get("max_drawdown_pct") or d_row.get("max_drawdown_pct") or 4.0)
-                is_active = bool(r_row.get("is_active", d_row.get("is_active", True)))
+
+                # Determine active mode and running state from separated tables
+                r_active = bool(r_row.get("is_active", False))
+                d_active = bool(d_row.get("is_active", False))
+                r_running = bool(r_row.get("is_running", False))
+                d_running = bool(d_row.get("is_running", False))
+
+                if d_active and not r_active:
+                    chosen_mode = "demo"
+                    is_active = True
+                    is_running = d_running
+                elif r_active and not d_active:
+                    chosen_mode = "real"
+                    is_active = True
+                    is_running = r_running
+                elif d_running and not r_running:
+                    chosen_mode = "demo"
+                    is_active = True
+                    is_running = True
+                elif r_running and not d_running:
+                    chosen_mode = "real"
+                    is_active = True
+                    is_running = True
+                elif r_active and d_active:
+                    chosen_mode = "real" if raw_real_k else "demo"
+                    is_active = True
+                    is_running = r_running if chosen_mode == "real" else d_running
+                else:
+                    chosen_mode = "real" if raw_real_k else "demo"
+                    is_active = False
+                    is_running = False
 
                 cfg = TenantConfig(
                     tenant_id=t_id,
                     user_id=str(uid) if uid else None,
                     name=clean_name,
-                    mode="real" if raw_real_k else "demo",
+                    mode=chosen_mode,
                     initial_balance=0.0,
                     delta_api_key=raw_real_k,
                     delta_api_secret=raw_real_s,
@@ -1442,6 +1490,7 @@ class TenantManager:
                     created_at=r_row.get("created_at") or d_row.get("created_at") or datetime.now(timezone.utc).isoformat(),
                 )
                 inst = TenantInstance(config=cfg, contract_specs=contract_specs)
+                inst.is_running = is_running
                 inst.tenant_manager = self
                 self.tenants[t_id] = inst
                 loaded += 1
@@ -1649,6 +1698,15 @@ class TenantManager:
             enc_demo_key = encrypt_secret(instance.config.demo_api_key) if instance.config.demo_api_key else None
             enc_demo_secret = encrypt_secret(instance.config.demo_api_secret) if instance.config.demo_api_secret else None
 
+            is_real_selected = instance.mode.is_real
+            is_demo_selected = instance.mode.is_demo
+
+            real_is_active = bool(instance.config.is_active and is_real_selected)
+            real_is_running = bool(instance.is_running and instance.config.is_active and is_real_selected)
+
+            demo_is_active = bool(instance.config.is_active and is_demo_selected)
+            demo_is_running = bool(instance.is_running and instance.config.is_active and is_demo_selected)
+
             # Real Tenant Payload (Strictly Real Desk parameters)
             real_payload = {
                 "tenant_id": instance.config.tenant_id,
@@ -1664,11 +1722,11 @@ class TenantManager:
                 "timeframe": instance.config.timeframe,
                 "max_drawdown_pct": float(instance.config.max_drawdown_pct),
                 "symbols": instance.config.symbols,
-                "is_running": instance.is_running and instance.mode == ExecutionMode.LIVE,
-                "is_active": instance.config.is_active,
+                "is_running": real_is_running,
+                "is_active": real_is_active,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
-            if instance.mode == ExecutionMode.LIVE:
+            if instance.mode.is_real:
                 real_payload["balance"] = round(float(live_bal), 4)
                 real_payload["equity"] = round(float(live_eq), 4)
                 real_payload["realized_pnl"] = round(float(live_rpnl), 4)
@@ -1689,11 +1747,11 @@ class TenantManager:
                 "timeframe": instance.config.timeframe,
                 "max_drawdown_pct": float(instance.config.max_drawdown_pct),
                 "symbols": instance.config.symbols,
-                "is_running": instance.is_running and instance.mode in (ExecutionMode.DEMO, ExecutionMode.PAPER),
-                "is_active": instance.config.is_active,
+                "is_running": demo_is_running,
+                "is_active": demo_is_active,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
-            if instance.mode in (ExecutionMode.DEMO, ExecutionMode.PAPER):
+            if instance.mode.is_demo:
                 demo_payload["balance"] = round(float(live_bal), 4)
                 demo_payload["equity"] = round(float(live_eq), 4)
                 demo_payload["realized_pnl"] = round(float(live_rpnl), 4)

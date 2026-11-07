@@ -1081,6 +1081,72 @@ def test_sync_and_load_demo_api_keys_to_supabase(tmp_path: Any) -> None:
         assert loaded_t.config.demo_base_url == "https://cdn-ind.testnet.deltaex.org"
 
 
+def test_tenant_control_and_mode_mutual_exclusion_in_supabase(tmp_path: Path) -> None:
+    """Verifies that start/stop/mode-switch enforces mutual exclusion between real and demo tables."""
+    mgr = TenantManager(
+        storage_path=str(tmp_path / "tenants_exclusive.json"),
+        supabase_url="https://fake.supabase.co",
+        supabase_secret_key="fake_key",
+    )
+    t_cfg = TenantConfig(
+        tenant_id="exclusive_desk",
+        name="Exclusive Desk",
+        mode="demo",
+        is_active=True,
+        delta_api_key="real_key_1",
+        delta_api_secret="real_sec_1",
+        demo_api_key="demo_key_1",
+        demo_api_secret="demo_sec_1",
+    )
+    captured = []
+
+    def mock_post(url, headers, json):
+        captured.append((url, json))
+        resp = MagicMock()
+        resp.status_code = 201
+        return resp
+
+    with patch("httpx.Client.post", side_effect=mock_post):
+        inst = mgr.create_tenant(t_cfg)
+        inst.is_running = True
+
+        # 1. Active DEMO mode + running: Real must be stopped & inactive; Demo must be running & active
+        captured.clear()
+        mgr.sync_tenant_to_supabase(inst)
+        assert len(captured) == 2
+        real_p = next(j for u, j in captured if "real_tenants" in u)
+        demo_p = next(j for u, j in captured if "demo_tenants" in u)
+        assert real_p["is_active"] is False
+        assert real_p["is_running"] is False
+        assert demo_p["is_active"] is True
+        assert demo_p["is_running"] is True
+
+        # 2. Engine Stopped / Paused: Both desks must be inactive & not running
+        inst.is_running = False
+        inst.config.is_active = False
+        captured.clear()
+        mgr.sync_tenant_to_supabase(inst)
+        real_p = next(j for u, j in captured if "real_tenants" in u)
+        demo_p = next(j for u, j in captured if "demo_tenants" in u)
+        assert real_p["is_active"] is False
+        assert real_p["is_running"] is False
+        assert demo_p["is_active"] is False
+        assert demo_p["is_running"] is False
+
+        # 3. Mode switched to REAL + Engine Resumed: Real is active & running; Demo is inactive & stopped
+        inst.is_running = True
+        inst.config.is_active = True
+        inst.set_execution_mode("real")
+        captured.clear()
+        mgr.sync_tenant_to_supabase(inst)
+        real_p = next(j for u, j in captured if "real_tenants" in u)
+        demo_p = next(j for u, j in captured if "demo_tenants" in u)
+        assert real_p["is_active"] is True
+        assert real_p["is_running"] is True
+        assert demo_p["is_active"] is False
+        assert demo_p["is_running"] is False
+
+
 
 
 

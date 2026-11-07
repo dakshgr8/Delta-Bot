@@ -1606,10 +1606,16 @@
     // Execution Controls
     // -------------------------------------------------------------------------
     async function toggleEngine() {
+      const btnLabel = document.getElementById('btn-engine-label');
+      const btnToggle = document.getElementById('btn-toggle-engine');
       const action = isRunning ? 'stop' : 'start';
       const activeTenant = (currentTenantId && currentTenantId !== 'default') 
         ? currentTenantId 
         : (localStorage.getItem('tenant_id') || 'default');
+
+      if (btnToggle) btnToggle.disabled = true;
+      if (btnLabel) btnLabel.textContent = isRunning ? 'Pausing...' : 'Resuming...';
+
       try {
         const endpoint = (activeTenant && activeTenant !== 'default')
           ? `${BACKEND_URL}/api/tenants/${activeTenant}/control/${action}`
@@ -1619,10 +1625,15 @@
           headers: getAuthHeaders()
         });
         const data = await res.json();
-        alert(data.message || `Bot ${action === 'stop' ? 'paused' : 'started'}`);
-        fetchStatus();
+        if (!res.ok) {
+          throw new Error(data.detail || data.message || `Server returned ${res.status}`);
+        }
+        await forceFetchStatus();
       } catch (err) {
-        alert(`Failed to ${action}: ${err}`);
+        alert(`Failed to ${action} engine: ${err.message || err}`);
+        await forceFetchStatus();
+      } finally {
+        if (btnToggle) btnToggle.disabled = false;
       }
     }
 
@@ -1640,10 +1651,13 @@
           headers: getAuthHeaders()
         });
         const data = await res.json();
-        alert(data.message || 'Flatten complete');
-        fetchStatus();
+        if (!res.ok) {
+          throw new Error(data.detail || data.message || `Server returned ${res.status}`);
+        }
+        await forceFetchStatus();
       } catch (err) {
-        alert(`Flatten error: ${err}`);
+        alert(`Flatten error: ${err.message || err}`);
+        await forceFetchStatus();
       }
     }
 
@@ -1655,10 +1669,13 @@
           headers: getAuthHeaders()
         });
         const data = await res.json();
-        alert(data.message || 'Position closed');
-        fetchStatus();
+        if (!res.ok) {
+          throw new Error(data.detail || data.message || `Server returned ${res.status}`);
+        }
+        await forceFetchStatus();
       } catch (err) {
-        alert(`Failed: ${err}`);
+        alert(`Failed to close position: ${err.message || err}`);
+        await forceFetchStatus();
       }
     }
 
@@ -1669,10 +1686,13 @@
           headers: getAuthHeaders()
         });
         const data = await res.json();
-        alert(data.message || 'Order cancelled');
-        fetchStatus();
+        if (!res.ok) {
+          throw new Error(data.detail || data.message || `Server returned ${res.status}`);
+        }
+        await forceFetchStatus();
       } catch (err) {
-        alert(`Failed: ${err}`);
+        alert(`Failed to cancel order: ${err.message || err}`);
+        await forceFetchStatus();
       }
     }
 
@@ -1703,6 +1723,17 @@
 
     async function switchExecutionMode(targetMode) {
       const modeClean = targetMode.toLowerCase();
+      const btnReal = document.getElementById('btn-mode-real');
+      const btnDemo = document.getElementById('btn-mode-demo');
+
+      if (modeClean === 'demo') {
+        if (btnReal) btnReal.className = 'px-2.5 py-1 rounded text-[var(--dp-color-meta)] hover:text-white transition cursor-pointer flex items-center gap-1.5 opacity-60';
+        if (btnDemo) btnDemo.className = 'px-2.5 py-1 rounded text-white font-medium bg-amber-500/20 border border-amber-500/40 text-amber-300 transition cursor-pointer flex items-center gap-1.5';
+      } else {
+        if (btnReal) btnReal.className = 'px-2.5 py-1 rounded text-white font-medium bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 transition cursor-pointer flex items-center gap-1.5';
+        if (btnDemo) btnDemo.className = 'px-2.5 py-1 rounded text-[var(--dp-color-meta)] hover:text-white transition cursor-pointer flex items-center gap-1.5 opacity-60';
+      }
+
       try {
         const endpoint = (currentTenantId && currentTenantId !== 'default')
           ? `${BACKEND_URL}/api/tenants/${currentTenantId}/update`
@@ -1719,6 +1750,7 @@
         await forceFetchStatus();
       } catch (err) {
         alert(`Cannot switch to ${targetMode.toUpperCase()} mode: ${err.message || err}`);
+        await forceFetchStatus();
       }
     }
 
