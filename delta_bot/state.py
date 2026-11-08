@@ -593,11 +593,61 @@ class TradingStateManager:
                                         tp_px,
                                     )
                                 except Exception as patch_exc:
-                                    logger.error(
-                                        "Failed to attach position bracket to naked position %s: %s",
+                                    logger.warning(
+                                        "set_position_bracket failed for %s: %s. Placing fallback native reduce-only child orders...",
                                         pos.symbol,
                                         patch_exc,
                                     )
+                                    # Fallback 1: Native reduce-only child stop loss order
+                                    try:
+                                        sl_res = await self.client.place_order(
+                                            product_id=pos.product_id,
+                                            size=abs(pos.size),
+                                            side=exit_side,
+                                            order_type="market_order",
+                                            stop_price=sl_px,
+                                            stop_order_type="stop_loss_order",
+                                            reduce_only=True,
+                                            time_in_force="gtc",
+                                            symbol=pos.symbol,
+                                        )
+                                        report["naked_positions_repaired"] = report.get("naked_positions_repaired", 0) + 1
+                                        logger.info(
+                                            "🛡️ Repaired naked position for %s via fallback child SL order #%d @ %.4f",
+                                            pos.symbol,
+                                            sl_res.id,
+                                            sl_px,
+                                        )
+                                    except Exception as sl_err:
+                                        logger.error("Failed to place fallback child SL for %s: %s", pos.symbol, sl_err)
+
+                                    # Fallback 2: Native reduce-only child take profit order (if missing)
+                                    has_tp = any(
+                                        o.product_id == pos.product_id
+                                        and o.side.lower() == exit_side
+                                        and o.order_type == "limit_order"
+                                        for o in open_orders
+                                    )
+                                    if not has_tp and tp_px is not None:
+                                        try:
+                                            tp_res = await self.client.place_order(
+                                                product_id=pos.product_id,
+                                                size=abs(pos.size),
+                                                side=exit_side,
+                                                order_type="limit_order",
+                                                limit_price=tp_px,
+                                                reduce_only=True,
+                                                time_in_force="gtc",
+                                                symbol=pos.symbol,
+                                            )
+                                            logger.info(
+                                                "🛡️ Repaired naked position for %s via fallback child TP order #%d @ %.4f",
+                                                pos.symbol,
+                                                tp_res.id,
+                                                tp_px,
+                                            )
+                                        except Exception as tp_err:
+                                            logger.error("Failed to place fallback child TP for %s: %s", pos.symbol, tp_err)
 
             except Exception as exc:
                 logger.warning("REST open orders reconciliation error: %s", exc)

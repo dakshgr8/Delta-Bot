@@ -214,7 +214,7 @@ class OrderRouter:
                 size=size,
                 unfilled_size=size,
                 stop_price=stop_price,
-                stop_order_type="stop_loss_order",
+                stop_order_type=None,
                 stop_trigger_method=self.config.stop_trigger_method,
                 bracket_stop_loss_price=bracket_stop_loss_price,
                 bracket_take_profit_price=bracket_take_profit_price,
@@ -236,13 +236,13 @@ class OrderRouter:
 
         # Live submission
         try:
-            return await self.client.place_order(
+            order = await self.client.place_order(
                 product_id=product_id,
                 size=size,
                 side=side,
                 order_type="market_order",
                 stop_price=stop_price,
-                stop_order_type="stop_loss_order",
+                stop_order_type=None,
                 stop_trigger_method=self.config.stop_trigger_method,
                 bracket_stop_loss_price=bracket_stop_loss_price,
                 bracket_take_profit_price=bracket_take_profit_price,
@@ -250,6 +250,51 @@ class OrderRouter:
                 client_order_id=client_order_id,
                 symbol=symbol,
             )
+
+            # Verification 1: If order is resting, ensure brackets are attached on exchange
+            if getattr(order, "is_open", False) and (
+                getattr(order, "bracket_stop_loss_price", None) is None
+                or getattr(order, "bracket_take_profit_price", None) is None
+            ):
+                try:
+                    await self.client.edit_bracket_order(
+                        product_id=product_id,
+                        order_id=order.id,
+                        bracket_stop_loss_price=bracket_stop_loss_price,
+                        bracket_take_profit_price=bracket_take_profit_price,
+                    )
+                    logger.info(
+                        "[BRACKET GUARD] Successfully attached brackets via PUT /v2/orders/bracket to resting order #%d: SL=%.4f, TP=%.4f",
+                        order.id,
+                        bracket_stop_loss_price,
+                        bracket_take_profit_price,
+                    )
+                    if hasattr(order, "model_copy"):
+                        order = order.model_copy(
+                            update={
+                                "bracket_stop_loss_price": bracket_stop_loss_price,
+                                "bracket_take_profit_price": bracket_take_profit_price,
+                            }
+                        )
+                except Exception as b_err:
+                    logger.warning(
+                        "[BRACKET GUARD] Could not attach brackets to resting order #%d via PUT /v2/orders/bracket: %s",
+                        order.id,
+                        b_err,
+                    )
+
+            # Verification 2: If order filled immediately (not resting open), ensure position is armed
+            if not getattr(order, "is_open", False):
+                await self.ensure_position_protection(
+                    product_id=product_id,
+                    symbol=symbol,
+                    side=side,
+                    size=size,
+                    stop_loss_price=bracket_stop_loss_price,
+                    take_profit_price=bracket_take_profit_price,
+                )
+
+            return order
         except DeltaAPIError as err:
             if err.error_code == "immediate_execution_stop_order":
                 logger.warning(
@@ -304,19 +349,47 @@ class OrderRouter:
         if stop_loss_price is None and take_profit_price is None:
             return False
 
+        has_sl = False
+        has_tp = False
+        exit_side = "sell" if str(side).lower() == "buy" else "buy"
+        try:
+            open_orders = await self.client.get_open_orders(product_id=product_id)
+            if isinstance(open_orders, list):
+                has_sl = any(
+                    o.product_id == product_id
+                    and str(getattr(o, "side", "")).lower() == exit_side
+                    and getattr(o, "stop_price", None) is not None
+                    for o in open_orders
+                )
+                has_tp = any(
+                    o.product_id == product_id
+                    and str(getattr(o, "side", "")).lower() == exit_side
+                    and (
+                        getattr(o, "order_type", "") == "limit_order"
+                        or getattr(o, "bracket_take_profit_price", None) is not None
+                    )
+                    for o in open_orders
+                )
+        except Exception as o_err:
+            logger.debug("Could not fetch open orders to check existing protection: %s", o_err)
+
+        if has_sl and has_tp:
+            logger.info("[PROTECTION GUARD] Position for %s already has active SL and TP protection.", symbol)
+            return True
+
         attached = False
         try:
             await self.client.set_position_bracket(
                 product_id=product_id,
-                bracket_stop_loss_price=stop_loss_price,
-                bracket_take_profit_price=take_profit_price,
+                bracket_stop_loss_price=stop_loss_price if not has_sl else None,
+                bracket_take_profit_price=take_profit_price if not has_tp else None,
             )
             logger.info(
                 "[PROTECTION GUARD] Successfully armed position bracket for %s (product_id=%d): SL=%s, TP=%s",
                 symbol,
                 product_id,
-                stop_loss_price,
-                take_profit_price,
+                stop_loss_price if not has_sl else "EXISTING",
+                take_profit_price if not has_tp else "EXISTING",
             )
             attached = True
         except Exception as b_exc:
@@ -327,8 +400,7 @@ class OrderRouter:
             )
 
         if not attached:
-            exit_side = "sell" if str(side).lower() == "buy" else "buy"
-            if stop_loss_price is not None:
+            if not has_sl and stop_loss_price is not None:
                 try:
                     sl_res = await self.client.place_order(
                         product_id=product_id,
@@ -354,7 +426,7 @@ class OrderRouter:
                         sl_exc,
                     )
 
-            if take_profit_price is not None:
+            if not has_tp and take_profit_price is not None:
                 try:
                     tp_res = await self.client.place_order(
                         product_id=product_id,

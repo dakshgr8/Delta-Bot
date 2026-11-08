@@ -639,7 +639,8 @@ class DeltaRestClient:
             payload["limit_price"] = str(limit_price)
         if stop_price is not None:
             payload["stop_price"] = str(stop_price)
-            payload["stop_order_type"] = stop_order_type or "stop_loss_order"
+            if stop_order_type is not None:
+                payload["stop_order_type"] = stop_order_type
             payload["stop_trigger_method"] = stop_trigger_method
         if bracket_stop_loss_price is not None:
             payload["bracket_stop_loss_price"] = str(bracket_stop_loss_price)
@@ -649,16 +650,22 @@ class DeltaRestClient:
             payload["bracket_stop_loss_limit_price"] = str(bracket_stop_loss_limit_price)
         if bracket_take_profit_limit_price is not None:
             payload["bracket_take_profit_limit_price"] = str(bracket_take_profit_limit_price)
+        if bracket_stop_loss_price is not None or bracket_take_profit_price is not None:
+            payload["bracket_stop_trigger_method"] = stop_trigger_method or "mark_price"
         if client_order_id:
             payload["client_order_id"] = str(client_order_id)
 
+        bracket_str = ""
+        if bracket_stop_loss_price is not None or bracket_take_profit_price is not None:
+            bracket_str = f" bracket_sl={bracket_stop_loss_price} bracket_tp={bracket_take_profit_price}"
         logger.info(
-            "Submitting exchange order: product_id=%d side=%s size=%d type=%s stop_price=%s",
+            "Submitting exchange order: product_id=%d side=%s size=%d type=%s stop_price=%s%s",
             product_id,
             side,
             size,
             order_type,
             stop_price,
+            bracket_str,
         )
 
         raw_result = await self._http_engine.request(
@@ -821,13 +828,30 @@ class DeltaRestClient:
         Attaches or modifies bracket Stop Loss and Take Profit on an active open position.
         Endpoint: POST /v2/orders/bracket (Authenticated)
         """
-        payload: dict[str, Any] = {"product_id": int(product_id)}
+        payload: dict[str, Any] = {
+            "product_id": int(product_id),
+            "bracket_stop_trigger_method": "mark_price",
+        }
         if bracket_stop_loss_price is not None:
             payload["bracket_stop_loss_price"] = str(bracket_stop_loss_price)
+            payload["stop_loss_order"] = {
+                "order_type": "market_order",
+                "stop_price": str(bracket_stop_loss_price),
+            }
         if bracket_take_profit_price is not None:
             payload["bracket_take_profit_price"] = str(bracket_take_profit_price)
+            payload["take_profit_order"] = {
+                "order_type": "limit_order",
+                "stop_price": str(bracket_take_profit_price),
+                "limit_price": str(bracket_take_profit_price),
+            }
 
-        logger.info("Setting position bracket for product_id=%d...", product_id)
+        logger.info(
+            "Setting position bracket for product_id=%d: SL=%s, TP=%s...",
+            product_id,
+            bracket_stop_loss_price,
+            bracket_take_profit_price,
+        )
         raw_result = await self._http_engine.request(
             method="POST",
             path="/v2/orders/bracket",

@@ -177,7 +177,7 @@ async def test_native_stop_order_with_brackets_live_submission(
     assert call_kwargs["side"] == "buy"
     assert call_kwargs["order_type"] == "market_order"
     assert call_kwargs["stop_price"] == 51000.5
-    assert call_kwargs["stop_order_type"] == "stop_loss_order"
+    assert call_kwargs.get("stop_order_type") is None
     assert call_kwargs["stop_trigger_method"] == "mark_price"
     assert call_kwargs["bracket_stop_loss_price"] == 50600.0
     assert call_kwargs["bracket_take_profit_price"] == 51801.5
@@ -871,4 +871,93 @@ async def test_split_brain_reconnect_shield(
     assert res2 is None
     assert intent2.status == OrderStatus.CANCELLED_MANUAL
     assert "Split-brain" in (intent2.cancellation_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_native_stop_order_missing_brackets_attaches_via_edit_bracket(
+    btc_global_spec: ContractSpec,
+    sample_bullish_intent: OrderIntent,
+) -> None:
+    """Verifies that if exchange accepts order without brackets, edit_bracket_order is immediately invoked."""
+    mock_client = AsyncMock(spec=DeltaRestClient)
+    mock_client.get_cached_contract_spec.return_value = btc_global_spec
+    mock_client.config = BotConfig()
+
+    # Exchange returned order without attached brackets
+    bare_order = ExchangeOrder(
+        id=778899,
+        client_order_id=sample_bullish_intent.client_order_id,
+        product_id=139,
+        symbol="BTCUSDT",
+        side="buy",
+        order_type="market_order",
+        size=50,
+        stop_price=51000.5,
+        bracket_stop_loss_price=None,
+        bracket_take_profit_price=None,
+        state="open",
+        created_at=1700000000.0,
+    )
+    mock_client.place_order.return_value = bare_order
+
+    manager = OrderExecutionManager(mock_client, ExecutionConfig(execution_mode=ExecutionMode.LIVE, leverage=5))
+    order = await manager.execute_signal(
+        order_intent=sample_bullish_intent,
+        account_equity=10000.0,
+        available_margin_override=5000.0,
+    )
+
+    assert order.id == 778899
+    # Verify edit_bracket_order was called to attach missing brackets
+    mock_client.edit_bracket_order.assert_awaited_once_with(
+        product_id=139,
+        order_id=778899,
+        bracket_stop_loss_price=50600.0,
+        bracket_take_profit_price=51801.5,
+    )
+    assert order.bracket_stop_loss_price == 50600.0
+    assert order.bracket_take_profit_price == 51801.5
+
+
+@pytest.mark.asyncio
+async def test_native_stop_order_immediate_fill_ensures_position_protection(
+    btc_global_spec: ContractSpec,
+    sample_bullish_intent: OrderIntent,
+) -> None:
+    """Verifies that if stop order fills immediately on placement, position protection is armed."""
+    mock_client = AsyncMock(spec=DeltaRestClient)
+    mock_client.get_cached_contract_spec.return_value = btc_global_spec
+    mock_client.config = BotConfig()
+
+    filled_order = ExchangeOrder(
+        id=998877,
+        client_order_id=sample_bullish_intent.client_order_id,
+        product_id=139,
+        symbol="BTCUSDT",
+        side="buy",
+        order_type="market_order",
+        size=50,
+        stop_price=51000.5,
+        bracket_stop_loss_price=50600.0,
+        bracket_take_profit_price=51801.5,
+        state="closed",  # Filled immediately
+        created_at=1700000000.0,
+    )
+    mock_client.place_order.return_value = filled_order
+
+    manager = OrderExecutionManager(mock_client, ExecutionConfig(execution_mode=ExecutionMode.LIVE, leverage=5))
+    order = await manager.execute_signal(
+        order_intent=sample_bullish_intent,
+        account_equity=10000.0,
+        available_margin_override=5000.0,
+    )
+
+    assert order.id == 998877
+    # Verify set_position_bracket was called to arm the filled position
+    mock_client.set_position_bracket.assert_awaited_once_with(
+        product_id=139,
+        bracket_stop_loss_price=50600.0,
+        bracket_take_profit_price=51801.5,
+    )
+
 

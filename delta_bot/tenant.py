@@ -651,7 +651,109 @@ class TenantInstance:
                     self.risk_manager.circuit_breaker.is_tripped = False
                     self.risk_manager.circuit_breaker.trip_reason = None
 
+            # Fetch both positions and open orders directly from Delta Exchange API
             positions = await self.rest_client.get_open_positions()
+            try:
+                open_orders = await self.rest_client.get_open_orders()
+            except Exception as ord_err:
+                logger.debug("[TENANT %s] Sync live orders failed: %s", self.config.tenant_id, ord_err)
+                open_orders = []
+
+            # 1. Process and guard open orders
+            formatted_orders: list[dict[str, Any]] = []
+            active_order_ids: set[int] = set()
+            for o in open_orders:
+                if getattr(o, "is_open", False) or str(getattr(o, "state", "open")).lower() in ("open", "pending"):
+                    active_order_ids.add(o.id)
+                    sym = o.symbol
+                    if not sym:
+                        for s_sym, s_spec in self.contract_specs.items():
+                            if s_spec.product_id == o.product_id:
+                                sym = s_sym
+                                break
+                    trigger_px = o.stop_price if o.stop_price is not None else o.limit_price
+                    strategy = self.strategies.get(sym) if sym else None
+                    intent = strategy.pending_order if strategy else None
+                    bars_elapsed = intent.bars_elapsed if intent else 0
+                    ttl_bars = intent.ttl_bars if intent else (strategy.config.max_pending_bars if strategy else 3)
+                    ttl_rem = max(0, ttl_bars - bars_elapsed)
+
+                    # Guard: If resting entry stop order is missing attached brackets, attach them
+                    if o.stop_price is not None and (
+                        getattr(o, "bracket_stop_loss_price", None) is None
+                        or getattr(o, "bracket_take_profit_price", None) is None
+                    ):
+                        calc_sl = (
+                            intent.initial_stop_loss
+                            if intent and intent.initial_stop_loss
+                            else (o.stop_price * 0.985 if str(o.side).lower() == "buy" else o.stop_price * 1.015)
+                        )
+                        calc_tp = (
+                            intent.take_profit
+                            if intent and intent.take_profit
+                            else (o.stop_price * 1.03 if str(o.side).lower() == "buy" else o.stop_price * 0.97)
+                        )
+                        spec = self.contract_specs.get(sym) if sym else None
+                        sl_px = spec.round_price(calc_sl) if spec else round(calc_sl, 4)
+                        tp_px = spec.round_price(calc_tp) if spec else round(calc_tp, 4)
+                        try:
+                            await self.rest_client.edit_bracket_order(
+                                product_id=o.product_id,
+                                order_id=o.id,
+                                bracket_stop_loss_price=sl_px if getattr(o, "bracket_stop_loss_price", None) is None else None,
+                                bracket_take_profit_price=tp_px if getattr(o, "bracket_take_profit_price", None) is None else None,
+                            )
+                            logger.info(
+                                "[TENANT %s] Attached missing brackets to resting entry order #%d (%s): SL=%.4f, TP=%.4f",
+                                self.config.tenant_id,
+                                o.id,
+                                sym or o.product_id,
+                                sl_px,
+                                tp_px,
+                            )
+                            if hasattr(o, "model_copy"):
+                                o = o.model_copy(
+                                    update={
+                                        "bracket_stop_loss_price": sl_px,
+                                        "bracket_take_profit_price": tp_px,
+                                    }
+                                )
+                        except Exception as b_patch_err:
+                            logger.debug("[TENANT %s] Could not attach bracket to order #%d: %s", self.config.tenant_id, o.id, b_patch_err)
+
+                    formatted_orders.append({
+                        "order_id": o.id,
+                        "id": o.id,
+                        "client_order_id": o.client_order_id,
+                        "base_signal_id": self.order_to_base_id.get(o.client_order_id or ""),
+                        "product_id": o.product_id,
+                        "symbol": sym or f"PRODUCT_{o.product_id}",
+                        "side": str(o.side or "").upper(),
+                        "size": o.size or o.unfilled_size,
+                        "stop_price": o.stop_price,
+                        "limit_price": o.limit_price,
+                        "trigger_price": trigger_px,
+                        "bracket_stop_loss_price": o.bracket_stop_loss_price,
+                        "bracket_take_profit_price": o.bracket_take_profit_price,
+                        "status": str(o.state or "OPEN").upper(),
+                        "bars_elapsed": bars_elapsed,
+                        "ttl_bars": ttl_bars,
+                        "ttl_remaining": ttl_rem,
+                        "created_at": o.created_at,
+                        "mode": "LIVE",
+                    })
+                    if self.execution_manager and hasattr(self.execution_manager, "registry"):
+                        if not self.execution_manager.registry.get_by_exchange_id(o.id):
+                            self.execution_manager.registry.register(o)
+
+            if self.execution_manager and hasattr(self.execution_manager, "registry"):
+                for ex_id in list(self.execution_manager.registry._orders_by_exchange_id.keys()):
+                    if ex_id not in active_order_ids:
+                        self.execution_manager.registry.remove(ex_id)
+
+            self.live_orders = formatted_orders
+
+            # 2. Process and guard open positions
             formatted_positions: list[dict[str, Any]] = []
             pos_pnl_acc = 0.0
 
@@ -682,7 +784,59 @@ class TenantInstance:
                         if (liq_px and pos.mark_price > 0)
                         else 0.0
                     )
-                    child_sl = self.state_manager.get_child_stop_loss_order_id(pos.product_id)
+
+                    exit_side = "sell" if pos.size > 0 else "buy"
+                    matching_sl = next(
+                        (
+                            o for o in open_orders
+                            if o.product_id == pos.product_id
+                            and str(getattr(o, "side", "")).lower() == exit_side
+                            and getattr(o, "stop_price", None) is not None
+                        ),
+                        None,
+                    )
+                    matching_tp = next(
+                        (
+                            o for o in open_orders
+                            if o.product_id == pos.product_id
+                            and str(getattr(o, "side", "")).lower() == exit_side
+                            and (
+                                getattr(o, "order_type", "") == "limit_order"
+                                or getattr(o, "bracket_take_profit_price", None) is not None
+                            )
+                        ),
+                        None,
+                    )
+
+                    # Guard: If active live position has NO Stop Loss on exchange, arm it immediately
+                    if matching_sl is None and self.execution_manager is not None:
+                        calc_sl = pos.entry_price * (0.985 if pos.size > 0 else 1.015)
+                        calc_tp = pos.entry_price * (1.03 if pos.size > 0 else 0.97)
+                        sl_px = spec.round_price(calc_sl) if spec else round(calc_sl, 4)
+                        tp_px = spec.round_price(calc_tp) if spec else round(calc_tp, 4)
+                        logger.critical(
+                            "[TENANT %s] 🚨 NAKED POSITION DETECTED! %s (size=%d) missing SL on exchange. Arming protection...",
+                            self.config.tenant_id,
+                            sym or pos.product_id,
+                            pos.size,
+                        )
+                        try:
+                            await self.execution_manager.order_router.ensure_position_protection(
+                                product_id=pos.product_id,
+                                symbol=sym or f"PRODUCT_{pos.product_id}",
+                                side="buy" if pos.size > 0 else "sell",
+                                size=abs(pos.size),
+                                stop_loss_price=sl_px,
+                                take_profit_price=tp_px if matching_tp is None else None,
+                            )
+                        except Exception as arm_err:
+                            logger.error("[TENANT %s] Failed to arm position protection: %s", self.config.tenant_id, arm_err)
+
+                    child_sl = matching_sl.id if matching_sl else self.state_manager.get_child_stop_loss_order_id(pos.product_id)
+                    child_tp = matching_tp.id if matching_tp else None
+                    sl_disp = matching_sl.stop_price if matching_sl else None
+                    tp_disp = (matching_tp.limit_price or getattr(matching_tp, "bracket_take_profit_price", None)) if matching_tp else None
+
                     formatted_positions.append({
                         "product_id": pos.product_id,
                         "symbol": sym or f"PRODUCT_{pos.product_id}",
@@ -694,10 +848,10 @@ class TenantInstance:
                         "entry_price": round(pos.entry_price, 4),
                         "mark_price": round(pos.mark_price, 4),
                         "unrealized_pnl": round(pos.unrealized_pnl, 2),
-                        "stop_loss_price": None,
-                        "take_profit_price": None,
+                        "stop_loss_price": sl_disp,
+                        "take_profit_price": tp_disp,
                         "child_stop_loss_order_id": child_sl,
-                        "child_take_profit_order_id": None,
+                        "child_take_profit_order_id": child_tp,
                         "allocated_margin": alloc_margin,
                         "liquidation_price": liq_px,
                         "liquidation_distance_pct": dist_pct,
@@ -709,61 +863,6 @@ class TenantInstance:
             if formatted_positions and self.live_unrealized_pnl == 0.0:
                 self.live_unrealized_pnl = round(pos_pnl_acc, 4)
                 self.live_equity = round(self.live_balance + self.live_unrealized_pnl, 4)
-
-            # Query live resting/open orders directly from Delta Exchange API
-            try:
-                open_orders = await self.rest_client.get_open_orders()
-                formatted_orders: list[dict[str, Any]] = []
-                active_order_ids: set[int] = set()
-                for o in open_orders:
-                    if getattr(o, "is_open", False) or str(getattr(o, "state", "open")).lower() in ("open", "pending"):
-                        active_order_ids.add(o.id)
-                        sym = o.symbol
-                        if not sym:
-                            for s_sym, s_spec in self.contract_specs.items():
-                                if s_spec.product_id == o.product_id:
-                                    sym = s_sym
-                                    break
-                        trigger_px = o.stop_price if o.stop_price is not None else o.limit_price
-                        strategy = self.strategies.get(sym) if sym else None
-                        intent = strategy.pending_order if strategy else None
-                        bars_elapsed = intent.bars_elapsed if intent else 0
-                        ttl_bars = intent.ttl_bars if intent else (strategy.config.max_pending_bars if strategy else 3)
-                        ttl_rem = max(0, ttl_bars - bars_elapsed)
-
-                        formatted_orders.append({
-                            "order_id": o.id,
-                            "id": o.id,
-                            "client_order_id": o.client_order_id,
-                            "base_signal_id": self.order_to_base_id.get(o.client_order_id or ""),
-                            "product_id": o.product_id,
-                            "symbol": sym or f"PRODUCT_{o.product_id}",
-                            "side": str(o.side or "").upper(),
-                            "size": o.size or o.unfilled_size,
-                            "stop_price": o.stop_price,
-                            "limit_price": o.limit_price,
-                            "trigger_price": trigger_px,
-                            "bracket_stop_loss_price": o.bracket_stop_loss_price,
-                            "bracket_take_profit_price": o.bracket_take_profit_price,
-                            "status": str(o.state or "OPEN").upper(),
-                            "bars_elapsed": bars_elapsed,
-                            "ttl_bars": ttl_bars,
-                            "ttl_remaining": ttl_rem,
-                            "created_at": o.created_at,
-                            "mode": "LIVE",
-                        })
-                        if self.execution_manager and hasattr(self.execution_manager, "registry"):
-                            if not self.execution_manager.registry.get_by_exchange_id(o.id):
-                                self.execution_manager.registry.register(o)
-
-                if self.execution_manager and hasattr(self.execution_manager, "registry"):
-                    for ex_id in list(self.execution_manager.registry._orders_by_exchange_id.keys()):
-                        if ex_id not in active_order_ids:
-                            self.execution_manager.registry.remove(ex_id)
-
-                self.live_orders = formatted_orders
-            except Exception as ord_err:
-                logger.debug("[TENANT %s] Sync live orders failed: %s", self.config.tenant_id, ord_err)
 
             self.last_sync_time = time.time()
             self.last_sync_error = None
