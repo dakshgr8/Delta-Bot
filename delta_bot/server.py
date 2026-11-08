@@ -457,6 +457,8 @@ def get_all_positions_summary(
 
     if target_mode == ExecutionMode.PAPER and target_sim is not None:
         for pid, pos in target_sim._open_positions.items():
+            if getattr(pos, "size", 0) == 0:
+                continue
             spec = orchestrator.contract_specs.get(pos.symbol)
             cv = spec.contract_value if spec else 1.0
             native_val = round(pos.size * cv, 4)
@@ -497,45 +499,16 @@ def get_all_positions_summary(
                 "liquidation_distance_pct": dist_pct,
                 "mode": "PAPER",
             })
-    elif tenant is not None and getattr(tenant, "live_positions", None):
-        positions_list = list(tenant.live_positions)
-    elif target_sm is not None:
-        for p in target_sm.get_all_positions():
-            child_sl = target_sm.get_child_stop_loss_order_id(p.product_id)
-            spec = orchestrator.contract_specs.get(p.symbol)
-            cv = spec.contract_value if spec else 1.0
-            native_val = round(abs(p.size) * cv, 4)
-            alloc_margin = (
-                round((abs(p.size) * cv * p.entry_price) / max(1, lev), 2) if p.entry_price > 0 else 0.0
-            )
-
-            liq_px = round(p.liquidation_price, 4) if p.liquidation_price else None
-            dist_pct = (
-                round(abs(p.mark_price - liq_px) / p.mark_price * 100.0, 2)
-                if (liq_px and p.mark_price > 0)
-                else 0.0
-            )
-
-            positions_list.append({
-                "product_id": p.product_id,
-                "symbol": p.symbol,
-                "side": "BUY" if p.size > 0 else "SELL",
-                "size": abs(p.size),
-                "contract_value": cv,
-                "native_value": native_val,
-                "leverage": lev,
-                "entry_price": round(p.entry_price, 4),
-                "mark_price": round(p.mark_price, 4),
-                "unrealized_pnl": round(p.unrealized_pnl, 2),
-                "stop_loss_price": None,
-                "take_profit_price": None,
-                "child_stop_loss_order_id": child_sl,
-                "child_take_profit_order_id": None,
-                "allocated_margin": alloc_margin,
-                "liquidation_price": liq_px,
-                "liquidation_distance_pct": dist_pct,
-                "mode": "LIVE",
-            })
+    elif tenant is not None:
+        # Live / Demo mode for tenant: strictly return active positions directly from Delta API (never database or state history)
+        if getattr(tenant, "live_positions", None) is not None:
+            return [p for p in tenant.live_positions if p.get("size", 0) != 0]
+        return []
+    elif target_mode != ExecutionMode.PAPER:
+        def_t = orchestrator.tenant_manager.get_tenant("default") if hasattr(orchestrator, "tenant_manager") else None
+        if def_t and getattr(def_t, "live_positions", None) is not None:
+            return [p for p in def_t.live_positions if p.get("size", 0) != 0]
+        return []
 
     return positions_list
 
@@ -565,6 +538,7 @@ def get_all_orders_summary(
             b_el, ttl_b, ttl_rem = get_order_ttl(o.symbol)
             orders_list.append({
                 "order_id": oid,
+                "id": oid,
                 "client_order_id": o.client_order_id,
                 "base_signal_id": (tenant.order_to_base_id.get(o.client_order_id) if tenant else None),
                 "product_id": o.product_id,
@@ -581,6 +555,8 @@ def get_all_orders_summary(
                 "created_at": o.created_at,
                 "mode": "PAPER",
             })
+    elif tenant is not None and getattr(tenant, "live_orders", None) is not None:
+        return list(tenant.live_orders)
     elif target_exec is not None and hasattr(target_exec, "registry"):
         active_src = getattr(target_exec.registry, "active_orders", [])
         active_list = active_src() if callable(active_src) else (active_src or [])
@@ -588,6 +564,7 @@ def get_all_orders_summary(
             b_el, ttl_b, ttl_rem = get_order_ttl(ao.symbol)
             orders_list.append({
                 "order_id": ao.id,
+                "id": ao.id,
                 "client_order_id": ao.client_order_id,
                 "base_signal_id": (tenant.order_to_base_id.get(ao.client_order_id) if tenant else None),
                 "product_id": ao.product_id,
@@ -604,6 +581,10 @@ def get_all_orders_summary(
                 "created_at": ao.created_at,
                 "mode": "LIVE",
             })
+    elif orchestrator.mode != ExecutionMode.PAPER and hasattr(orchestrator, "tenant_manager"):
+        def_t = orchestrator.tenant_manager.get_tenant("default")
+        if def_t and getattr(def_t, "live_orders", None) is not None:
+            return list(def_t.live_orders)
 
     return orders_list
 
@@ -2073,21 +2054,49 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             else:
                 target_t = auth.tenant_id
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
-            if tenant and tenant.paper_simulator is not None:
-                try:
-                    numeric_id = int(order_id)
-                    for pid, o in list(tenant.paper_simulator._pending_orders.items()):
-                        if o.order_id == numeric_id or str(o.order_id) == str(order_id):
-                            tenant.paper_simulator.cancel_order(
-                                product_id=o.product_id, order_id=numeric_id
-                            )
-                            return ControlActionResponse(
-                                status="success",
-                                action="order_cancel",
-                                message=f"Tenant '{tenant.config.name}' pending order #{order_id} cancelled.",
-                            )
-                except ValueError:
-                    pass
+            if tenant:
+                if tenant.paper_simulator is not None:
+                    try:
+                        numeric_id = int(order_id)
+                        for pid, o in list(tenant.paper_simulator._pending_orders.items()):
+                            if o.order_id == numeric_id or str(o.order_id) == str(order_id):
+                                tenant.paper_simulator.cancel_order(
+                                    product_id=o.product_id, order_id=numeric_id
+                                )
+                                return ControlActionResponse(
+                                    status="success",
+                                    action="order_cancel",
+                                    message=f"Tenant '{tenant.config.name}' pending order #{order_id} cancelled.",
+                                )
+                    except ValueError:
+                        pass
+
+                # Live Delta order cancellation
+                numeric_id = int(order_id) if str(order_id).isdigit() else None
+                matched_pid = None
+                for lo in getattr(tenant, "live_orders", []):
+                    if str(lo.get("order_id")) == str(order_id) or str(lo.get("id")) == str(order_id):
+                        matched_pid = lo.get("product_id")
+                        break
+                if matched_pid is None and tenant.execution_manager and hasattr(tenant.execution_manager, "registry"):
+                    ao = tenant.execution_manager.registry.get_by_exchange_id(numeric_id) if numeric_id else None
+                    if ao:
+                        matched_pid = ao.product_id
+                if matched_pid is not None and numeric_id is not None and getattr(tenant, "rest_client", None):
+                    try:
+                        await tenant.rest_client.cancel_order(product_id=matched_pid, order_id=numeric_id)
+                        tenant.live_orders = [o for o in tenant.live_orders if str(o.get("order_id")) != str(order_id) and str(o.get("id")) != str(order_id)]
+                        if tenant.execution_manager and hasattr(tenant.execution_manager, "registry"):
+                            tenant.execution_manager.registry.remove(numeric_id)
+                        return ControlActionResponse(
+                            status="success",
+                            action="order_cancel",
+                            message=f"Resting order #{order_id} cancelled on Delta Exchange.",
+                        )
+                    except Exception as e:
+                        logger.error("Failed to cancel live order #%s: %s", order_id, e)
+                        raise HTTPException(status_code=500, detail=f"Failed to cancel order on Delta Exchange: {e}")
+
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Pending order #{order_id} not found in tenant '{target_t}'.",
@@ -2096,21 +2105,48 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         target_t = tenant_id or x_tenant_id
         if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
-            if tenant and tenant.paper_simulator is not None:
-                try:
-                    numeric_id = int(order_id)
-                    for pid, o in list(tenant.paper_simulator._pending_orders.items()):
-                        if o.order_id == numeric_id or str(o.order_id) == str(order_id):
-                            tenant.paper_simulator.cancel_order(
-                                product_id=o.product_id, order_id=numeric_id
-                            )
-                            return ControlActionResponse(
-                                status="success",
-                                action="order_cancel",
-                                message=f"Tenant '{tenant.config.name}' pending order #{order_id} cancelled.",
-                            )
-                except ValueError:
-                    pass
+            if tenant:
+                if tenant.paper_simulator is not None:
+                    try:
+                        numeric_id = int(order_id)
+                        for pid, o in list(tenant.paper_simulator._pending_orders.items()):
+                            if o.order_id == numeric_id or str(o.order_id) == str(order_id):
+                                tenant.paper_simulator.cancel_order(
+                                    product_id=o.product_id, order_id=numeric_id
+                                )
+                                return ControlActionResponse(
+                                    status="success",
+                                    action="order_cancel",
+                                    message=f"Tenant '{tenant.config.name}' pending order #{order_id} cancelled.",
+                                )
+                    except ValueError:
+                        pass
+
+                # Live Delta order cancellation
+                numeric_id = int(order_id) if str(order_id).isdigit() else None
+                matched_pid = None
+                for lo in getattr(tenant, "live_orders", []):
+                    if str(lo.get("order_id")) == str(order_id) or str(lo.get("id")) == str(order_id):
+                        matched_pid = lo.get("product_id")
+                        break
+                if matched_pid is None and tenant.execution_manager and hasattr(tenant.execution_manager, "registry"):
+                    ao = tenant.execution_manager.registry.get_by_exchange_id(numeric_id) if numeric_id else None
+                    if ao:
+                        matched_pid = ao.product_id
+                if matched_pid is not None and numeric_id is not None and getattr(tenant, "rest_client", None):
+                    try:
+                        await tenant.rest_client.cancel_order(product_id=matched_pid, order_id=numeric_id)
+                        tenant.live_orders = [o for o in tenant.live_orders if str(o.get("order_id")) != str(order_id) and str(o.get("id")) != str(order_id)]
+                        if tenant.execution_manager and hasattr(tenant.execution_manager, "registry"):
+                            tenant.execution_manager.registry.remove(numeric_id)
+                        return ControlActionResponse(
+                            status="success",
+                            action="order_cancel",
+                            message=f"Resting order #{order_id} cancelled on Delta Exchange.",
+                        )
+                    except Exception as e:
+                        logger.error("Failed to cancel live order #%s: %s", order_id, e)
+                        raise HTTPException(status_code=500, detail=f"Failed to cancel order on Delta Exchange: {e}")
 
         cancelled = False
 

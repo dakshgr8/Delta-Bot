@@ -642,8 +642,8 @@
         </button>
       </div>
 
-      <!-- Ruled Summary Row: 4 Essential Financial Metrics -->
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-[var(--dp-spacing-gap)]">
+      <!-- Ruled Summary Row: Essential Financial Metrics -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-[var(--dp-spacing-gap)]">
         <div class="dp-panel p-4">
           <span class="mono-label block">Account Equity</span>
           <span id="card-equity" class="text-xl font-mono text-white mt-1 block font-normal">$0.00</span>
@@ -653,16 +653,6 @@
           <span class="mono-label block">Unrealized P&L</span>
           <span id="card-upnl" class="text-xl font-mono text-white mt-1 block font-normal">+$0.00</span>
           <span class="mono-meta text-[11px]">Open contract exposure</span>
-        </div>
-        <div class="dp-panel p-4">
-          <span class="mono-label block">Win Rate</span>
-          <span id="card-winrate" class="text-xl font-mono text-white mt-1 block font-normal">0.0%</span>
-          <span id="card-trades" class="mono-meta text-[11px]">0W / 0 total trades</span>
-        </div>
-        <div class="dp-panel p-4">
-          <span class="mono-label block">Max Drawdown</span>
-          <span id="card-maxdd" class="text-xl font-mono text-white mt-1 block font-normal">0.00%</span>
-          <span class="mono-meta text-[11px]">Circuit Limit: 4.0%</span>
         </div>
       </div>
 
@@ -1566,11 +1556,14 @@
         const tr = document.createElement('tr');
         tr.className = 'border-b border-[var(--dp-color-hairline)] hover:bg-[var(--dp-color-hairline)]/30 transition-colors';
 
+        const triggerPx = Number(ord.trigger_price || ord.stop_price || ord.limit_price || ord.price || 0);
+        const ttlDisplay = ord.ttl ? `${ord.ttl}s` : (ord.ttl_remaining !== undefined && ord.ttl_remaining > 0 ? `${ord.ttl_remaining} bars` : 'Active');
+
         tr.innerHTML = `
           <td class="py-2.5 font-medium text-white">${ord.symbol || '--'}</td>
-          <td class="py-2.5 font-mono text-xs text-[var(--dp-color-meta)]">${ord.side || '--'}</td>
-          <td class="py-2.5 font-mono text-xs text-white">$${Number(ord.stop_price || ord.trigger_price || ord.price || 0).toLocaleString()}</td>
-          <td class="py-2.5 font-mono text-xs text-[var(--dp-color-meta)]">${ord.ttl ? `${ord.ttl}s` : 'Active'}</td>
+          <td class="py-2.5 font-mono text-xs text-[var(--dp-color-meta)]">${(ord.side || '--').toUpperCase()}</td>
+          <td class="py-2.5 font-mono text-xs text-white">$${triggerPx.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 4})}</td>
+          <td class="py-2.5 font-mono text-xs text-[var(--dp-color-meta)]">${ttlDisplay}</td>
           <td class="py-2.5 text-right">
             <button type="button" onclick="cancelOrder('${ord.id || ord.order_id}')" class="btn-secondary text-[11px] py-1 px-2.5">
               Cancel

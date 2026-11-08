@@ -1151,6 +1151,114 @@ def test_tenant_control_and_mode_mutual_exclusion_in_supabase(tmp_path: Path) ->
         assert demo_p["is_running"] is False
 
 
+@pytest.mark.asyncio
+async def test_tenant_live_positions_and_resting_orders_sync_from_delta_api(multi_tenant_orchestrator: TradingBotOrchestrator) -> None:
+    """Verifies that tenant sync_live_metrics queries Delta API for active positions and resting orders."""
+    import uuid
+    from unittest.mock import AsyncMock
+    from delta_bot.models import PositionInfo, WalletBalance, ExchangeOrder
+    mgr = multi_tenant_orchestrator.tenant_manager
+    t_id = f"live_desk_sync_{uuid.uuid4().hex[:6]}"
+    cfg = TenantConfig(
+        tenant_id=t_id,
+        name="Live Desk Sync",
+        user_id="user_live_sync",
+        mode="real",
+        delta_api_key="mock_key",
+        delta_api_secret="mock_secret",
+        is_active=True,
+    )
+    tenant = mgr.create_tenant(cfg, contract_specs=multi_tenant_orchestrator.contract_specs)
+    assert tenant.mode == ExecutionMode.REAL
+
+    mock_balances = [
+        WalletBalance(
+            asset_id=1,
+            asset_symbol="USDT",
+            balance=1000.0,
+            available_balance=900.0,
+            order_margin=50.0,
+            position_margin=50.0,
+            blocked_margin=100.0,
+            unrealized_pnl=25.0,
+        )
+    ]
+    mock_positions = [
+        PositionInfo(
+            product_id=1,
+            symbol="BTCUSDT",
+            size=5,
+            entry_price=68000.0,
+            mark_price=68500.0,
+            liquidation_price=55000.0,
+            margin=50.0,
+            unrealized_pnl=25.0,
+        ),
+        PositionInfo(
+            product_id=2,
+            symbol="ETHUSDT",
+            size=0,
+            entry_price=3500.0,
+            mark_price=3500.0,
+            margin=0.0,
+            unrealized_pnl=0.0,
+        ),
+    ]
+    mock_orders = [
+        ExchangeOrder(
+            id=98765,
+            client_order_id="cl_ord_1",
+            product_id=1,
+            symbol="BTCUSDT",
+            side="buy",
+            order_type="limit_order",
+            size=10,
+            unfilled_size=10,
+            limit_price=67000.0,
+            stop_price=None,
+            state="open",
+        ),
+        ExchangeOrder(
+            id=98766,
+            client_order_id="cl_ord_2",
+            product_id=1,
+            symbol="BTCUSDT",
+            side="buy",
+            order_type="stop_market_order",
+            size=10,
+            unfilled_size=10,
+            limit_price=None,
+            stop_price=69500.0,
+            state="open",
+        ),
+    ]
+
+    tenant.rest_client.get_wallet_balances = AsyncMock(return_value=mock_balances)
+    tenant.rest_client.get_open_positions = AsyncMock(return_value=mock_positions)
+    tenant.rest_client.get_open_orders = AsyncMock(return_value=mock_orders)
+
+    try:
+        await tenant.sync_live_metrics()
+
+        # Only position with size != 0 is included
+        assert len(tenant.live_positions) == 1
+        assert tenant.live_positions[0]["symbol"] == "BTCUSDT"
+        assert tenant.live_positions[0]["size"] == 5
+
+        # Both open orders are tracked in live_orders
+        assert len(tenant.live_orders) == 2
+        assert tenant.live_orders[0]["order_id"] == 98765
+        assert tenant.live_orders[1]["order_id"] == 98766
+        assert tenant.live_orders[1]["stop_price"] == 69500.0
+
+        # Summary shows correct counts
+        summary = tenant.get_summary()
+        assert summary["open_positions_count"] == 1
+        assert summary["resting_orders_count"] == 2
+    finally:
+        mgr.tenants.pop(t_id, None)
+
+
 
 
 

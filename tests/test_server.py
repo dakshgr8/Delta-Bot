@@ -136,6 +136,11 @@ def test_server_dashboard_html_endpoints(client: TestClient) -> None:
     res_dash = client.get("/dashboard")
     assert res_dash.status_code == 200
     assert "DELTA-BOT" in res_dash.text
+    # Win rate and Max Drawdown tabs/cards must be removed from metrics summary
+    assert "id=\"card-winrate\"" not in res_dash.text
+    assert "id=\"card-maxdd\"" not in res_dash.text
+    assert "id=\"card-equity\"" in res_dash.text
+    assert "id=\"card-upnl\"" in res_dash.text
 
 
 # -----------------------------------------------------------------------------
@@ -805,6 +810,85 @@ def test_server_tenant_control_syncs_to_supabase(client: TestClient, test_orches
             assert tenant.config.is_active is True
             assert len(sync_calls) >= 1
             assert sync_calls[-1].config.tenant_id == t_id
+    finally:
+        test_orchestrator.tenant_manager.tenants.pop(t_id, None)
+        test_orchestrator.tenant_manager.save_to_disk()
+
+
+def test_live_positions_and_resting_orders_api(client: TestClient, test_orchestrator: TradingBotOrchestrator) -> None:
+    """Verifies that in Live/Demo mode, GET /api/positions and /api/orders return ONLY live Delta API data without db history."""
+    import uuid
+    from unittest.mock import AsyncMock
+    from delta_bot.tenant import TenantConfig
+
+    t_id = f"live_desk_test_{uuid.uuid4().hex[:6]}"
+    # Add a live-mode tenant
+    cfg = TenantConfig(
+        tenant_id=t_id,
+        name="Live Desk",
+        user_id="user_live_1",
+        mode="real",
+        delta_api_key="mock_key",
+        delta_api_secret="mock_secret",
+        is_active=True,
+    )
+    t = test_orchestrator.tenant_manager.create_tenant(cfg, contract_specs=test_orchestrator.contract_specs)
+    t.mode = ExecutionMode.REAL
+    t.live_positions = [
+        {
+            "product_id": 1,
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "size": 10,
+            "entry_price": 68000.0,
+            "mark_price": 68500.0,
+            "unrealized_pnl": 5.0,
+        }
+    ]
+    t.live_orders = [
+        {
+            "order_id": 123456,
+            "id": 123456,
+            "symbol": "BTCUSDT",
+            "side": "BUY",
+            "product_id": 1,
+            "size": 10,
+            "stop_price": 69000.0,
+            "trigger_price": 69000.0,
+            "status": "OPEN",
+        }
+    ]
+    t.rest_client.cancel_order = AsyncMock(return_value={"status": "success"})
+
+    try:
+        # GET /api/positions for this tenant
+        res_pos = client.get(f"/api/positions?tenant_id={t_id}")
+        assert res_pos.status_code == 200
+        p_data = res_pos.json()
+        assert p_data["count"] == 1
+        assert p_data["positions"][0]["symbol"] == "BTCUSDT"
+        assert p_data["positions"][0]["size"] == 10
+
+        # When live positions are empty, returns 0 and does NOT fall back to state_manager history
+        t.live_positions = []
+        t.state_manager._open_positions[1] = VirtualPosition(product_id=1, symbol="BTCUSDT", side="buy", size=999, entry_price=50000.0, mark_price=50000.0)
+        res_empty = client.get(f"/api/positions?tenant_id={t_id}")
+        assert res_empty.status_code == 200
+        assert res_empty.json()["count"] == 0
+        assert len(res_empty.json()["positions"]) == 0
+
+        # GET /api/orders for this tenant returns live resting orders
+        res_ord = client.get(f"/api/orders?tenant_id={t_id}")
+        assert res_ord.status_code == 200
+        o_data = res_ord.json()
+        assert o_data["count"] == 1
+        assert o_data["orders"][0]["order_id"] == 123456
+
+        # Cancel live resting order via POST /api/orders/{order_id}/cancel
+        res_cancel = client.post(f"/api/orders/123456/cancel?tenant_id={t_id}")
+        assert res_cancel.status_code == 200
+        assert res_cancel.json()["status"] == "success"
+        t.rest_client.cancel_order.assert_awaited_once_with(product_id=1, order_id=123456)
     finally:
         test_orchestrator.tenant_manager.tenants.pop(t_id, None)
         test_orchestrator.tenant_manager.save_to_disk()

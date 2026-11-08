@@ -235,6 +235,7 @@ class TenantInstance:
         self.live_unrealized_pnl: float = 0.0
         self.live_realized_pnl: float = 0.0
         self.live_positions: list[dict[str, Any]] = []
+        self.live_orders: list[dict[str, Any]] = []
         self.last_sync_time: float = 0.0
         self.last_sync_error: str | None = None
         self.order_to_base_id: dict[str, str] = {}
@@ -508,10 +509,10 @@ class TenantInstance:
         return self.config.initial_balance
 
     def get_active_positions_count(self) -> int:
-        if self.live_positions:
+        if getattr(self, "live_positions", None) is not None and (self.last_sync_time > 0 or self.execution_manager is not None):
             return len(self.live_positions)
         if self.paper_simulator is not None and self.execution_manager is None:
-            return len(self.paper_simulator._open_positions)
+            return len([p for p in self.paper_simulator._open_positions.values() if getattr(p, "size", 0) != 0])
         return len(self.state_manager.get_all_positions())
 
     def set_execution_mode(self, mode: ExecutionMode | str) -> ExecutionMode:
@@ -530,6 +531,7 @@ class TenantInstance:
         self.live_unrealized_pnl = 0.0
         self.live_realized_pnl = 0.0
         self.live_positions = []
+        self.live_orders = []
         if hasattr(self, "state_manager") and hasattr(self.state_manager, "_open_positions"):
             self.state_manager._open_positions.clear()
 
@@ -599,6 +601,7 @@ class TenantInstance:
             self.live_unrealized_pnl = 0.0
             self.live_realized_pnl = 0.0
             self.live_positions = []
+            self.live_orders = []
             self.last_sync_time = 0.0
 
     async def sync_live_metrics(self) -> None:
@@ -612,6 +615,7 @@ class TenantInstance:
             self.live_unrealized_pnl = 0.0
             self.live_realized_pnl = 0.0
             self.live_positions = []
+            self.live_orders = []
             return
         try:
             balances = await self.rest_client.get_wallet_balances()
@@ -651,9 +655,14 @@ class TenantInstance:
             formatted_positions: list[dict[str, Any]] = []
             pos_pnl_acc = 0.0
 
+            # Clear cached positions in state_manager so only live active positions remain
+            if hasattr(self, "state_manager") and hasattr(self.state_manager, "_open_positions"):
+                self.state_manager._open_positions.clear()
+
             for pos in positions:
-                self.state_manager._open_positions[pos.product_id] = pos
                 if pos.size != 0:
+                    if hasattr(self, "state_manager") and hasattr(self.state_manager, "_open_positions"):
+                        self.state_manager._open_positions[pos.product_id] = pos
                     sym = pos.symbol
                     if not sym:
                         for s_sym, s_spec in self.contract_specs.items():
@@ -701,14 +710,70 @@ class TenantInstance:
                 self.live_unrealized_pnl = round(pos_pnl_acc, 4)
                 self.live_equity = round(self.live_balance + self.live_unrealized_pnl, 4)
 
+            # Query live resting/open orders directly from Delta Exchange API
+            try:
+                open_orders = await self.rest_client.get_open_orders()
+                formatted_orders: list[dict[str, Any]] = []
+                active_order_ids: set[int] = set()
+                for o in open_orders:
+                    if getattr(o, "is_open", False) or str(getattr(o, "state", "open")).lower() in ("open", "pending"):
+                        active_order_ids.add(o.id)
+                        sym = o.symbol
+                        if not sym:
+                            for s_sym, s_spec in self.contract_specs.items():
+                                if s_spec.product_id == o.product_id:
+                                    sym = s_sym
+                                    break
+                        trigger_px = o.stop_price if o.stop_price is not None else o.limit_price
+                        strategy = self.strategies.get(sym) if sym else None
+                        intent = strategy.pending_order if strategy else None
+                        bars_elapsed = intent.bars_elapsed if intent else 0
+                        ttl_bars = intent.ttl_bars if intent else (strategy.config.max_pending_bars if strategy else 3)
+                        ttl_rem = max(0, ttl_bars - bars_elapsed)
+
+                        formatted_orders.append({
+                            "order_id": o.id,
+                            "id": o.id,
+                            "client_order_id": o.client_order_id,
+                            "base_signal_id": self.order_to_base_id.get(o.client_order_id or ""),
+                            "product_id": o.product_id,
+                            "symbol": sym or f"PRODUCT_{o.product_id}",
+                            "side": str(o.side or "").upper(),
+                            "size": o.size or o.unfilled_size,
+                            "stop_price": o.stop_price,
+                            "limit_price": o.limit_price,
+                            "trigger_price": trigger_px,
+                            "bracket_stop_loss_price": o.bracket_stop_loss_price,
+                            "bracket_take_profit_price": o.bracket_take_profit_price,
+                            "status": str(o.state or "OPEN").upper(),
+                            "bars_elapsed": bars_elapsed,
+                            "ttl_bars": ttl_bars,
+                            "ttl_remaining": ttl_rem,
+                            "created_at": o.created_at,
+                            "mode": "LIVE",
+                        })
+                        if self.execution_manager and hasattr(self.execution_manager, "registry"):
+                            if not self.execution_manager.registry.get_by_exchange_id(o.id):
+                                self.execution_manager.registry.register(o)
+
+                if self.execution_manager and hasattr(self.execution_manager, "registry"):
+                    for ex_id in list(self.execution_manager.registry._orders_by_exchange_id.keys()):
+                        if ex_id not in active_order_ids:
+                            self.execution_manager.registry.remove(ex_id)
+
+                self.live_orders = formatted_orders
+            except Exception as ord_err:
+                logger.debug("[TENANT %s] Sync live orders failed: %s", self.config.tenant_id, ord_err)
+
             self.last_sync_time = time.time()
             self.last_sync_error = None
             logger.info(
-                "[TENANT %s] Synced real Delta India metrics: Balance=%.2f, Equity=%.2f, Positions=%d",
+                "[TENANT %s] Synced real Delta India metrics: Balance=%.2f, Equity=%.2f, Positions=%d, Orders=%d",
                 self.config.tenant_id,
                 self.live_balance,
                 self.live_equity,
                 len(self.live_positions),
+                len(self.live_orders),
             )
         except AuthenticationError as auth_err:
             self.live_balance = 0.0
@@ -717,6 +782,7 @@ class TenantInstance:
             self.live_unrealized_pnl = 0.0
             self.live_realized_pnl = 0.0
             self.live_positions = []
+            self.live_orders = []
             err_code = getattr(auth_err, "error_code", "")
             resp_body = getattr(auth_err, "response_body", {}) or {}
             client_ip = (resp_body.get("context") or {}).get("client_ip")
@@ -796,14 +862,17 @@ class TenantInstance:
             rpnl = self.live_realized_pnl
             win_rate = 0.0
             drawdown = 0.0
-            open_pos = len(self.live_positions) if self.live_positions else len(self.state_manager.get_all_positions())
-            act_src = (
-                getattr(self.execution_manager.registry, "active_orders", [])
-                if self.execution_manager and hasattr(self.execution_manager, "registry")
-                else []
-            )
-            act_list = act_src() if callable(act_src) else (act_src or [])
-            resting_orders = len(act_list)
+            open_pos = len(self.live_positions) if getattr(self, "live_positions", None) is not None else 0
+            if getattr(self, "live_orders", None) is not None:
+                resting_orders = len(self.live_orders)
+            else:
+                act_src = (
+                    getattr(self.execution_manager.registry, "active_orders", [])
+                    if self.execution_manager and hasattr(self.execution_manager, "registry")
+                    else []
+                )
+                act_list = act_src() if callable(act_src) else (act_src or [])
+                resting_orders = len(act_list)
         elif self.paper_simulator is not None:
             stats = self.paper_simulator.get_summary()
             bal = stats["balance"]

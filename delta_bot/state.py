@@ -165,7 +165,7 @@ class TradingStateManager:
 
     def get_all_positions(self) -> list[PositionInfo]:
         """Returns all open positions tracked in memory."""
-        return list(self._open_positions.values())
+        return [p for p in self._open_positions.values() if p.size != 0]
 
     def get_ghost_positions(self) -> list[GhostPosition]:
         """Returns all untracked external positions discovered on the exchange."""
@@ -456,11 +456,20 @@ class TradingStateManager:
                 active_product_ids = set()
 
                 for pos in positions:
-                    self._open_positions[pos.product_id] = pos
-                    active_product_ids.add(pos.product_id)
-
                     if pos.size != 0:
+                        self._open_positions[pos.product_id] = pos
+                        active_product_ids.add(pos.product_id)
                         report["synced_positions"] += 1
+                    else:
+                        self._open_positions.pop(pos.product_id, None)
+
+                # Prune positions that no longer exist on Delta
+                for pid in list(self._open_positions.keys()):
+                    if pid not in active_product_ids:
+                        self._open_positions.pop(pid, None)
+
+                for pos in positions:
+                    if pos.size != 0:
                         # Ghost Position Check: Is this position tracked by a local OrderIntent?
                         tracked_intent = self.get_active_intent_for_product(pos.product_id)
                         if tracked_intent is None:
