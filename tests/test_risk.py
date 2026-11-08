@@ -38,8 +38,10 @@ def risk_manager() -> RiskManager:
         max_account_risk_pct=1.0,
         max_leverage=5,
         margin_safety_buffer=0.90,
+        enable_drawdown_circuit_breaker=True,
         daily_max_drawdown_pct=4.0,
         max_concurrent_positions=1,
+        enable_revenge_breaker=True,
     )
     return RiskManager(config=config, initial_equity=10000.0)
 
@@ -327,5 +329,32 @@ def test_unfunded_live_account_does_not_trip_circuit_breaker() -> None:
     can_open, reason = rm.can_open_new_position()
     # Circuit breaker is not tripped
     assert "Circuit breaker is TRIPPED" not in str(reason)
+
+
+def test_default_risk_manager_has_no_drawdown_or_concurrent_or_revenge_restrictions() -> None:
+    """Verifies that by default, concurrent positions are unlimited, daily drawdown breaker is disabled, and revenge breaker is disabled."""
+    rm = RiskManager(initial_equity=10000.0)
+    assert rm.config.enable_drawdown_circuit_breaker is False
+    assert rm.config.daily_max_drawdown_pct is None
+    assert rm.config.max_concurrent_positions is None
+    assert rm.config.enable_revenge_breaker is False
+
+    # 1. Multiple concurrent positions allowed across symbols
+    can_open, reason = rm.can_open_new_position(active_positions=10)
+    assert can_open is True
+    assert reason is None
+
+    # 2. Large drawdown does NOT trip circuit breaker
+    is_safe = rm.update_daily_equity(5000.0)  # 50% loss
+    assert is_safe is True
+    assert rm.is_circuit_breaker_tripped is False
+
+    # 3. Repeated stop-outs do NOT quarantine symbol
+    sym = "BTCUSDT"
+    rm.record_trade_exit(pnl=-100.0, current_equity=4900.0, symbol=sym)
+    rm.record_trade_exit(pnl=-100.0, current_equity=4800.0, symbol=sym)
+    can_open_sym, reason_sym = rm.can_open_new_position(symbol=sym)
+    assert can_open_sym is True
+    assert reason_sym is None
 
 

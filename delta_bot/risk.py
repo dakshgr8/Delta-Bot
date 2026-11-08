@@ -52,17 +52,21 @@ class RiskConfig(BaseModel):
         le=1.0,
         description="Fraction of available margin usable for initial margin (10% buffer for taker fees)",
     )
-    daily_max_drawdown_pct: float = Field(
-        default=4.0,
+    daily_max_drawdown_pct: float | None = Field(
+        default=None,
         validation_alias=AliasChoices("daily_max_drawdown_pct", "max_daily_drawdown_pct"),
-        gt=0.0,
-        le=50.0,
-        description="Circuit breaker: Halt all new trades if daily loss exceeds this percentage (e.g. 4.0%)",
+        ge=0.0,
+        le=100.0,
+        description="Circuit breaker: Halt all new trades if daily loss exceeds this percentage (None = disabled)",
     )
-    max_concurrent_positions: int = Field(
-        default=1,
+    enable_drawdown_circuit_breaker: bool = Field(
+        default=False,
+        description="Whether to enforce daily drawdown circuit breaker (default: False)",
+    )
+    max_concurrent_positions: int | None = Field(
+        default=None,
         ge=1,
-        description="Strict maximum number of simultaneous open positions across the bot (default: 1)",
+        description="Strict maximum number of simultaneous open positions across the bot (None = unlimited)",
     )
     default_collateral_symbol: str = Field(
         default="USDT",
@@ -73,8 +77,8 @@ class RiskConfig(BaseModel):
         description="Halt new orders during daily rollover window 21:58-22:10 UTC",
     )
     enable_revenge_breaker: bool = Field(
-        default=True,
-        description="Quarantine symbol after 2 rapid stop-outs within 15 minutes",
+        default=False,
+        description="Quarantine symbol after 2 rapid stop-outs within 15 minutes (default: False)",
     )
     revenge_cooldown_sec: float = Field(
         default=1800.0,
@@ -170,7 +174,11 @@ class RiskManager:
             drawdown_pct = ((start_eq - current_equity) / start_eq) * 100.0
             self.circuit_breaker.current_drawdown_pct = round(drawdown_pct, 2)
 
-            if drawdown_pct >= self.config.daily_max_drawdown_pct:
+            if (
+                self.config.enable_drawdown_circuit_breaker
+                and self.config.daily_max_drawdown_pct is not None
+                and drawdown_pct >= self.config.daily_max_drawdown_pct
+            ):
                 reason = (
                     f"Daily max drawdown breached: {drawdown_pct:.2f}% loss "
                     f"(Threshold: {self.config.daily_max_drawdown_pct:.2f}%)"
@@ -190,8 +198,8 @@ class RiskManager:
         Pre-trade check:
         1. Verifies circuit breaker state.
         2. Daily rollover spread shield (21:58 - 22:10 UTC).
-        3. Revenge trading breaker (symbol cooldown after consecutive stop-outs).
-        4. Max concurrent position limit (strictly 1).
+        3. Revenge trading breaker (if enabled).
+        4. Max concurrent position limit (if enabled).
         """
         if self.circuit_breaker.is_tripped:
             return False, f"Circuit breaker is TRIPPED: {self.circuit_breaker.trip_reason}"
@@ -217,12 +225,13 @@ class RiskManager:
                     f"[REVENGE BREAKER] Symbol {clean_sym} quarantined for another {remaining_m:.1f}m due to rapid stop-outs.",
                 )
 
-        pos_count = active_positions if active_positions is not None else self.active_positions_count
-        if pos_count >= self.config.max_concurrent_positions:
-            return (
-                False,
-                f"Concurrent position limit reached ({pos_count}/{self.config.max_concurrent_positions} active)",
-            )
+        if self.config.max_concurrent_positions is not None:
+            pos_count = active_positions if active_positions is not None else self.active_positions_count
+            if pos_count >= self.config.max_concurrent_positions:
+                return (
+                    False,
+                    f"Concurrent position limit reached ({pos_count}/{self.config.max_concurrent_positions} active)",
+                )
 
         return True, None
 

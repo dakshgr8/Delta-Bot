@@ -761,7 +761,7 @@ def get_full_state_packet(
 
         positions = get_all_positions_summary(orchestrator, tenant=tenant)
         orders = get_all_orders_summary(orchestrator, tenant=tenant)
-        max_dd = tenant.risk_manager.config.daily_max_drawdown_pct
+        max_dd = tenant.risk_manager.config.daily_max_drawdown_pct or 0.0
         circuit_tripped = bool(tenant.risk_manager.is_circuit_breaker_tripped)
         current_tenant_dict = tenant.config.safe_dict()
     else:
@@ -805,7 +805,7 @@ def get_full_state_packet(
 
         positions = get_all_positions_summary(orchestrator)
         orders = get_all_orders_summary(orchestrator)
-        max_dd = orchestrator.risk_manager.config.daily_max_drawdown_pct
+        max_dd = orchestrator.risk_manager.config.daily_max_drawdown_pct or 0.0
         circuit_tripped = bool(orchestrator.risk_manager.is_circuit_breaker_tripped)
         def_key = orchestrator.config.delta_api_key.get_secret_value() if orchestrator.config.delta_api_key else ""
         has_key_def = bool(def_key and def_key.strip())
