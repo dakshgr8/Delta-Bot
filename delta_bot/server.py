@@ -306,6 +306,16 @@ class RingBufferLogHandler(logging.Handler):
         self.capacity: int = capacity
         self.buffer: deque[dict[str, Any]] = deque(maxlen=capacity)
         self.version: int = 0
+        now = time.time()
+        self.buffer.append(
+            {
+                "timestamp": now,
+                "time_str": datetime.fromtimestamp(now, tz=timezone.utc).strftime("%H:%M:%S"),
+                "level": "INFO",
+                "name": "delta_bot.telemetry",
+                "message": "[SYSTEM] Delta-Bot Execution Telemetry Engine active. Listening for perpetual order flow...",
+            }
+        )
 
     def emit(self, record: logging.LogRecord) -> None:
         try:

@@ -1579,12 +1579,27 @@
       if (!container || !Array.isArray(logs)) return;
 
       container.replaceChildren();
-      logs.slice(-30).forEach(log => {
+      if (logs.length === 0) {
+        const placeholder = document.createElement('div');
+        placeholder.className = 'text-[var(--dp-color-meta)] px-1 py-1 font-mono text-xs';
+        placeholder.textContent = 'Connected to execution stream. Monitoring order flow & live breakout channels...';
+        container.appendChild(placeholder);
+        return;
+      }
+
+      logs.slice(-50).forEach(log => {
         const msg = typeof log === 'string' ? log : (log.message || log.msg || JSON.stringify(log));
-        const time = log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+        const time = log.time_str || (log.timestamp ? new Date(log.timestamp < 1e11 ? log.timestamp * 1000 : log.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString());
+        const level = typeof log === 'object' && log.level ? String(log.level).toUpperCase() : 'INFO';
+        let levelColor = 'text-[var(--dp-color-read)]';
+        if (level === 'ERROR' || level === 'CRITICAL') {
+          levelColor = 'text-rose-400 font-medium';
+        } else if (level === 'WARNING') {
+          levelColor = 'text-amber-400';
+        }
 
         const line = document.createElement('div');
-        line.className = 'text-[var(--dp-color-read)] hover:bg-white/5 px-1 py-0.5 rounded';
+        line.className = `${levelColor} hover:bg-white/5 px-1 py-0.5 rounded transition-colors`;
         line.innerHTML = `<span class="text-[var(--dp-color-meta)]">[${time}]</span> ${escapeHtml(msg)}`;
         container.appendChild(line);
       });
@@ -1592,7 +1607,7 @@
     }
 
     function escapeHtml(str) {
-      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     // -------------------------------------------------------------------------
