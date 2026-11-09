@@ -769,15 +769,24 @@ class ExecutionManager:
                 try:
                     balances = await self.client.get_wallet_balances()
                     target_symbol = spec.quoting_symbol or self.config.default_collateral_symbol
-                    priority_symbols = [target_symbol.upper(), "INR", "USD", "USDT"]
+                    priority_symbols = [target_symbol.upper(), "USDT", "USD"]
                     matched = [b for b in balances if b.asset_symbol.upper() in priority_symbols and float(b.available_balance) > 0]
                     if matched:
                         available_margin = float(matched[0].available_balance)
-                    elif balances:
-                        pos_bals = [b for b in balances if float(b.available_balance) > 0]
-                        available_margin = float(pos_bals[0].available_balance) if pos_bals else float(balances[0].available_balance)
                     else:
-                        available_margin = 0.0
+                        inr_b = next((b for b in balances if b.asset_symbol.upper() == "INR" and float(b.available_balance) > 0), None)
+                        if inr_b:
+                            available_margin = float(inr_b.available_balance) / 87.0
+                            logger.warning(
+                                "Using INR collateral for USD margin check (₹%.2f). Converted to ~$%.2f available margin.",
+                                float(inr_b.available_balance),
+                                available_margin,
+                            )
+                        elif balances:
+                            pos_bals = [b for b in balances if float(b.available_balance) > 0]
+                            available_margin = float(pos_bals[0].available_balance) if pos_bals else float(balances[0].available_balance)
+                        else:
+                            available_margin = 0.0
                 except Exception as exc:
                     logger.error("Failed to fetch live wallet balances from Delta Exchange: %s. Disallowing trade sizing on fallback demo values.", exc)
                     available_margin = 0.0
@@ -970,7 +979,7 @@ class ExecutionManager:
     async def handle_invalidation(
         self,
         order_intent: OrderIntent,
-        reason: str,
+        reason: str = "Order invalidated",
     ) -> bool:
         """
         Cancels the resting stop order from Delta Exchange when an intermediate candle
@@ -1023,6 +1032,7 @@ class ExecutionManager:
         self,
         order_intent: OrderIntent,
         new_sl: float,
+        old_sl: float | None = None,
     ) -> bool:
         """
         Synchronizes trailing stop ratchet with Delta Exchange.

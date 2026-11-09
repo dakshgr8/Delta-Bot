@@ -98,6 +98,8 @@ class TradingBotOrchestrator:
         risk_cfg = RiskConfig(
             max_account_risk_pct=self.config.default_risk_pct,
             default_leverage=self.config.default_leverage,
+            daily_max_drawdown_pct=self.config.max_drawdown_pct,
+            enable_drawdown_circuit_breaker=True,
             min_stop_loss_pct=self.config.min_stop_loss_pct,
             max_effective_leverage=self.config.max_effective_leverage,
         )
@@ -304,8 +306,8 @@ class TradingBotOrchestrator:
             try:
                 await self.execution_manager.handle_trailing_stop_ratchet(
                     order_intent=intent,
-                    old_sl=old_sl,
                     new_sl=new_sl,
+                    old_sl=old_sl,
                 )
             except Exception as e:
                 logger.error(
@@ -333,7 +335,7 @@ class TradingBotOrchestrator:
         )
         if self.mode == ExecutionMode.LIVE and self.execution_manager is not None:
             try:
-                await self.execution_manager.handle_invalidation(intent)
+                await self.execution_manager.handle_invalidation(intent, reason=reason)
             except Exception as e:
                 logger.error(
                     "[%s] Error cancelling live order on invalidation: %s",
@@ -347,6 +349,8 @@ class TradingBotOrchestrator:
                     product_id=spec.product_id,
                     order_id=intent.exchange_order_id,
                 )
+            if self.risk_manager.active_positions_count > 0:
+                self.risk_manager.active_positions_count -= 1
 
     async def _handle_position_close(
         self, intent: OrderIntent, status: OrderStatus, exit_price: float
@@ -604,6 +608,12 @@ class TradingBotOrchestrator:
     ) -> None:
         """Executes a validated breakout order intent for an isolated tenant."""
         t_id = tenant.config.tenant_id
+
+        # Ensure tenant does not already have an active position or pending order
+        tracked = tenant.state_manager.get_active_intent_for_product(spec.product_id)
+        if tracked is not None and tracked.is_active:
+            logger.debug("[TENANT %s:%s] Tenant already has active intent. Skipping duplicate execution.", t_id, clean_symbol)
+            return
         t_equity = await tenant.get_account_equity()
         if tenant.mode == ExecutionMode.LIVE and t_equity <= 0:
             logger.warning(
@@ -1108,11 +1118,22 @@ class TradingBotOrchestrator:
 
         try:
             balances = await self.rest_client.get_wallet_balances()
-            # Search for positive INR, USD, USDT collateral on Delta Exchange India
-            for sym in ("INR", "USD", "USDT"):
+            # Prioritize USDT / USD collateral matching perpetual futures contracts
+            for sym in ("USDT", "USD"):
                 b = next((x for x in balances if x.asset_symbol.upper() == sym), None)
                 if b and float(b.balance) > 0:
                     return float(b.balance)
+            # If collateral is in INR on Delta India, convert to USD equivalent (~87 INR/USD)
+            inr_b = next((x for x in balances if x.asset_symbol.upper() == "INR"), None)
+            if inr_b and float(inr_b.balance) > 0:
+                inr_val = float(inr_b.balance)
+                usd_equiv = inr_val / 87.0
+                logger.warning(
+                    "Detected INR collateral (₹%.2f). Converted to ~$%.2f USD equivalent for safe contract sizing.",
+                    inr_val,
+                    usd_equiv,
+                )
+                return usd_equiv
             if balances:
                 pos_bals = [x for x in balances if float(x.balance) > 0]
                 if pos_bals:

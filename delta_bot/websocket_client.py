@@ -354,6 +354,8 @@ class CandleAggregator:
             )
 
             # Session VWAP and Rollover logic
+            existing_anchor = self.get_session_anchor(symbol)
+            prev_session_date = existing_anchor.session_date
             anchor = self._check_session_rollover(
                 symbol=symbol,
                 candle_start_epoch_s=incoming_candle.candle_start_epoch_s,
@@ -362,7 +364,7 @@ class CandleAggregator:
             anchor.update(closed_bar)
 
             # Dispatch session rollover event if date transitioned
-            if self._on_session_rollover_cb and anchor.session_date != anchor.session_date:
+            if self._on_session_rollover_cb and anchor.session_date != prev_session_date:
                 await self._on_session_rollover_cb(symbol, anchor)
 
             # Fire on_candle_close callback

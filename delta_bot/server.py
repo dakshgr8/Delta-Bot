@@ -2367,7 +2367,10 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         if payload.max_drawdown_pct is not None:
             orchestrator.config.max_drawdown_pct = payload.max_drawdown_pct
             orchestrator.risk_manager.config = orchestrator.risk_manager.config.model_copy(
-                update={"daily_max_drawdown_pct": payload.max_drawdown_pct}
+                update={
+                    "daily_max_drawdown_pct": payload.max_drawdown_pct,
+                    "enable_drawdown_circuit_breaker": True,
+                }
             )
             if hasattr(orchestrator, "tenant_manager") and "default" in orchestrator.tenant_manager.tenants:
                 orchestrator.tenant_manager.tenants["default"].apply_config_updates({"max_drawdown_pct": payload.max_drawdown_pct})

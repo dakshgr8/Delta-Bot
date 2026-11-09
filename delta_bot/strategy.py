@@ -474,7 +474,28 @@ class BreakoutStrategyEngine:
             return None
 
         # ---------------------------------------------------------------------
-        # Step 1: Active Position Management
+        # Step 0: Sync Strategy Order State with External Reality (WS / REST)
+        # ---------------------------------------------------------------------
+        if self.pending_order is not None:
+            if self.pending_order.is_triggered:
+                self.active_position = self.pending_order
+                self.pending_order = None
+            elif self.pending_order.is_closed:
+                self.pending_order = None
+
+        if self.active_position is not None and self.active_position.is_closed:
+            self.active_position = None
+
+        # ---------------------------------------------------------------------
+        # Step 1: Compute Indicators strictly on confirmed closed bar first
+        # ---------------------------------------------------------------------
+        snapshot = self.indicator_pipeline.compute_from_cache(bar_cache, session_anchor)
+        if snapshot is None:
+            logger.debug("Insufficient bar history for indicator calculation on %s", self.symbol)
+            return None
+
+        # ---------------------------------------------------------------------
+        # Step 2: Active Position Management (TP, SL, Trailing Ratchet)
         # ---------------------------------------------------------------------
         if self.active_position is not None:
             pos = self.active_position
@@ -514,13 +535,11 @@ class BreakoutStrategyEngine:
 
                     # Trailing Stop Ratchet
                     if self.config.trailing_stop:
-                        snap = self.indicator_pipeline.latest_snapshot
-                        if snap is not None:
-                            proposed_sl = candle.low - (self.config.trailing_stop_atr_mult * snap.atr_14)
-                            quantized_sl = contract_spec.round_price(proposed_sl)
-                            old_sl = pos.current_stop_loss
-                            if pos.ratchet_sl(quantized_sl):
-                                await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
+                        proposed_sl = candle.low - (self.config.trailing_stop_atr_mult * snapshot.atr_14)
+                        quantized_sl = contract_spec.round_price(proposed_sl)
+                        old_sl = pos.current_stop_loss
+                        if pos.ratchet_sl(quantized_sl):
+                            await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
 
             elif pos.signal_type == SignalType.BEARISH_BREAKDOWN:
                 # Check Take Profit
@@ -558,16 +577,14 @@ class BreakoutStrategyEngine:
 
                     # Trailing Stop Ratchet
                     if self.config.trailing_stop:
-                        snap = self.indicator_pipeline.latest_snapshot
-                        if snap is not None:
-                            proposed_sl = candle.high + (self.config.trailing_stop_atr_mult * snap.atr_14)
-                            quantized_sl = contract_spec.round_price(proposed_sl)
-                            old_sl = pos.current_stop_loss
-                            if pos.ratchet_sl(quantized_sl):
-                                await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
+                        proposed_sl = candle.high + (self.config.trailing_stop_atr_mult * snapshot.atr_14)
+                        quantized_sl = contract_spec.round_price(proposed_sl)
+                        old_sl = pos.current_stop_loss
+                        if pos.ratchet_sl(quantized_sl):
+                            await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
 
         # ---------------------------------------------------------------------
-        # Step 2: Pending Order Trigger, Invalidation & TTL Evaluation
+        # Step 3: Pending Order Trigger, Invalidation & TTL Evaluation
         # ---------------------------------------------------------------------
         if self.pending_order is not None:
             order = self.pending_order
@@ -582,12 +599,12 @@ class BreakoutStrategyEngine:
                     triggered = True
                     await self._emit(self._on_order_trigger_cb, order, candle)
 
-                    # Evaluate if the trigger bar immediately hits TP or SL
+                    # Evaluate if the trigger bar hits TP or SL
                     if candle.high >= order.take_profit:
                         order.close_position(OrderStatus.CLOSED_TP, order.take_profit, candle.candle_start_epoch_s)
                         await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_TP, order.take_profit)
                         self.active_position = None
-                    elif candle.low <= order.current_stop_loss:
+                    elif candle.low <= order.current_stop_loss and candle.close <= order.current_stop_loss:
                         order.close_position(OrderStatus.CLOSED_SL, order.current_stop_loss, candle.candle_start_epoch_s)
                         await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_SL, order.current_stop_loss)
                         self.active_position = None
@@ -601,32 +618,28 @@ class BreakoutStrategyEngine:
                     triggered = True
                     await self._emit(self._on_order_trigger_cb, order, candle)
 
-                    # Evaluate if the trigger bar immediately hits TP or SL
+                    # Evaluate if the trigger bar hits TP or SL
                     if candle.low <= order.take_profit:
                         order.close_position(OrderStatus.CLOSED_TP, order.take_profit, candle.candle_start_epoch_s)
                         await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_TP, order.take_profit)
                         self.active_position = None
-                    elif candle.high <= order.current_stop_loss:
+                    elif candle.high >= order.current_stop_loss and candle.close >= order.current_stop_loss:
                         order.close_position(OrderStatus.CLOSED_SL, order.current_stop_loss, candle.candle_start_epoch_s)
                         await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_SL, order.current_stop_loss)
                         self.active_position = None
 
             if not triggered and self.pending_order is not None:
-                # Get current snapshot to evaluate EMA invalidation
-                current_snapshot = self.indicator_pipeline.latest_snapshot
-
                 # Invalidation: intermediate candle closes across EMA 20
-                if current_snapshot is not None:
-                    if order.signal_type == SignalType.BULLISH_BREAKOUT and candle.close < current_snapshot.ema_20:
-                        reason = f"Intermediate candle close ({candle.close:.4f}) below EMA 20 ({current_snapshot.ema_20:.4f})"
-                        order.cancel(reason, OrderStatus.CANCELLED_INVALIDATED)
-                        self.pending_order = None
-                        await self._emit(self._on_order_cancel_cb, order, reason)
-                    elif order.signal_type == SignalType.BEARISH_BREAKDOWN and candle.close > current_snapshot.ema_20:
-                        reason = f"Intermediate candle close ({candle.close:.4f}) above EMA 20 ({current_snapshot.ema_20:.4f})"
-                        order.cancel(reason, OrderStatus.CANCELLED_INVALIDATED)
-                        self.pending_order = None
-                        await self._emit(self._on_order_cancel_cb, order, reason)
+                if order.signal_type == SignalType.BULLISH_BREAKOUT and candle.close < snapshot.ema_20:
+                    reason = f"Intermediate candle close ({candle.close:.4f}) below EMA 20 ({snapshot.ema_20:.4f})"
+                    order.cancel(reason, OrderStatus.CANCELLED_INVALIDATED)
+                    self.pending_order = None
+                    await self._emit(self._on_order_cancel_cb, order, reason)
+                elif order.signal_type == SignalType.BEARISH_BREAKDOWN and candle.close > snapshot.ema_20:
+                    reason = f"Intermediate candle close ({candle.close:.4f}) above EMA 20 ({snapshot.ema_20:.4f})"
+                    order.cancel(reason, OrderStatus.CANCELLED_INVALIDATED)
+                    self.pending_order = None
+                    await self._emit(self._on_order_cancel_cb, order, reason)
 
                 # TTL Expiration Check
                 if self.pending_order is not None:
@@ -636,13 +649,6 @@ class BreakoutStrategyEngine:
                         order.cancel(reason, OrderStatus.CANCELLED_TTL_EXPIRED)
                         self.pending_order = None
                         await self._emit(self._on_order_cancel_cb, order, reason)
-
-        # ---------------------------------------------------------------------
-        # Step 3: Compute Indicators strictly on confirmed closed bar
-        # ---------------------------------------------------------------------
-        snapshot = self.indicator_pipeline.compute_from_cache(bar_cache, session_anchor)
-        if snapshot is None:
-            logger.debug("Insufficient bar history for indicator calculation on %s", self.symbol)
             return None
 
         # ---------------------------------------------------------------------
@@ -757,6 +763,16 @@ class BreakoutStrategyEngine:
             contract_lots = contract_spec.round_size(target_asset_qty)
 
             if contract_lots < self.config.min_contracts:
+                min_lot_risk = self.config.min_contracts * contract_spec.contract_value * per_unit_risk
+                if account_equity > 0 and min_lot_risk > (capital_at_risk * 1.05):
+                    logger.warning(
+                        "Bullish breakout on %s skipped: min %d lot risk ($%.2f) exceeds risk budget ($%.2f)",
+                        self.symbol,
+                        self.config.min_contracts,
+                        min_lot_risk,
+                        capital_at_risk,
+                    )
+                    return None
                 contract_lots = self.config.min_contracts
 
             actual_asset_qty = contract_spec.contracts_to_asset_qty(contract_lots)
@@ -839,6 +855,16 @@ class BreakoutStrategyEngine:
             contract_lots = contract_spec.round_size(target_asset_qty)
 
             if contract_lots < self.config.min_contracts:
+                min_lot_risk = self.config.min_contracts * contract_spec.contract_value * per_unit_risk
+                if account_equity > 0 and min_lot_risk > (capital_at_risk * 1.05):
+                    logger.warning(
+                        "Bullish breakout on %s skipped: min %d lot risk ($%.2f) exceeds risk budget ($%.2f)",
+                        self.symbol,
+                        self.config.min_contracts,
+                        min_lot_risk,
+                        capital_at_risk,
+                    )
+                    return None
                 contract_lots = self.config.min_contracts
 
             actual_asset_qty = contract_spec.contracts_to_asset_qty(contract_lots)

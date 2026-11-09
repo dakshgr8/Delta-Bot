@@ -61,7 +61,7 @@ class RiskConfig(BaseModel):
     )
     enable_drawdown_circuit_breaker: bool = Field(
         default=False,
-        description="Whether to enforce daily drawdown circuit breaker (default: False)",
+        description="Whether to enforce daily drawdown circuit breaker (default: False in bare RiskConfig, enabled by orchestrator/tenant)",
     )
     max_concurrent_positions: int | None = Field(
         default=None,
@@ -214,13 +214,19 @@ class RiskManager:
         if self.circuit_breaker.is_tripped:
             return False, f"Circuit breaker is TRIPPED: {self.circuit_breaker.trip_reason}"
 
-        # Daily Rollover Spread Shield (21:58 - 22:10 UTC)
+        # Daily Rollover Spread Shield (21:58 - 22:10 UTC and 23:58 - 00:05 UTC)
         if self.config.enable_rollover_shield:
             curr_dt = now_utc or datetime.now(timezone.utc)
-            if (curr_dt.hour == 21 and curr_dt.minute >= 58) or (curr_dt.hour == 22 and curr_dt.minute <= 10):
+            in_settlement_window = (
+                (curr_dt.hour == 21 and curr_dt.minute >= 58)
+                or (curr_dt.hour == 22 and curr_dt.minute <= 10)
+                or (curr_dt.hour == 23 and curr_dt.minute >= 58)
+                or (curr_dt.hour == 0 and curr_dt.minute <= 5)
+            )
+            if in_settlement_window:
                 return (
                     False,
-                    "[ROLLOVER SHIELD] Order rejected: Trading frozen between 21:58-22:10 UTC during daily settlement rollover.",
+                    "[ROLLOVER SHIELD] Order rejected: Trading frozen during daily settlement/midnight rollover window.",
                 )
 
         # Revenge Trading Breaker (Symbol Quarantine)
@@ -314,7 +320,7 @@ class RiskManager:
             )
 
         target_qty_by_risk = risk_budget_usd / per_unit_risk
-        risk_based_lots = spec.round_size(target_qty_by_risk)
+        risk_based_lots = int(math.floor(target_qty_by_risk / spec.contract_value)) if spec.contract_value > 0 else 0
 
         # Strict Cap: effective leverage (Notional / Equity) limit
         if self.config.max_effective_leverage > 0 and trigger_price > 0:

@@ -267,7 +267,8 @@ class TenantInstance:
         risk_cfg = RiskConfig(
             max_account_risk_pct=config.risk_pct,
             max_leverage=config.leverage,
-            daily_max_drawdown_pct=config.max_drawdown_pct,
+            daily_max_drawdown_pct=config.max_drawdown_pct or self.bot_config.max_drawdown_pct,
+            enable_drawdown_circuit_breaker=True,
             min_stop_loss_pct=self.bot_config.min_stop_loss_pct,
             max_effective_leverage=self.bot_config.max_effective_leverage,
         )
@@ -2061,6 +2062,17 @@ class TenantManager:
             if not tenant.is_running or not tenant.is_symbol_enabled(clean_symbol):
                 continue
 
+            # Ensure tenant does not already have an active position or pending order
+            tracked_intent = tenant.state_manager.get_active_intent_for_product(spec.product_id)
+            if tracked_intent is not None and tracked_intent.is_active:
+                logger.debug(
+                    "[FANOUT %s:%s] Tenant already has active intent [%s]. Skipping fan-out.",
+                    tenant.config.tenant_id,
+                    clean_symbol,
+                    tracked_intent.intent_id,
+                )
+                continue
+
             strategy = tenant.strategies.get(clean_symbol)
             if not strategy:
                 continue
@@ -2206,6 +2218,17 @@ class TenantManager:
             if tenant.config.tenant_id == "default":
                 continue  # Default tenant order is executed directly by the master orchestrator
             if not tenant.is_running or not tenant.is_symbol_enabled(clean_symbol):
+                continue
+
+            # Ensure tenant does not already have an active position or pending order
+            tracked_intent = tenant.state_manager.get_active_intent_for_product(spec.product_id)
+            if tracked_intent is not None and tracked_intent.is_active:
+                logger.debug(
+                    "[FANOUT %s:%s] Tenant already has active intent [%s]. Skipping fan-out.",
+                    tenant.config.tenant_id,
+                    clean_symbol,
+                    tracked_intent.intent_id,
+                )
                 continue
 
             tenant.register_contract_spec(spec)

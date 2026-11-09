@@ -261,7 +261,32 @@ class TradingStateManager:
                 logger.info("OrderIntent [%s] cancelled on exchange: %s", intent.intent_id, update.state)
             return
 
-        # 2. Check if this is a spawned child Stop Loss order
+        # 2. Check if this is an update on an already-bound child Stop Loss or Take Profit order
+        intent_sl = self._intents_by_child_sl_id.get(order_id)
+        intent_tp = self._intents_by_child_tp_id.get(order_id)
+        target_intent = intent_sl or intent_tp
+
+        if target_intent is not None and target_intent.is_active:
+            if update.is_closed:
+                status = OrderStatus.CLOSED_SL if target_intent == intent_sl else OrderStatus.CLOSED_TP
+                exit_px = update.stop_price or update.limit_price or (target_intent.current_stop_loss if status == OrderStatus.CLOSED_SL else target_intent.take_profit)
+                target_intent.close_position(status, exit_px, update.created_at)
+                logger.info(
+                    "OrderIntent [%s] (%s) closed via child bracket fill: %s at %.4f",
+                    target_intent.intent_id,
+                    target_intent.symbol,
+                    status.value,
+                    exit_px,
+                )
+                if self.execution_manager and getattr(self.execution_manager, "risk_manager", None):
+                    self.execution_manager.risk_manager.record_trade_exit(
+                        pnl=target_intent.realized_pnl or 0.0,
+                        current_equity=0.0,
+                        symbol=target_intent.symbol,
+                    )
+                return
+
+        # 3. Check if this is a newly spawned child Stop Loss / Take Profit order
         # Delta creates child stop orders with stop_order_type="stop_loss_order" or stop_price set
         is_child_sl = (
             update.stop_order_type == "stop_loss_order"
@@ -329,9 +354,34 @@ class TradingStateManager:
         if isinstance(position, dict):
             position = PositionInfo.from_api_dict(position)
 
-        self._open_positions[position.product_id] = position
-        if position.symbol and position.mark_price > 0:
-            self._cached_mark_prices[position.symbol] = position.mark_price
+        if position.size == 0:
+            self._open_positions.pop(position.product_id, None)
+            tracked_intent = self.get_active_intent_for_product(position.product_id)
+            if tracked_intent and tracked_intent.is_active:
+                exit_px = position.mark_price or tracked_intent.current_stop_loss
+                status = (
+                    OrderStatus.CLOSED_TP
+                    if (tracked_intent.take_profit and abs(exit_px - tracked_intent.take_profit) < abs(exit_px - tracked_intent.current_stop_loss))
+                    else OrderStatus.CLOSED_SL
+                )
+                tracked_intent.close_position(status, exit_px, time.time())
+                logger.info(
+                    "OrderIntent [%s] (%s) closed via position size=0 update: %s at %.4f",
+                    tracked_intent.intent_id,
+                    tracked_intent.symbol,
+                    status.value,
+                    exit_px,
+                )
+                if self.execution_manager and getattr(self.execution_manager, "risk_manager", None):
+                    self.execution_manager.risk_manager.record_trade_exit(
+                        pnl=tracked_intent.realized_pnl or 0.0,
+                        current_equity=0.0,
+                        symbol=tracked_intent.symbol,
+                    )
+        else:
+            self._open_positions[position.product_id] = position
+            if position.symbol and position.mark_price > 0:
+                self._cached_mark_prices[position.symbol] = position.mark_price
 
         logger.debug(
             "StateEngine: Position cached for %s (id=%d): Size=%d, Entry=%.4f, Mark=%.4f, Liq=%s",
@@ -467,6 +517,22 @@ class TradingStateManager:
                 for pid in list(self._open_positions.keys()):
                     if pid not in active_product_ids:
                         self._open_positions.pop(pid, None)
+                        tracked_intent = self.get_active_intent_for_product(pid)
+                        if tracked_intent and tracked_intent.is_active:
+                            exit_px = tracked_intent.current_stop_loss or tracked_intent.fill_price or 0.0
+                            status = OrderStatus.CLOSED_SL
+                            tracked_intent.close_position(status, exit_px, time.time())
+                            logger.info(
+                                "REST reconciliation: closed orphaned intent [%s] for product %d",
+                                tracked_intent.intent_id,
+                                pid,
+                            )
+                            if self.execution_manager and getattr(self.execution_manager, "risk_manager", None):
+                                self.execution_manager.risk_manager.record_trade_exit(
+                                    pnl=tracked_intent.realized_pnl or 0.0,
+                                    current_equity=0.0,
+                                    symbol=tracked_intent.symbol,
+                                )
 
                 for pos in positions:
                     if pos.size != 0:
