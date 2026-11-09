@@ -853,7 +853,7 @@ def get_full_state_packet(
             }
         ]
 
-    return {
+    packet = {
         "type": "state_update",
         "timestamp": time.time(),
         "status": {

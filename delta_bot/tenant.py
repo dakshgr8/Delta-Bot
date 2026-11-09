@@ -253,7 +253,7 @@ class TenantInstance:
             delta_api_secret=active_s,
             delta_base_url=active_base,
             delta_ws_url=active_ws,
-            execution_mode="live" if self.mode == ExecutionMode.REAL else "demo",
+            execution_mode="live" if self.mode.is_real else "demo",
             default_leverage=config.leverage,
             default_risk_pct=config.risk_pct,
             timeframe=config.timeframe,
@@ -285,6 +285,7 @@ class TenantInstance:
             self.execution_manager: ExecutionManager | None = ExecutionManager(
                 client=self.rest_client,
                 config=exec_cfg,
+                risk_manager=self.risk_manager,
                 state_manager=self.state_manager,
             )
         else:
@@ -329,7 +330,7 @@ class TenantInstance:
         strategy.on_position_close(self._handle_position_close)
 
     async def _handle_sl_ratchet(self, intent: OrderIntent, old_sl: float, new_sl: float) -> None:
-        if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
+        if self.mode.is_demo and self.paper_simulator is not None:
             spec = self.contract_specs.get(intent.symbol)
             if spec:
                 self.paper_simulator.edit_order_stop_loss(
@@ -337,7 +338,7 @@ class TenantInstance:
                     order_id=intent.exchange_order_id or 0,
                     new_sl=new_sl,
                 )
-        elif self.mode == ExecutionMode.LIVE and self.execution_manager is not None:
+        elif self.mode.is_real and self.execution_manager is not None:
             try:
                 await self.execution_manager.handle_trailing_stop_ratchet(
                     order_intent=intent,
@@ -348,25 +349,27 @@ class TenantInstance:
                 logger.error("[%s:%s] Error ratcheting SL: %s", self.config.tenant_id, intent.symbol, e)
 
     async def _handle_order_cancel(self, intent: OrderIntent, reason: str) -> None:
-        if self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
+        if self.mode.is_demo and self.paper_simulator is not None:
             spec = self.contract_specs.get(intent.symbol)
             if spec and intent.exchange_order_id:
                 self.paper_simulator.cancel_order(spec.product_id, intent.exchange_order_id)
             if self.risk_manager.active_positions_count > 0:
                 self.risk_manager.active_positions_count -= 1
-        elif self.mode == ExecutionMode.LIVE and self.execution_manager is not None:
+        elif self.mode.is_real and self.execution_manager is not None:
             try:
                 await self.execution_manager.handle_invalidation(order_intent=intent, reason=reason)
             except Exception as e:
                 logger.error("[%s:%s] Error cancelling order: %s", self.config.tenant_id, intent.symbol, e)
 
     async def _handle_position_close(self, intent: OrderIntent, status: OrderStatus, exit_price: float) -> None:
-        equity = await self.get_account_equity()
-        self.risk_manager.record_trade_exit(
-            pnl=getattr(intent, "realized_pnl", 0.0) or 0.0,
-            current_equity=equity,
-            symbol=intent.symbol,
-        )
+        if not getattr(intent, "is_exit_recorded", False):
+            intent.is_exit_recorded = True
+            equity = await self.get_account_equity()
+            self.risk_manager.record_trade_exit(
+                pnl=getattr(intent, "realized_pnl", 0.0) or 0.0,
+                current_equity=equity,
+                symbol=intent.symbol,
+            )
 
     def register_contract_spec(self, spec: ContractSpec) -> None:
         """Caches contract specification and registers with paper simulator (perpetual futures only)."""
@@ -465,7 +468,7 @@ class TenantInstance:
                 )
                 self.execution_manager._configured_leverages.clear()
 
-            if self.mode == ExecutionMode.LIVE and self.rest_client.config.has_valid_credentials():
+            if self.mode.is_real and self.rest_client.config.has_valid_credentials():
                 try:
                     loop = asyncio.get_running_loop()
                     loop.create_task(self.sync_exchange_leverage(lev))
@@ -586,6 +589,7 @@ class TenantInstance:
             self.execution_manager = ExecutionManager(
                 client=self.rest_client,
                 config=exec_cfg,
+                risk_manager=self.risk_manager,
                 state_manager=self.state_manager,
             )
             self.paper_simulator = None
@@ -635,25 +639,34 @@ class TenantInstance:
         try:
             balances = await self.rest_client.get_wallet_balances()
             if balances:
-                # Delta India collateral assets: INR, USD, USDT, or highest positive balance
+                # Delta India collateral assets: prioritize USDT, USD, then INR
                 positive_balances = [b for b in balances if float(b.balance) > 0]
                 target_bal = None
                 if positive_balances:
                     target_bal = next(
-                        (b for b in positive_balances if b.asset_symbol.upper() in ("INR", "USD", "USDT")),
+                        (b for b in positive_balances if b.asset_symbol.upper() in ("USDT", "USD", "INR")),
                         max(positive_balances, key=lambda b: float(b.balance)),
                     )
                 else:
                     target_bal = (
-                        next((b for b in balances if b.asset_symbol.upper() == "INR"), None)
+                        next((b for b in balances if b.asset_symbol.upper() == "USDT"), None)
                         or next((b for b in balances if b.asset_symbol.upper() == "USD"), None)
-                        or next((b for b in balances if b.asset_symbol.upper() == "USDT"), None)
+                        or next((b for b in balances if b.asset_symbol.upper() == "INR"), None)
                         or balances[0]
                     )
 
-                self.live_balance = round(float(target_bal.balance), 4)
-                self.live_available_margin = round(float(target_bal.available_balance), 4)
-                self.live_unrealized_pnl = round(float(target_bal.unrealized_pnl or 0.0), 4)
+                is_inr = target_bal.asset_symbol.upper() == "INR"
+                scale = 87.0 if is_inr else 1.0
+                if is_inr:
+                    logger.warning(
+                        "[TENANT %s] Detected INR collateral (₹%.2f). Scaled by 87.0 to USD equivalent for safe sizing.",
+                        self.config.tenant_id,
+                        float(target_bal.balance),
+                    )
+
+                self.live_balance = round(float(target_bal.balance) / scale, 4)
+                self.live_available_margin = round(float(target_bal.available_balance) / scale, 4)
+                self.live_unrealized_pnl = round(float(target_bal.unrealized_pnl or 0.0) / scale, 4)
                 self.live_equity = round(float(self.live_balance + self.live_unrealized_pnl), 4)
 
                 if self.live_equity > 0:
@@ -2016,13 +2029,13 @@ class TenantManager:
         """Dispatches real-time ticker to each tenant's paper matching engine or state context."""
         for tenant in self.tenants.values():
             clean = symbol.strip().upper()
-            if tenant.mode == ExecutionMode.PAPER and tenant.paper_simulator is not None:
+            if tenant.mode.is_demo and tenant.paper_simulator is not None:
                 await tenant.paper_simulator.on_tick(
                     symbol=clean,
                     mark_price=ticker.mark_price,
                     orderbook=orderbook,
                 )
-            elif tenant.mode == ExecutionMode.LIVE:
+            elif tenant.mode.is_real:
                 await tenant.state_manager.update_market_context(
                     symbol=clean,
                     mark_price=ticker.mark_price,
@@ -2034,7 +2047,7 @@ class TenantManager:
         """Dispatches intra-bar candle update to all tenants."""
         for tenant in self.tenants.values():
             clean = symbol.strip().upper()
-            if tenant.mode == ExecutionMode.PAPER and tenant.paper_simulator is not None:
+            if tenant.mode.is_demo and tenant.paper_simulator is not None:
                 await tenant.paper_simulator.on_tick(
                     symbol=clean,
                     mark_price=candle.close,
@@ -2042,7 +2055,7 @@ class TenantManager:
                     low=candle.low,
                     orderbook=orderbook,
                 )
-            elif tenant.mode == ExecutionMode.LIVE:
+            elif tenant.mode.is_real:
                 await tenant.state_manager.update_market_context(
                     symbol=clean,
                     mark_price=candle.close,
@@ -2116,10 +2129,12 @@ class TenantManager:
             # Route to tenant execution manager or paper simulator
             if tenant.execution_manager is not None:
                 try:
-                    await tenant.execution_manager.execute_signal(
+                    res = await tenant.execution_manager.execute_signal(
                         order_intent=order_intent,
                         account_equity=account_equity,
                     )
+                    if res is None and order_intent.is_closed:
+                        strategy.pending_order = None
                 except Exception as e:
                     logger.error(
                         "[TENANT %s:%s] Error executing signal: %s",
@@ -2127,6 +2142,9 @@ class TenantManager:
                         clean_symbol,
                         e,
                     )
+                    if not order_intent.is_closed:
+                        order_intent.cancel(f"Execution failed: {e}", OrderStatus.CANCELLED_MANUAL)
+                    strategy.pending_order = None
             elif tenant.paper_simulator is not None:
                 try:
                     avail_margin = (
@@ -2272,15 +2290,18 @@ class TenantManager:
 
             if tenant.execution_manager is not None:
                 try:
-                    await tenant.execution_manager.execute_signal(
+                    res = await tenant.execution_manager.execute_signal(
                         order_intent=tenant_intent,
                         account_equity=account_equity,
                     )
-                    if tenant_intent.client_order_id:
-                        tenant.order_to_base_id[tenant_intent.client_order_id] = base_signal_id
-                    executed_tenants.append(tenant.config.tenant_id)
+                    if res is not None:
+                        if tenant_intent.client_order_id:
+                            tenant.order_to_base_id[tenant_intent.client_order_id] = base_signal_id
+                        executed_tenants.append(tenant.config.tenant_id)
                 except Exception as e:
                     logger.error("[FANOUT %s:%s] Live order failed: %s", tenant.config.tenant_id, clean_symbol, e)
+                    if not tenant_intent.is_closed:
+                        tenant_intent.cancel(f"Live execution failed: {e}", OrderStatus.CANCELLED_MANUAL)
             elif tenant.paper_simulator is not None:
                 try:
                     avail_margin = (

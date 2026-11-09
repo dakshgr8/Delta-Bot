@@ -268,6 +268,9 @@ class TradingStateManager:
             elif update.is_cancelled and intent.is_pending:
                 intent.cancel(f"Exchange order {update.state}: ID={order_id}")
                 logger.info("OrderIntent [%s] cancelled on exchange: %s", intent.intent_id, update.state)
+                rm = self.get_risk_manager()
+                if rm is not None and rm.active_positions_count > 0:
+                    rm.active_positions_count -= 1
             return
 
         # 2. Check if this is an update on an already-bound child Stop Loss or Take Profit order
@@ -287,13 +290,15 @@ class TradingStateManager:
                     status.value,
                     exit_px,
                 )
-                rm = self.get_risk_manager()
-                if rm is not None:
-                    rm.record_trade_exit(
-                        pnl=target_intent.realized_pnl or 0.0,
-                        current_equity=0.0,
-                        symbol=target_intent.symbol,
-                    )
+                if not getattr(target_intent, "is_exit_recorded", False):
+                    target_intent.is_exit_recorded = True
+                    rm = self.get_risk_manager()
+                    if rm is not None:
+                        rm.record_trade_exit(
+                            pnl=target_intent.realized_pnl or 0.0,
+                            current_equity=0.0,
+                            symbol=target_intent.symbol,
+                        )
                 return
 
         # 3. Check if this is a newly spawned child Stop Loss / Take Profit order
@@ -382,13 +387,15 @@ class TradingStateManager:
                     status.value,
                     exit_px,
                 )
-                rm = self.get_risk_manager()
-                if rm is not None:
-                    rm.record_trade_exit(
-                        pnl=tracked_intent.realized_pnl or 0.0,
-                        current_equity=0.0,
-                        symbol=tracked_intent.symbol,
-                    )
+                if not getattr(tracked_intent, "is_exit_recorded", False):
+                    tracked_intent.is_exit_recorded = True
+                    rm = self.get_risk_manager()
+                    if rm is not None:
+                        rm.record_trade_exit(
+                            pnl=tracked_intent.realized_pnl or 0.0,
+                            current_equity=0.0,
+                            symbol=tracked_intent.symbol,
+                        )
         else:
             self._open_positions[position.product_id] = position
             if position.symbol and position.mark_price > 0:
@@ -538,13 +545,15 @@ class TradingStateManager:
                                 tracked_intent.intent_id,
                                 pid,
                             )
-                            rm = self.get_risk_manager()
-                            if rm is not None:
-                                rm.record_trade_exit(
-                                    pnl=tracked_intent.realized_pnl or 0.0,
-                                    current_equity=0.0,
-                                    symbol=tracked_intent.symbol,
-                                )
+                            if not getattr(tracked_intent, "is_exit_recorded", False):
+                                tracked_intent.is_exit_recorded = True
+                                rm = self.get_risk_manager()
+                                if rm is not None:
+                                    rm.record_trade_exit(
+                                        pnl=tracked_intent.realized_pnl or 0.0,
+                                        current_equity=0.0,
+                                        symbol=tracked_intent.symbol,
+                                    )
 
                 for pos in positions:
                     if pos.size != 0:
@@ -611,6 +620,9 @@ class TradingStateManager:
                         else:
                             intent.cancel(f"Order ID={parent_order_id} no longer present on Delta open order book")
                             logger.info("REST sync reconciled cancelled parent order ID=%d for %s", parent_order_id, intent.symbol)
+                            rm = self.get_risk_manager()
+                            if rm is not None and rm.active_positions_count > 0:
+                                rm.active_positions_count -= 1
 
                 # Discover and bind resting child Stop Loss orders for active triggered positions
                 for intent in list(self._intents_by_id.values()):
@@ -644,11 +656,19 @@ class TradingStateManager:
                         )
                         tracked_intent = self.get_active_intent_for_product(pos.product_id)
                         if not has_sl:
-                            sl_px = tracked_intent.initial_stop_loss if tracked_intent else None
+                            sl_px = tracked_intent.current_stop_loss if tracked_intent else None
                             tp_px = tracked_intent.take_profit if tracked_intent else None
+                            spec = self.client.get_cached_contract_spec(pos.symbol)
                             if sl_px is None and pos.entry_price > 0:
-                                sl_px = round(pos.entry_price * (0.985 if pos.size > 0 else 1.015), 4)
-                                tp_px = round(pos.entry_price * (1.03 if pos.size > 0 else 0.97), 4)
+                                raw_sl = pos.entry_price * (0.985 if pos.size > 0 else 1.015)
+                                raw_tp = pos.entry_price * (1.03 if pos.size > 0 else 0.97)
+                                sl_px = spec.round_price(raw_sl) if spec else round(raw_sl, 4)
+                                tp_px = spec.round_price(raw_tp) if spec else round(raw_tp, 4)
+                            elif spec:
+                                if sl_px is not None:
+                                    sl_px = spec.round_price(sl_px)
+                                if tp_px is not None:
+                                    tp_px = spec.round_price(tp_px)
 
                             if sl_px is not None:
                                 logger.critical(

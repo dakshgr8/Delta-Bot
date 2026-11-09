@@ -121,6 +121,7 @@ class TradingBotOrchestrator:
             self.execution_manager: ExecutionManager | None = ExecutionManager(
                 client=self.rest_client,
                 config=exec_cfg,
+                risk_manager=self.risk_manager,
                 state_manager=self.state_manager,
             )
             self.paper_simulator: PaperExchangeSimulator | None = None
@@ -243,6 +244,7 @@ class TradingBotOrchestrator:
                 self.execution_manager = ExecutionManager(
                     client=self.rest_client,
                     config=exec_cfg,
+                    risk_manager=self.risk_manager,
                     state_manager=self.state_manager,
                 )
             else:
@@ -365,12 +367,14 @@ class TradingBotOrchestrator:
             status.value,
             exit_price,
         )
-        equity = await self.get_account_equity()
-        self.risk_manager.record_trade_exit(
-            pnl=getattr(intent, "realized_pnl", 0.0) or 0.0,
-            current_equity=equity,
-            symbol=intent.symbol,
-        )
+        if not getattr(intent, "is_exit_recorded", False):
+            intent.is_exit_recorded = True
+            equity = await self.get_account_equity()
+            self.risk_manager.record_trade_exit(
+                pnl=getattr(intent, "realized_pnl", 0.0) or 0.0,
+                current_equity=equity,
+                symbol=intent.symbol,
+            )
 
     # -------------------------------------------------------------------------
     # Public & Private WebSocket Event Handlers
@@ -507,10 +511,13 @@ class TradingBotOrchestrator:
         # Execution Dispatch (Live vs Paper)
         if self.mode == ExecutionMode.LIVE and self.execution_manager is not None:
             try:
-                await self.execution_manager.execute_signal(
+                res = await self.execution_manager.execute_signal(
                     order_intent=order_intent,
                     account_equity=account_equity,
                 )
+                if res is None and order_intent.is_closed:
+                    if getattr(strategy, "pending_order", None) == order_intent:
+                        strategy.pending_order = None
             except Exception as e:
                 logger.error(
                     "[%s] Failed to execute live order intent %s: %s",
@@ -545,6 +552,9 @@ class TradingBotOrchestrator:
                         clean_symbol,
                         margin_res.rejection_reason,
                     )
+                    order_intent.cancel(margin_res.rejection_reason or "Margin check failed", OrderStatus.CANCELLED_MANUAL)
+                    if getattr(strategy, "pending_order", None) == order_intent:
+                        strategy.pending_order = None
                     return
 
                 order_intent.contract_lots = margin_res.final_lots
@@ -574,6 +584,10 @@ class TradingBotOrchestrator:
                     e,
                     exc_info=True,
                 )
+                if not order_intent.is_closed:
+                    order_intent.cancel(f"Paper submission failed: {e}", OrderStatus.CANCELLED_MANUAL)
+                if getattr(strategy, "pending_order", None) == order_intent:
+                    strategy.pending_order = None
 
     async def _dispatch_candle_to_custom_tenants(
         self, clean_symbol: str, candle: Candle, spec: ContractSpec
@@ -616,6 +630,7 @@ class TradingBotOrchestrator:
     ) -> None:
         """Executes a validated breakout order intent for an isolated tenant."""
         t_id = tenant.config.tenant_id
+        t_strat = tenant.get_strategy(clean_symbol)
 
         # Ensure tenant does not already have an active position or pending order
         tracked = tenant.state_manager.get_active_intent_for_product(spec.product_id)
@@ -623,13 +638,15 @@ class TradingBotOrchestrator:
             logger.debug("[TENANT %s:%s] Tenant already has active intent. Skipping duplicate execution.", t_id, clean_symbol)
             return
         t_equity = await tenant.get_account_equity()
-        if tenant.mode == ExecutionMode.LIVE and t_equity <= 0:
+        if tenant.mode.is_real and t_equity <= 0:
             logger.warning(
                 "[TENANT %s:%s] Order skipped: Live account balance is $0.00 on Delta Exchange India. Please deposit funds to trade.",
                 t_id,
                 clean_symbol,
             )
             order_intent.cancel("Zero account balance on exchange", OrderStatus.CANCELLED_MANUAL)
+            if t_strat and getattr(t_strat, "pending_order", None) == order_intent:
+                t_strat.pending_order = None
             return
 
         tenant.risk_manager.update_daily_equity(t_equity)
@@ -639,9 +656,11 @@ class TradingBotOrchestrator:
         if not can_open:
             logger.warning("[TENANT %s:%s] Order rejected by RiskManager: %s", t_id, clean_symbol, reject_reason)
             order_intent.cancel(reject_reason or "RiskManager rejection", OrderStatus.CANCELLED_MANUAL)
+            if t_strat and getattr(t_strat, "pending_order", None) == order_intent:
+                t_strat.pending_order = None
             return
 
-        if tenant.mode == ExecutionMode.PAPER and tenant.paper_simulator is not None:
+        if tenant.mode.is_demo and tenant.paper_simulator is not None:
             avail_margin = (
                 tenant.paper_simulator.wallet.available_balance
                 if tenant.paper_simulator.wallet.available_balance > 0
@@ -657,6 +676,9 @@ class TradingBotOrchestrator:
             )
             if not margin_res.is_margin_sufficient or margin_res.final_lots < 1:
                 logger.warning("[TENANT %s:%s] Margin check failed: %s", t_id, clean_symbol, margin_res.rejection_reason)
+                order_intent.cancel(margin_res.rejection_reason or "Margin check failed", OrderStatus.CANCELLED_MANUAL)
+                if t_strat and getattr(t_strat, "pending_order", None) == order_intent:
+                    t_strat.pending_order = None
                 return
 
             order_intent.contract_lots = margin_res.final_lots
@@ -696,8 +718,25 @@ class TradingBotOrchestrator:
                 v_order.size,
                 v_order.stop_price,
             )
-        elif tenant.mode == ExecutionMode.LIVE and tenant.execution_manager is not None:
-            await tenant.execution_manager.execute_signal(order_intent=order_intent, account_equity=t_equity)
+        elif tenant.mode.is_real and tenant.execution_manager is not None:
+            try:
+                from delta_bot.tenant import generate_deterministic_client_order_id
+                base_signal_id = order_intent.base_signal_id or f"SIG_{clean_symbol}_{int(time.time())}"
+                det_client_id = generate_deterministic_client_order_id(base_signal_id, t_id)
+                order_intent.base_signal_id = base_signal_id
+                order_intent.client_order_id = det_client_id
+                tenant.order_to_base_id[det_client_id] = base_signal_id
+
+                res = await tenant.execution_manager.execute_signal(order_intent=order_intent, account_equity=t_equity)
+                if res is None and order_intent.is_closed:
+                    if t_strat and getattr(t_strat, "pending_order", None) == order_intent:
+                        t_strat.pending_order = None
+            except Exception as e:
+                logger.error("[TENANT %s:%s] Failed to execute live order intent %s: %s", t_id, clean_symbol, order_intent.intent_id, e, exc_info=True)
+                if not order_intent.is_closed:
+                    order_intent.cancel(f"Execution failed: {e}", OrderStatus.CANCELLED_MANUAL)
+                if t_strat and getattr(t_strat, "pending_order", None) == order_intent:
+                    t_strat.pending_order = None
 
     async def _handle_candle_update(self, symbol: str, candle: Candle) -> None:
         """Receives forming candle updates for intra-bar price tracking."""

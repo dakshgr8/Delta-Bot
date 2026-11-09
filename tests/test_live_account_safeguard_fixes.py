@@ -259,3 +259,184 @@ def test_state_manager_get_risk_manager_direct_or_execution() -> None:
     state_mgr.risk_manager = mock_rm
     assert state_mgr.get_risk_manager() is mock_rm
 
+
+@pytest.mark.asyncio
+async def test_trailing_stop_ratchet_guards_and_allows_legitimate_advancement(
+    btc_spec: ContractSpec, sample_intent: OrderIntent
+) -> None:
+    """
+    Verifies that handle_trailing_stop_ratchet:
+    1. Allows valid ratchet even if intent.current_stop_loss is already set to new_sl (when old_sl is passed).
+    2. Allows valid ratchet when old_sl is None and new_sl == intent.current_stop_loss.
+    3. Strictly blocks loosening risk (new_sl <= old_sl for Bullish, or new_sl >= old_sl for Bearish).
+    """
+    mock_client = AsyncMock(spec=DeltaRestClient)
+    mock_client.get_cached_contract_spec.return_value = btc_spec
+    mock_client.config = BotConfig()
+
+    manager = OrderExecutionManager(mock_client, ExecutionConfig(execution_mode=ExecutionMode.DRY_RUN))
+
+    # Scenario 1: Strategy already set current_stop_loss to 50500.0, old_sl was 50000.0
+    sample_intent.current_stop_loss = 50500.0
+    success = await manager.handle_trailing_stop_ratchet(
+        order_intent=sample_intent,
+        new_sl=50500.0,
+        old_sl=50000.0,
+    )
+    assert success is True
+
+    # Scenario 2: old_sl is None, new_sl == current_stop_loss
+    success = await manager.handle_trailing_stop_ratchet(
+        order_intent=sample_intent,
+        new_sl=50500.0,
+        old_sl=None,
+    )
+    assert success is True
+
+    # Scenario 3: Attempting to loosen risk (new_sl 49000.0 < old_sl 50500.0 for LONG)
+    rejected = await manager.handle_trailing_stop_ratchet(
+        order_intent=sample_intent,
+        new_sl=49000.0,
+        old_sl=50500.0,
+    )
+    assert rejected is False
+
+
+@pytest.mark.asyncio
+async def test_tenant_sync_live_metrics_converts_inr_balance_to_usd() -> None:
+    """Verifies TenantInstance.sync_live_metrics normalizes INR wallet balances to USD using 87.0 rate."""
+    from delta_bot.tenant import TenantConfig, TenantInstance
+    t_cfg = TenantConfig(
+        tenant_id="t_inr_test",
+        name="INR Tenant",
+        mode="live",
+        delta_api_key="key",
+        delta_api_secret="secret",
+    )
+    bot_cfg = BotConfig(execution_mode="live", DELTA_API_KEY="key", DELTA_API_SECRET="secret")
+    tenant = TenantInstance(t_cfg, bot_cfg)
+
+    # Mock rest_client wallet balances returning 870,000 INR
+    mock_rest = AsyncMock(spec=DeltaRestClient)
+    mock_rest.get_wallet_balances.return_value = [
+        WalletBalance(
+            asset_id=5,
+            asset_symbol="INR",
+            balance=870000.0,
+            available_balance=435000.0,
+            unrealized_pnl=8700.0,
+        )
+    ]
+    tenant.rest_client = mock_rest
+
+    await tenant.sync_live_metrics()
+
+    # 870,000 / 87 = $10,000 USD
+    assert tenant.live_balance == 10000.0
+    # 435,000 / 87 = $5,000 USD
+    assert tenant.live_available_margin == 5000.0
+    # 8,700 / 87 = $100 USD
+    assert tenant.live_unrealized_pnl == 100.0
+    assert tenant.live_equity == 10100.0
+
+
+def test_order_intent_close_position_and_exit_recording_idempotency(sample_intent: OrderIntent) -> None:
+    """Verifies that OrderIntent.close_position is idempotent and is_exit_recorded prevents double PnL accounting."""
+    sample_intent.status = OrderStatus.TRIGGERED
+    sample_intent.fill_price = 50000.0
+
+    # First close
+    sample_intent.close_position(OrderStatus.CLOSED_TP, exit_price=52000.0, timestamp=1700000100.0)
+    assert sample_intent.status == OrderStatus.CLOSED_TP
+    assert sample_intent.exit_price == 52000.0
+    assert sample_intent.closed_at == 1700000100.0
+    assert sample_intent.is_closed is True
+
+    # Second close attempt (must be a no-op, preserving original exit price and time)
+    sample_intent.close_position(OrderStatus.CLOSED_SL, exit_price=49000.0, timestamp=1700000200.0)
+    assert sample_intent.status == OrderStatus.CLOSED_TP
+    assert sample_intent.exit_price == 52000.0
+    assert sample_intent.closed_at == 1700000100.0
+
+    # Test is_exit_recorded guard on RiskManager
+    rm = RiskManager(initial_equity=10000.0)
+    rm.record_trade_entry()
+    assert rm.active_positions_count == 1
+
+    # First record
+    if not sample_intent.is_exit_recorded:
+        sample_intent.is_exit_recorded = True
+        rm.record_trade_exit(pnl=200.0, current_equity=10200.0, symbol="BTCUSDT")
+
+    assert rm.active_positions_count == 0
+    assert rm.daily_realized_pnl == 200.0
+
+    # Second record attempt (blocked by is_exit_recorded)
+    if not sample_intent.is_exit_recorded:
+        sample_intent.is_exit_recorded = True
+        rm.record_trade_exit(pnl=200.0, current_equity=10200.0, symbol="BTCUSDT")
+
+    # Counts and realized PnL remain unchanged
+    assert rm.active_positions_count == 0
+    assert rm.daily_realized_pnl == 200.0
+
+
+@pytest.mark.asyncio
+async def test_reconcile_with_rest_naked_position_uses_current_sl_and_spec_quantization(
+    btc_spec: ContractSpec, sample_intent: OrderIntent
+) -> None:
+    """Verifies that naked position repair uses the ratcheted current_stop_loss and spec tick quantization."""
+    from delta_bot.models import PositionInfo
+
+    mock_client = AsyncMock(spec=DeltaRestClient)
+    mock_client.get_cached_contract_spec.return_value = btc_spec
+
+    # Open position exists without any open orders (naked)
+    mock_client.get_open_positions.return_value = [
+        PositionInfo(product_id=139, symbol="BTCUSDT", size=10, entry_price=50000.0)
+    ]
+    mock_client.get_open_orders.return_value = []
+    mock_client.set_position_bracket.return_value = {"status": "success"}
+
+    state_mgr = TradingStateManager(client=mock_client)
+    sample_intent.status = OrderStatus.TRIGGERED
+    sample_intent.current_stop_loss = 50200.33  # Unrounded ratchet
+    sample_intent.take_profit = 52000.77       # Unrounded TP
+    state_mgr.register_intent(sample_intent)
+
+    report = await state_mgr.reconcile_with_rest()
+
+    assert report["naked_positions_repaired"] == 1
+    # Check that set_position_bracket was called with quantized prices (tick_size = 0.5)
+    mock_client.set_position_bracket.assert_awaited_once_with(
+        product_id=139,
+        bracket_stop_loss_price=50200.5,  # 50200.33 quantized to nearest 0.5 tick
+        bracket_take_profit_price=52001.0, # 52000.77 quantized to nearest 0.5 tick
+    )
+
+
+def test_tenant_execution_manager_shares_risk_manager_instance() -> None:
+    """Verifies that ExecutionManager instantiated by TenantInstance shares the tenant's RiskManager."""
+    from delta_bot.tenant import TenantConfig, TenantInstance
+    t_cfg = TenantConfig(
+        tenant_id="t_rm_shared",
+        name="Shared RM Tenant",
+        mode="live",
+        delta_api_key="key",
+        delta_api_secret="secret",
+        risk_pct=2.0,
+    )
+    bot_cfg = BotConfig(execution_mode="live", DELTA_API_KEY="key", DELTA_API_SECRET="secret")
+    tenant = TenantInstance(t_cfg, bot_cfg)
+
+    assert tenant.execution_manager is not None
+    assert tenant.execution_manager.risk_manager is tenant.risk_manager
+    assert tenant.state_manager.risk_manager is tenant.risk_manager
+
+    # Re-verify after credentials reload
+    tenant.reload_credentials()
+    assert tenant.execution_manager is not None
+    assert tenant.execution_manager.risk_manager is tenant.risk_manager
+    assert tenant.state_manager.risk_manager is tenant.risk_manager
+
+

@@ -21,6 +21,7 @@ import asyncio
 import inspect
 import logging
 import math
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from enum import Enum
@@ -181,6 +182,7 @@ class OrderIntent(BaseModel):
     filled_size: int | None = Field(default=None, description="Actual executed contract lots from private user feed")
     realized_pnl: float | None = Field(default=None, description="Realized PnL of closed position in USD")
     is_breakeven_locked: bool = Field(default=False, description="Flag indicating SL has been advanced to break-even")
+    is_exit_recorded: bool = Field(default=False, description="Flag indicating exit has been accounted for in RiskManager")
 
     @property
     def is_pending(self) -> bool:
@@ -257,6 +259,8 @@ class OrderIntent(BaseModel):
 
     def close_position(self, status: OrderStatus, exit_price: float, timestamp: float) -> None:
         """Marks the active position as closed via Take Profit or Stop Loss."""
+        if self.is_closed:
+            return
         self.status = status
         self.exit_price = exit_price
         self.closed_at = timestamp
@@ -501,13 +505,13 @@ class BreakoutStrategyEngine:
         if self.active_position is not None:
             pos = self.active_position
             if pos.signal_type == SignalType.BULLISH_BREAKOUT:
-                # Check Take Profit
-                if candle.high >= pos.take_profit:
+                # Check Take Profit (simulated offline mode only)
+                if pos.exchange_order_id is None and candle.high >= pos.take_profit:
                     pos.close_position(OrderStatus.CLOSED_TP, pos.take_profit, candle.candle_start_epoch_s)
                     await self._emit(self._on_position_close_cb, pos, OrderStatus.CLOSED_TP, pos.take_profit)
                     self.active_position = None
-                # Check Stop Loss
-                elif candle.low <= pos.current_stop_loss:
+                # Check Stop Loss (simulated offline mode only)
+                elif pos.exchange_order_id is None and candle.low <= pos.current_stop_loss:
                     pos.close_position(OrderStatus.CLOSED_SL, pos.current_stop_loss, candle.candle_start_epoch_s)
                     await self._emit(self._on_position_close_cb, pos, OrderStatus.CLOSED_SL, pos.current_stop_loss)
                     self.active_position = None
@@ -543,13 +547,13 @@ class BreakoutStrategyEngine:
                             await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
 
             elif pos.signal_type == SignalType.BEARISH_BREAKDOWN:
-                # Check Take Profit
-                if candle.low <= pos.take_profit:
+                # Check Take Profit (simulated offline mode only)
+                if pos.exchange_order_id is None and candle.low <= pos.take_profit:
                     pos.close_position(OrderStatus.CLOSED_TP, pos.take_profit, candle.candle_start_epoch_s)
                     await self._emit(self._on_position_close_cb, pos, OrderStatus.CLOSED_TP, pos.take_profit)
                     self.active_position = None
-                # Check Stop Loss
-                elif candle.high >= pos.current_stop_loss:
+                # Check Stop Loss (simulated offline mode only)
+                elif pos.exchange_order_id is None and candle.high >= pos.current_stop_loss:
                     pos.close_position(OrderStatus.CLOSED_SL, pos.current_stop_loss, candle.candle_start_epoch_s)
                     await self._emit(self._on_position_close_cb, pos, OrderStatus.CLOSED_SL, pos.current_stop_loss)
                     self.active_position = None
@@ -591,43 +595,45 @@ class BreakoutStrategyEngine:
             order = self.pending_order
             triggered = False
 
-            if order.signal_type == SignalType.BULLISH_BREAKOUT:
-                # Trigger condition: Bar high breaches trigger price
-                if candle.high >= order.trigger_price:
-                    order.trigger(candle)
-                    self.active_position = order
-                    self.pending_order = None
-                    triggered = True
-                    await self._emit(self._on_order_trigger_cb, order, candle)
+            # In simulated offline mode without exchange order id, simulate trigger and immediate bar exits
+            if order.exchange_order_id is None:
+                if order.signal_type == SignalType.BULLISH_BREAKOUT:
+                    # Trigger condition: Bar high breaches trigger price
+                    if candle.high >= order.trigger_price:
+                        order.trigger(candle)
+                        self.active_position = order
+                        self.pending_order = None
+                        triggered = True
+                        await self._emit(self._on_order_trigger_cb, order, candle)
 
-                    # Evaluate if the trigger bar hits TP or SL
-                    if candle.high >= order.take_profit:
-                        order.close_position(OrderStatus.CLOSED_TP, order.take_profit, candle.candle_start_epoch_s)
-                        await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_TP, order.take_profit)
-                        self.active_position = None
-                    elif candle.low <= order.current_stop_loss:
-                        order.close_position(OrderStatus.CLOSED_SL, order.current_stop_loss, candle.candle_start_epoch_s)
-                        await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_SL, order.current_stop_loss)
-                        self.active_position = None
+                        # Evaluate if the trigger bar hits TP or SL
+                        if candle.high >= order.take_profit:
+                            order.close_position(OrderStatus.CLOSED_TP, order.take_profit, candle.candle_start_epoch_s)
+                            await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_TP, order.take_profit)
+                            self.active_position = None
+                        elif candle.low <= order.current_stop_loss:
+                            order.close_position(OrderStatus.CLOSED_SL, order.current_stop_loss, candle.candle_start_epoch_s)
+                            await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_SL, order.current_stop_loss)
+                            self.active_position = None
 
-            elif order.signal_type == SignalType.BEARISH_BREAKDOWN:
-                # Trigger condition: Bar low breaches trigger price
-                if candle.low <= order.trigger_price:
-                    order.trigger(candle)
-                    self.active_position = order
-                    self.pending_order = None
-                    triggered = True
-                    await self._emit(self._on_order_trigger_cb, order, candle)
+                elif order.signal_type == SignalType.BEARISH_BREAKDOWN:
+                    # Trigger condition: Bar low breaches trigger price
+                    if candle.low <= order.trigger_price:
+                        order.trigger(candle)
+                        self.active_position = order
+                        self.pending_order = None
+                        triggered = True
+                        await self._emit(self._on_order_trigger_cb, order, candle)
 
-                    # Evaluate if the trigger bar hits TP or SL
-                    if candle.low <= order.take_profit:
-                        order.close_position(OrderStatus.CLOSED_TP, order.take_profit, candle.candle_start_epoch_s)
-                        await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_TP, order.take_profit)
-                        self.active_position = None
-                    elif candle.high >= order.current_stop_loss:
-                        order.close_position(OrderStatus.CLOSED_SL, order.current_stop_loss, candle.candle_start_epoch_s)
-                        await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_SL, order.current_stop_loss)
-                        self.active_position = None
+                        # Evaluate if the trigger bar hits TP or SL
+                        if candle.low <= order.take_profit:
+                            order.close_position(OrderStatus.CLOSED_TP, order.take_profit, candle.candle_start_epoch_s)
+                            await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_TP, order.take_profit)
+                            self.active_position = None
+                        elif candle.high >= order.current_stop_loss:
+                            order.close_position(OrderStatus.CLOSED_SL, order.current_stop_loss, candle.candle_start_epoch_s)
+                            await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_SL, order.current_stop_loss)
+                            self.active_position = None
 
             if not triggered and self.pending_order is not None:
                 # Invalidation: intermediate candle closes across EMA 20

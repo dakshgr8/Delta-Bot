@@ -1055,22 +1055,40 @@ class ExecutionManager:
             return False
 
         # Directional Guard: never loosen risk
-        if order_intent.signal_type == SignalType.BULLISH_BREAKOUT:
-            if new_sl <= order_intent.current_stop_loss:
-                logger.warning(
-                    "Rejected Long SL loosening: new_sl (%.4f) <= current_sl (%.4f)",
-                    new_sl,
-                    order_intent.current_stop_loss,
-                )
-                return False
-        elif order_intent.signal_type == SignalType.BEARISH_BREAKDOWN:
-            if new_sl >= order_intent.current_stop_loss:
-                logger.warning(
-                    "Rejected Short SL loosening: new_sl (%.4f) >= current_sl (%.4f)",
-                    new_sl,
-                    order_intent.current_stop_loss,
-                )
-                return False
+        if old_sl is not None:
+            if order_intent.signal_type == SignalType.BULLISH_BREAKOUT:
+                if new_sl <= old_sl:
+                    logger.warning(
+                        "Rejected Long SL loosening: new_sl (%.4f) <= old_sl (%.4f)",
+                        new_sl,
+                        old_sl,
+                    )
+                    return False
+            elif order_intent.signal_type == SignalType.BEARISH_BREAKDOWN:
+                if new_sl >= old_sl:
+                    logger.warning(
+                        "Rejected Short SL loosening: new_sl (%.4f) >= old_sl (%.4f)",
+                        new_sl,
+                        old_sl,
+                    )
+                    return False
+        else:
+            if order_intent.signal_type == SignalType.BULLISH_BREAKOUT:
+                if new_sl < order_intent.current_stop_loss:
+                    logger.warning(
+                        "Rejected Long SL loosening: new_sl (%.4f) < current_sl (%.4f)",
+                        new_sl,
+                        order_intent.current_stop_loss,
+                    )
+                    return False
+            elif order_intent.signal_type == SignalType.BEARISH_BREAKDOWN:
+                if new_sl > order_intent.current_stop_loss:
+                    logger.warning(
+                        "Rejected Short SL loosening: new_sl (%.4f) > current_sl (%.4f)",
+                        new_sl,
+                        order_intent.current_stop_loss,
+                    )
+                    return False
 
         product_id = order_intent.product_id
         if product_id is None:
