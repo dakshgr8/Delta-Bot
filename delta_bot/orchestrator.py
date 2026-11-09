@@ -100,6 +100,7 @@ class TradingBotOrchestrator:
             default_leverage=self.config.default_leverage,
             daily_max_drawdown_pct=self.config.max_drawdown_pct,
             enable_drawdown_circuit_breaker=True,
+            enable_weekend_shield=self.config.enable_weekend_shield,
             min_stop_loss_pct=self.config.min_stop_loss_pct,
             max_effective_leverage=self.config.max_effective_leverage,
         )
@@ -158,6 +159,7 @@ class TradingBotOrchestrator:
                 risk_per_trade_pct=self.config.default_risk_pct,
                 min_stop_loss_pct=self.config.min_stop_loss_pct,
                 min_stop_loss_atr_mult=self.config.min_stop_loss_atr_mult,
+                enable_weekend_shield=self.config.enable_weekend_shield,
             )
             strat = BreakoutStrategyEngine(config=strat_cfg)
             self._register_strategy_callbacks(strat)
@@ -415,6 +417,7 @@ class TradingBotOrchestrator:
                     risk_per_trade_pct=self.config.default_risk_pct,
                     min_stop_loss_pct=self.config.min_stop_loss_pct,
                     min_stop_loss_atr_mult=self.config.min_stop_loss_atr_mult,
+                    enable_weekend_shield=self.config.enable_weekend_shield,
                 )
                 strategy = BreakoutStrategyEngine(config=strat_cfg)
                 self._register_strategy_callbacks(strategy)

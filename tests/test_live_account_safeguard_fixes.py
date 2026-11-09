@@ -440,3 +440,78 @@ def test_tenant_execution_manager_shares_risk_manager_instance() -> None:
     assert tenant.state_manager.risk_manager is tenant.risk_manager
 
 
+def test_weekend_shield_rejects_new_position_on_saturday_and_sunday() -> None:
+    """Verifies that RiskManager blocks opening new positions on Saturday and Sunday UTC."""
+    from datetime import datetime, timezone
+    rm = RiskManager(initial_equity=10000.0, config=RiskConfig(enable_weekend_shield=True))
+
+    # Saturday: 2026-11-14 12:00:00 UTC (weekday == 5)
+    sat_dt = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+    can_open, reason = rm.can_open_new_position(now_utc=sat_dt)
+    assert can_open is False
+    assert "[WEEKEND SHIELD]" in str(reason)
+    assert "Saturday" in str(reason)
+
+    # Sunday: 2026-11-15 15:30:00 UTC (weekday == 6)
+    sun_dt = datetime(2026, 11, 15, 15, 30, tzinfo=timezone.utc)
+    can_open, reason = rm.can_open_new_position(now_utc=sun_dt)
+    assert can_open is False
+    assert "[WEEKEND SHIELD]" in str(reason)
+    assert "Sunday" in str(reason)
+
+    # Monday: 2026-11-16 09:00:00 UTC (weekday == 0)
+    mon_dt = datetime(2026, 11, 16, 9, 0, tzinfo=timezone.utc)
+    can_open, reason = rm.can_open_new_position(now_utc=mon_dt)
+    assert can_open is True
+    assert reason is None
+
+
+def test_weekend_shield_disabled_allows_trading_on_weekends() -> None:
+    """Verifies that when enable_weekend_shield is False, weekend orders are permitted."""
+    from datetime import datetime, timezone
+    rm = RiskManager(initial_equity=10000.0, config=RiskConfig(enable_weekend_shield=False))
+
+    sat_dt = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+    can_open, reason = rm.can_open_new_position(now_utc=sat_dt)
+    assert can_open is True
+    assert reason is None
+
+
+@pytest.mark.asyncio
+async def test_strategy_weekend_shield_skips_signals_on_weekend(btc_spec: ContractSpec) -> None:
+    """Verifies BreakoutStrategyEngine suppresses breakout signals on Saturday and Sunday UTC."""
+    from datetime import datetime, timezone
+    from delta_bot.strategy import BreakoutStrategyEngine, StrategyConfig
+    from delta_bot.models import Candle, CircularBarCache, SessionAnchorData
+
+    cfg = StrategyConfig(symbol="BTCUSDT", enable_weekend_shield=True)
+    engine = BreakoutStrategyEngine(config=cfg)
+    bar_cache = CircularBarCache(capacity=100)
+    anchor = SessionAnchorData(symbol="BTCUSDT", session_date="2026-11-14", session_start_epoch_s=1794614400.0)
+
+    # Saturday candle: 2026-11-14 10:00:00 UTC
+    sat_epoch = datetime(2026, 11, 14, 10, 0, tzinfo=timezone.utc).timestamp()
+    sat_candle = Candle(
+        symbol="BTCUSDT",
+        resolution="1m",
+        open=50000.0,
+        high=51000.0,
+        low=49500.0,
+        close=50800.0,
+        volume=100.0,
+        candle_start_time_usec=int(sat_epoch * 1_000_000),
+        is_closed=True,
+    )
+    bar_cache.append(sat_candle)
+
+    intent = await engine.on_candle_close(
+        candle=sat_candle,
+        session_anchor=anchor,
+        contract_spec=btc_spec,
+        bar_cache=bar_cache,
+        account_equity=10000.0,
+    )
+    assert intent is None
+
+
+

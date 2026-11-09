@@ -263,19 +263,19 @@ def test_daily_rollover_spread_spike_shield(risk_manager: RiskManager) -> None:
     from datetime import datetime, timezone
 
     # 1. During 21:58 UTC -> Blocked
-    dt_rollover_1 = datetime(2026, 11, 7, 21, 59, 0, tzinfo=timezone.utc)
+    dt_rollover_1 = datetime(2026, 11, 6, 21, 59, 0, tzinfo=timezone.utc)
     can_open_1, reason_1 = risk_manager.can_open_new_position(now_utc=dt_rollover_1)
     assert can_open_1 is False
     assert "[ROLLOVER SHIELD]" in str(reason_1)
 
     # 2. During 22:05 UTC -> Blocked
-    dt_rollover_2 = datetime(2026, 11, 7, 22, 5, 0, tzinfo=timezone.utc)
+    dt_rollover_2 = datetime(2026, 11, 6, 22, 5, 0, tzinfo=timezone.utc)
     can_open_2, reason_2 = risk_manager.can_open_new_position(now_utc=dt_rollover_2)
     assert can_open_2 is False
     assert "[ROLLOVER SHIELD]" in str(reason_2)
 
     # 3. Normal trading hours (14:30 UTC) -> Allowed
-    dt_normal = datetime(2026, 11, 7, 14, 30, 0, tzinfo=timezone.utc)
+    dt_normal = datetime(2026, 11, 6, 14, 30, 0, tzinfo=timezone.utc)
     can_open_3, reason_3 = risk_manager.can_open_new_position(now_utc=dt_normal)
     assert can_open_3 is True
     assert reason_3 is None

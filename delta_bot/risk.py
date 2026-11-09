@@ -98,6 +98,10 @@ class RiskConfig(BaseModel):
         gt=0.0,
         description="Strict maximum effective leverage (Notional / Equity) allowed per trade",
     )
+    enable_weekend_shield: bool = Field(
+        default=True,
+        description="Whether to block opening new trades on weekends (Saturday and Sunday UTC)",
+    )
 
 
 class CircuitBreakerState(BaseModel):
@@ -227,6 +231,16 @@ class RiskManager:
                 return (
                     False,
                     "[ROLLOVER SHIELD] Order rejected: Trading frozen during daily settlement/midnight rollover window.",
+                )
+
+        # Weekend Shield (Disable trading on Saturday and Sunday UTC)
+        if self.config.enable_weekend_shield:
+            curr_dt = now_utc or datetime.now(timezone.utc)
+            if curr_dt.weekday() in (5, 6):
+                day_name = "Saturday" if curr_dt.weekday() == 5 else "Sunday"
+                return (
+                    False,
+                    f"[WEEKEND SHIELD] Order rejected: Trading is disabled on weekends ({day_name} UTC).",
                 )
 
         # Revenge Trading Breaker (Symbol Quarantine)

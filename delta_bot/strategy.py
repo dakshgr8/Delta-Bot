@@ -18,6 +18,7 @@ on confirmed bar closes.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import inspect
 import logging
 import math
@@ -127,6 +128,9 @@ class StrategyConfig(BaseModel):
     )
     breakeven_trigger_r: float = Field(
         default=1.0, gt=0.0, description="R-multiple floating profit required to trigger break-even ratchet (e.g. 1.0R or 1.5R)"
+    )
+    enable_weekend_shield: bool = Field(
+        default=True, description="Whether to block new breakout signal generation on Saturday and Sunday (UTC weekend filter)"
     )
 
 
@@ -661,6 +665,18 @@ class BreakoutStrategyEngine:
         # ---------------------------------------------------------------------
         # Step 4: Signal Generation & Regime Filtering
         # ---------------------------------------------------------------------
+        # Weekend Shield: Suppress new signal evaluation on Saturday and Sunday UTC
+        if self.config.enable_weekend_shield:
+            candle_dt = datetime.fromtimestamp(candle.candle_start_epoch_s, tz=timezone.utc)
+            if candle_dt.weekday() in (5, 6):
+                day_name = "Saturday" if candle_dt.weekday() == 5 else "Sunday"
+                logger.debug(
+                    "Signal evaluation skipped on %s: weekend shield active (%s UTC)",
+                    self.symbol,
+                    day_name,
+                )
+                return None
+
         # Strategy Rules:
         # 1. Close > EMA 20 (Bull) or Close < EMA 20 (Bear)
         # 2. Close > Session VWAP (Bull) or Close < Session VWAP (Bear)

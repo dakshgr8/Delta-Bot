@@ -269,6 +269,7 @@ class TenantInstance:
             max_leverage=config.leverage,
             daily_max_drawdown_pct=config.max_drawdown_pct or self.bot_config.max_drawdown_pct,
             enable_drawdown_circuit_breaker=True,
+            enable_weekend_shield=self.bot_config.enable_weekend_shield,
             min_stop_loss_pct=self.bot_config.min_stop_loss_pct,
             max_effective_leverage=self.bot_config.max_effective_leverage,
         )
@@ -311,6 +312,7 @@ class TenantInstance:
                     risk_per_trade_pct=config.risk_pct,
                     min_stop_loss_pct=self.bot_config.min_stop_loss_pct,
                     min_stop_loss_atr_mult=self.bot_config.min_stop_loss_atr_mult,
+                    enable_weekend_shield=self.bot_config.enable_weekend_shield,
                 )
                 strat = BreakoutStrategyEngine(config=s_cfg)
                 self._register_strategy_callbacks(strat)
@@ -512,6 +514,7 @@ class TenantInstance:
                         risk_per_trade_pct=self.config.risk_pct,
                         min_stop_loss_pct=self.bot_config.min_stop_loss_pct,
                         min_stop_loss_atr_mult=self.bot_config.min_stop_loss_atr_mult,
+                        enable_weekend_shield=self.bot_config.enable_weekend_shield,
                     )
                     strat = BreakoutStrategyEngine(config=s_cfg)
                     self._register_strategy_callbacks(strat)

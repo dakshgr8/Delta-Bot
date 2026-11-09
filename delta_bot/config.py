@@ -274,6 +274,11 @@ class BotConfig(BaseSettings):
         le=100.0,
         description="Strict maximum effective leverage (Notional / Equity) allowed per trade",
     )
+    enable_weekend_shield: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("ENABLE_WEEKEND_SHIELD", "enable_weekend_shield"),
+        description="Whether to block opening new trades on weekends (Saturday and Sunday UTC)",
+    )
 
     # Dashboard & Web Control API Authentication (Phase 8)
     dashboard_auth_token: SecretStr | None = Field(

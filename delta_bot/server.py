@@ -134,6 +134,10 @@ class ConfigUpdateRequest(BaseModel):
         default=None,
         description="Delta Exchange India Base API URL (e.g. https://api.india.delta.exchange)",
     )
+    enable_weekend_shield: bool | None = Field(
+        default=None,
+        description="Toggle weekend trading shield (True=No trading on Sat/Sun, False=Allow weekend trading)",
+    )
     reset_keys: bool | None = Field(
         default=False,
         description="Wipe configured API credentials and reset to clean paper state",
@@ -2417,6 +2421,23 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             for s in orchestrator.strategies.values():
                 s.config = s.config.model_copy(update={"max_pending_bars": payload.max_pending_bars})
             updated.append(f"max_pending_bars={payload.max_pending_bars}")
+
+        if payload.enable_weekend_shield is not None:
+            orchestrator.config.enable_weekend_shield = payload.enable_weekend_shield
+            orchestrator.risk_manager.config = orchestrator.risk_manager.config.model_copy(
+                update={"enable_weekend_shield": payload.enable_weekend_shield}
+            )
+            for s in orchestrator.strategies.values():
+                s.config = s.config.model_copy(update={"enable_weekend_shield": payload.enable_weekend_shield})
+            if hasattr(orchestrator, "tenant_manager"):
+                for t in orchestrator.tenant_manager.tenants.values():
+                    t.bot_config.enable_weekend_shield = payload.enable_weekend_shield
+                    t.risk_manager.config = t.risk_manager.config.model_copy(
+                        update={"enable_weekend_shield": payload.enable_weekend_shield}
+                    )
+                    for s in t.strategies.values():
+                        s.config = s.config.model_copy(update={"enable_weekend_shield": payload.enable_weekend_shield})
+            updated.append(f"enable_weekend_shield={payload.enable_weekend_shield}")
 
         # Handle API keys update or reset
         if payload.reset_keys:
