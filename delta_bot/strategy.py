@@ -102,6 +102,16 @@ class StrategyConfig(BaseModel):
     min_contracts: int = Field(
         default=1, ge=1, description="Minimum contract lots to submit if within risk limits"
     )
+    min_stop_loss_pct: float = Field(
+        default=0.15,
+        ge=0.0,
+        description="Minimum stop loss distance percentage (e.g. 0.15%) to skip noise stop-outs and prevent oversized sizing",
+    )
+    min_stop_loss_atr_mult: float = Field(
+        default=0.25,
+        ge=0.0,
+        description="Minimum stop loss distance as a multiple of ATR 14 to filter out tight consolidation noise",
+    )
 
     # Trailing Stop & Break-Even Configuration
     trailing_stop: bool = Field(
@@ -699,13 +709,38 @@ class BreakoutStrategyEngine:
             raw_sl = candle.low
             initial_sl = contract_spec.round_price(raw_sl)
 
-            # Ensure valid risk distance
+            # Ensure valid risk distance and skip microscopic stoploss
             per_unit_risk = trigger_price - initial_sl
             if per_unit_risk <= (contract_spec.tick_size * 2):
                 logger.warning(
-                    "Bullish breakout on %s rejected: per_unit_risk (%.4f) too tight",
+                    "Bullish breakout on %s skipped: per_unit_risk (%.4f) too tight (<= 2 ticks)",
                     self.symbol,
                     per_unit_risk,
+                )
+                return None
+
+            sl_pct = (per_unit_risk / trigger_price * 100.0) if trigger_price > 0 else 0.0
+            if self.config.min_stop_loss_pct > 0 and sl_pct < self.config.min_stop_loss_pct:
+                logger.warning(
+                    "Bullish breakout on %s skipped: Stop-Loss distance (%.4f = %.3f%%) is below min_stop_loss_pct (%.2f%%)",
+                    self.symbol,
+                    per_unit_risk,
+                    sl_pct,
+                    self.config.min_stop_loss_pct,
+                )
+                return None
+
+            if (
+                self.config.min_stop_loss_atr_mult > 0
+                and snapshot.atr_14 > 0
+                and per_unit_risk < (self.config.min_stop_loss_atr_mult * snapshot.atr_14)
+            ):
+                logger.warning(
+                    "Bullish breakout on %s skipped: Stop-Loss distance (%.4f) is below %.2fx ATR_14 (%.4f)",
+                    self.symbol,
+                    per_unit_risk,
+                    self.config.min_stop_loss_atr_mult,
+                    self.config.min_stop_loss_atr_mult * snapshot.atr_14,
                 )
                 return None
 
@@ -756,13 +791,38 @@ class BreakoutStrategyEngine:
             raw_sl = candle.high
             initial_sl = contract_spec.round_price(raw_sl)
 
-            # Ensure valid risk distance
+            # Ensure valid risk distance and skip microscopic stoploss
             per_unit_risk = initial_sl - trigger_price
             if per_unit_risk <= (contract_spec.tick_size * 2):
                 logger.warning(
-                    "Bearish breakdown on %s rejected: per_unit_risk (%.4f) too tight",
+                    "Bearish breakdown on %s skipped: per_unit_risk (%.4f) too tight (<= 2 ticks)",
                     self.symbol,
                     per_unit_risk,
+                )
+                return None
+
+            sl_pct = (per_unit_risk / trigger_price * 100.0) if trigger_price > 0 else 0.0
+            if self.config.min_stop_loss_pct > 0 and sl_pct < self.config.min_stop_loss_pct:
+                logger.warning(
+                    "Bearish breakdown on %s skipped: Stop-Loss distance (%.4f = %.3f%%) is below min_stop_loss_pct (%.2f%%)",
+                    self.symbol,
+                    per_unit_risk,
+                    sl_pct,
+                    self.config.min_stop_loss_pct,
+                )
+                return None
+
+            if (
+                self.config.min_stop_loss_atr_mult > 0
+                and snapshot.atr_14 > 0
+                and per_unit_risk < (self.config.min_stop_loss_atr_mult * snapshot.atr_14)
+            ):
+                logger.warning(
+                    "Bearish breakdown on %s skipped: Stop-Loss distance (%.4f) is below %.2fx ATR_14 (%.4f)",
+                    self.symbol,
+                    per_unit_risk,
+                    self.config.min_stop_loss_atr_mult,
+                    self.config.min_stop_loss_atr_mult * snapshot.atr_14,
                 )
                 return None
 

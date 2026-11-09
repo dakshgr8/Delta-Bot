@@ -797,3 +797,92 @@ async def test_automated_breakeven_autoratchet_bearish(
     assert len(ratchets) == 1
     assert ratchets[0] == (51000.0, 49999.5)
 
+
+@pytest.mark.asyncio
+async def test_strategy_skips_breakout_with_tiny_stop_loss_pct(
+    strategy_config: StrategyConfig, btc_spec: ContractSpec
+) -> None:
+    """Verifies that setups with stop loss distance < min_stop_loss_pct (e.g. flat/micro bars) are skipped."""
+    engine = BreakoutStrategyEngine(strategy_config)
+    bar_cache = CircularBarCache(capacity=500)
+    seed_synthetic_cache(bar_cache, count=45, base_price=50000.0, step=20.0)
+
+    session_anchor = SessionAnchorData(
+        symbol="BTCUSDT",
+        session_date="2026-11-06",
+        session_start_epoch_s=1700000000.0,
+        prior_day_high=50800.0,
+        prior_day_low=49000.0,
+        prior_day_close=49500.0,
+        session_vwap=50200.0,
+    )
+
+    # Signal candle breaches PDH, but has a microscopic range:
+    # High = 50950.5, Low = 50949.5 (range = 1.0, distance = 1.5 at 51,000 = 0.003%)
+    # min_stop_loss_pct = 0.15% requires distance >= 76.4
+    flat_signal_bar = make_candle(
+        open_p=50950.0,
+        high_p=50950.5,
+        low_p=50949.5,
+        close_p=50950.0,
+        volume=50.0,
+        epoch_s=1700000000.0 + (46 * 60),
+    )
+    bar_cache.append(flat_signal_bar)
+
+    intent = await engine.on_candle_close(
+        candle=flat_signal_bar,
+        session_anchor=session_anchor,
+        contract_spec=btc_spec,
+        bar_cache=bar_cache,
+        account_equity=10000.0,
+    )
+
+    # Must be cleanly skipped! No intent generated, no position opened
+    assert intent is None
+
+
+@pytest.mark.asyncio
+async def test_strategy_skips_breakout_with_sub_atr_stop_loss(
+    strategy_config: StrategyConfig, btc_spec: ContractSpec
+) -> None:
+    """Verifies that setups with stop loss distance < min_stop_loss_atr_mult * ATR are skipped."""
+    # Set min_stop_loss_pct to 0 to isolate the ATR check
+    cfg = strategy_config.model_copy(update={"min_stop_loss_pct": 0.0, "min_stop_loss_atr_mult": 0.50})
+    engine = BreakoutStrategyEngine(cfg)
+    bar_cache = CircularBarCache(capacity=500)
+    seed_synthetic_cache(bar_cache, count=45, base_price=50000.0, step=20.0)
+
+    session_anchor = SessionAnchorData(
+        symbol="BTCUSDT",
+        session_date="2026-11-06",
+        session_start_epoch_s=1700000000.0,
+        prior_day_high=50800.0,
+        prior_day_low=49000.0,
+        prior_day_close=49500.0,
+        session_vwap=50200.0,
+    )
+
+    # ATR in synthetic cache is ~25.0. 0.50 * ATR = 12.5.
+    # We craft a bar where distance is 5.5 (< 12.5)
+    tight_signal_bar = make_candle(
+        open_p=50950.0,
+        high_p=50955.0,
+        low_p=50950.0,
+        close_p=50953.0,
+        volume=50.0,
+        epoch_s=1700000000.0 + (46 * 60),
+    )
+    bar_cache.append(tight_signal_bar)
+
+    intent = await engine.on_candle_close(
+        candle=tight_signal_bar,
+        session_anchor=session_anchor,
+        contract_spec=btc_spec,
+        bar_cache=bar_cache,
+        account_equity=10000.0,
+    )
+
+    # Must be cleanly skipped!
+    assert intent is None
+

@@ -88,6 +88,16 @@ class RiskConfig(BaseModel):
         default=1.05,
         description="Max allowed risk / budget ratio to prevent oversized min-lot positions (default: 1.05)",
     )
+    min_stop_loss_pct: float = Field(
+        default=0.10,
+        ge=0.0,
+        description="Minimum stop-loss distance percentage (e.g. 0.10%) required for pre-trade verification",
+    )
+    max_effective_leverage: float = Field(
+        default=5.0,
+        gt=0.0,
+        description="Strict maximum effective leverage (Notional / Equity) allowed per trade",
+    )
 
 
 class CircuitBreakerState(BaseModel):
@@ -271,14 +281,47 @@ class RiskManager:
         safety_buf = self.config.margin_safety_buffer
         risk_pct = risk_pct_override or self.config.max_account_risk_pct
 
-        # 1. Risk-based sizing
+        # 1. Risk-based sizing & Stop-Loss Distance Verification
         risk_budget_usd = account_equity * (risk_pct / 100.0)
         per_unit_risk = abs(trigger_price - stop_loss_price)
-        if per_unit_risk <= (spec.tick_size * 2):
-            per_unit_risk = trigger_price * 0.01
+        sl_pct = (per_unit_risk / trigger_price * 100.0) if trigger_price > 0 else 0.0
+
+        if per_unit_risk <= (spec.tick_size * 2) or (
+            self.config.min_stop_loss_pct > 0 and sl_pct < self.config.min_stop_loss_pct
+        ):
+            rejection_reason = (
+                f"Stop-Loss distance too small ({per_unit_risk:.4f} / {sl_pct:.3f}% of price). "
+                f"Minimum required is {self.config.min_stop_loss_pct:.2f}% (and > 2 ticks). "
+                f"Aborting trade to prevent noise stop-out, immediate rejection, and oversized sizing."
+            )
+            logger.warning(
+                "RiskManager Sizing [%s] REJECTED: %s",
+                spec.symbol,
+                rejection_reason,
+            )
+            return MarginCheckResult(
+                symbol=spec.symbol,
+                product_id=spec.product_id,
+                leverage=leverage,
+                available_margin=round(available_margin, 2),
+                required_margin=0.0,
+                risk_budget_usd=round(risk_budget_usd, 2),
+                risk_based_lots=0,
+                margin_based_lots=0,
+                final_lots=0,
+                is_margin_sufficient=False,
+                rejection_reason=rejection_reason,
+            )
 
         target_qty_by_risk = risk_budget_usd / per_unit_risk
         risk_based_lots = spec.round_size(target_qty_by_risk)
+
+        # Strict Cap: effective leverage (Notional / Equity) limit
+        if self.config.max_effective_leverage > 0 and trigger_price > 0:
+            max_notional_usd = account_equity * self.config.max_effective_leverage
+            max_qty_by_effective_lev = max_notional_usd / trigger_price
+            max_lots_by_effective_lev = int(math.floor(max_qty_by_effective_lev / spec.contract_value))
+            risk_based_lots = min(risk_based_lots, max_lots_by_effective_lev)
 
         # 2. Margin-based sizing
         max_usable_margin = available_margin * safety_buf

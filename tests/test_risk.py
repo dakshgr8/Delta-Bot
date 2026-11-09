@@ -358,3 +358,76 @@ def test_default_risk_manager_has_no_drawdown_or_concurrent_or_revenge_restricti
     assert reason_sym is None
 
 
+def test_risk_manager_skips_very_small_stop_loss() -> None:
+    """Verifies that RiskManager.size_position rejects trades with microscopic stop-loss distance."""
+    xrp_spec = ContractSpec(
+        product_id=93723,
+        symbol="XRPUSD",
+        contract_type="perpetual_futures",
+        contract_value=1.0,
+        tick_size=0.0001,
+        maker_commission_rate=0.0002,
+        taker_commission_rate=0.0005,
+        quoting_symbol="USD",
+    )
+    rm = RiskManager(
+        RiskConfig(
+            max_account_risk_pct=1.0,
+            max_leverage=5,
+            min_stop_loss_pct=0.10,
+        ),
+        initial_equity=197.58,
+    )
+
+    # Simulated production XRP trade: Trigger=1.1612, SL=1.1616 (distance=0.0004 / 0.034% of price)
+    res = rm.size_position(
+        spec=xrp_spec,
+        trigger_price=1.1612,
+        stop_loss_price=1.1616,
+        account_equity=197.58,
+        available_margin=197.58,
+    )
+
+    assert res.is_margin_sufficient is False
+    assert res.final_lots == 0
+    assert "Stop-Loss distance too small" in str(res.rejection_reason)
+    assert "0.034%" in str(res.rejection_reason)
+
+
+def test_risk_manager_caps_lots_by_max_effective_leverage() -> None:
+    """Verifies that risk-based sizing cannot exceed max_effective_leverage * equity."""
+    btc_spec = ContractSpec(
+        product_id=1,
+        symbol="BTCUSDT",
+        contract_type="perpetual_futures",
+        contract_value=0.001,
+        tick_size=0.5,
+        maker_commission_rate=0.0002,
+        taker_commission_rate=0.0005,
+        quoting_symbol="USD",
+    )
+    # Set max_effective_leverage = 3.0
+    rm = RiskManager(
+        RiskConfig(
+            max_account_risk_pct=1.0,
+            max_leverage=10,
+            max_effective_leverage=3.0,
+            min_stop_loss_pct=0.10,
+        ),
+        initial_equity=1000.0,
+    )
+    # Trigger = 50,000, SL = 49,940 (diff = 60 = 0.12% > 0.10%)
+    # Risk budget = $10.00. 10 / (60 * 0.001) = 166.6 -> 167 lots ($8,350 notional = 8.35x leverage)
+    # Max effective leverage = 3.0 -> Max notional = $3,000 -> 3000 / (50000 * 0.001) = 60 lots!
+    res = rm.size_position(
+        spec=btc_spec,
+        trigger_price=50000.0,
+        stop_loss_price=49940.0,
+        account_equity=1000.0,
+        available_margin=1000.0,
+    )
+    assert res.is_margin_sufficient is True
+    assert res.final_lots <= 60
+    assert res.risk_based_lots == 60
+
+

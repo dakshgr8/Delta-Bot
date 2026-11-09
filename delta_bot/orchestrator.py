@@ -98,6 +98,8 @@ class TradingBotOrchestrator:
         risk_cfg = RiskConfig(
             max_account_risk_pct=self.config.default_risk_pct,
             default_leverage=self.config.default_leverage,
+            min_stop_loss_pct=self.config.min_stop_loss_pct,
+            max_effective_leverage=self.config.max_effective_leverage,
         )
         self.risk_manager: RiskManager = risk_manager or RiskManager(
             config=risk_cfg,
@@ -149,6 +151,8 @@ class TradingBotOrchestrator:
                 symbol=sym,
                 resolution=self.timeframe,
                 risk_per_trade_pct=self.config.default_risk_pct,
+                min_stop_loss_pct=self.config.min_stop_loss_pct,
+                min_stop_loss_atr_mult=self.config.min_stop_loss_atr_mult,
             )
             strat = BreakoutStrategyEngine(config=strat_cfg)
             self._register_strategy_callbacks(strat)
@@ -399,6 +403,8 @@ class TradingBotOrchestrator:
                     symbol=target_sym,
                     resolution=self.timeframe,
                     risk_per_trade_pct=self.config.default_risk_pct,
+                    min_stop_loss_pct=self.config.min_stop_loss_pct,
+                    min_stop_loss_atr_mult=self.config.min_stop_loss_atr_mult,
                 )
                 strategy = BreakoutStrategyEngine(config=strat_cfg)
                 self._register_strategy_callbacks(strategy)

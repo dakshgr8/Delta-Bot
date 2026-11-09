@@ -268,6 +268,8 @@ class TenantInstance:
             max_account_risk_pct=config.risk_pct,
             max_leverage=config.leverage,
             daily_max_drawdown_pct=config.max_drawdown_pct,
+            min_stop_loss_pct=self.bot_config.min_stop_loss_pct,
+            max_effective_leverage=self.bot_config.max_effective_leverage,
         )
         self.risk_manager = risk_manager or RiskManager(
             config=risk_cfg,
@@ -304,6 +306,8 @@ class TenantInstance:
                     symbol=sym,
                     resolution=config.timeframe,
                     risk_per_trade_pct=config.risk_pct,
+                    min_stop_loss_pct=self.bot_config.min_stop_loss_pct,
+                    min_stop_loss_atr_mult=self.bot_config.min_stop_loss_atr_mult,
                 )
                 strat = BreakoutStrategyEngine(config=s_cfg)
                 self._register_strategy_callbacks(strat)
@@ -495,6 +499,8 @@ class TenantInstance:
                         symbol=s,
                         resolution=self.config.timeframe,
                         risk_per_trade_pct=self.config.risk_pct,
+                        min_stop_loss_pct=self.bot_config.min_stop_loss_pct,
+                        min_stop_loss_atr_mult=self.bot_config.min_stop_loss_atr_mult,
                     )
                     strat = BreakoutStrategyEngine(config=s_cfg)
                     self._register_strategy_callbacks(strat)

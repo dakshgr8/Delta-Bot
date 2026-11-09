@@ -253,6 +253,27 @@ class BotConfig(BaseSettings):
         le=20,
         description="Candle bar TTL before un-triggered breakout order invalidation",
     )
+    min_stop_loss_pct: float = Field(
+        default=0.15,
+        validation_alias=AliasChoices("MIN_STOP_LOSS_PCT", "min_stop_loss_pct"),
+        ge=0.0,
+        le=10.0,
+        description="Minimum stop loss distance percentage (e.g. 0.15%) to skip noise stop-outs and prevent oversized sizing",
+    )
+    min_stop_loss_atr_mult: float = Field(
+        default=0.25,
+        validation_alias=AliasChoices("MIN_STOP_LOSS_ATR_MULT", "min_stop_loss_atr_mult"),
+        ge=0.0,
+        le=5.0,
+        description="Minimum stop loss distance as a multiple of ATR 14 to filter out tight consolidation noise",
+    )
+    max_effective_leverage: float = Field(
+        default=5.0,
+        validation_alias=AliasChoices("MAX_EFFECTIVE_LEVERAGE", "max_effective_leverage"),
+        ge=1.0,
+        le=100.0,
+        description="Strict maximum effective leverage (Notional / Equity) allowed per trade",
+    )
 
     # Dashboard & Web Control API Authentication (Phase 8)
     dashboard_auth_token: SecretStr | None = Field(
