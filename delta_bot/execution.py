@@ -909,6 +909,7 @@ class ExecutionManager:
                 order_intent.symbol,
                 margin_result.rejection_reason,
             )
+            order_intent.cancel(margin_result.rejection_reason or "Insufficient margin", OrderStatus.CANCELLED_MANUAL)
             raise InsufficientMarginError(
                 message=f"Order rejected: {margin_result.rejection_reason}",
             )

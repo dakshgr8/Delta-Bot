@@ -61,6 +61,7 @@ class TradingStateManager:
     ) -> None:
         self.client: DeltaRestClient = client
         self.execution_manager: Any | None = execution_manager
+        self.risk_manager: Any | None = None
         self.proximity_atr_mult: float = proximity_atr_mult
         self.poll_interval_sec: float = poll_interval_sec
 
@@ -86,6 +87,14 @@ class TradingStateManager:
         self._fill_callbacks: list[Callable[[OrderIntent, float, int], Any]] = []
         self._liquidation_callbacks: list[Callable[[LiquidationAlert], Any]] = []
         self._ghost_callbacks: list[Callable[[GhostPosition], Any]] = []
+
+    def get_risk_manager(self) -> Any | None:
+        """Returns the active RiskManager instance whether via direct attachment or execution_manager."""
+        if self.risk_manager is not None:
+            return self.risk_manager
+        if self.execution_manager and getattr(self.execution_manager, "risk_manager", None):
+            return self.execution_manager.risk_manager
+        return None
 
     # -------------------------------------------------------------------------
     # Event Hook Registration
@@ -278,8 +287,9 @@ class TradingStateManager:
                     status.value,
                     exit_px,
                 )
-                if self.execution_manager and getattr(self.execution_manager, "risk_manager", None):
-                    self.execution_manager.risk_manager.record_trade_exit(
+                rm = self.get_risk_manager()
+                if rm is not None:
+                    rm.record_trade_exit(
                         pnl=target_intent.realized_pnl or 0.0,
                         current_equity=0.0,
                         symbol=target_intent.symbol,
@@ -372,8 +382,9 @@ class TradingStateManager:
                     status.value,
                     exit_px,
                 )
-                if self.execution_manager and getattr(self.execution_manager, "risk_manager", None):
-                    self.execution_manager.risk_manager.record_trade_exit(
+                rm = self.get_risk_manager()
+                if rm is not None:
+                    rm.record_trade_exit(
                         pnl=tracked_intent.realized_pnl or 0.0,
                         current_equity=0.0,
                         symbol=tracked_intent.symbol,
@@ -527,8 +538,9 @@ class TradingStateManager:
                                 tracked_intent.intent_id,
                                 pid,
                             )
-                            if self.execution_manager and getattr(self.execution_manager, "risk_manager", None):
-                                self.execution_manager.risk_manager.record_trade_exit(
+                            rm = self.get_risk_manager()
+                            if rm is not None:
+                                rm.record_trade_exit(
                                     pnl=tracked_intent.realized_pnl or 0.0,
                                     current_equity=0.0,
                                     symbol=tracked_intent.symbol,

@@ -107,6 +107,8 @@ class TradingBotOrchestrator:
             config=risk_cfg,
             initial_equity=0.0,
         )
+        if self.state_manager is not None:
+            self.state_manager.risk_manager = self.risk_manager
 
         # Execution Engine based on Mode
         if self.mode == ExecutionMode.LIVE:
@@ -498,6 +500,8 @@ class TradingBotOrchestrator:
                 reject_reason or "RiskManager position rejection",
                 OrderStatus.CANCELLED_MANUAL,
             )
+            if getattr(strategy, "pending_order", None) == order_intent:
+                strategy.pending_order = None
             return
 
         # Execution Dispatch (Live vs Paper)
@@ -515,6 +519,10 @@ class TradingBotOrchestrator:
                     e,
                     exc_info=True,
                 )
+                if not order_intent.is_closed:
+                    order_intent.cancel(f"Execution failed: {e}", OrderStatus.CANCELLED_MANUAL)
+                if getattr(strategy, "pending_order", None) == order_intent:
+                    strategy.pending_order = None
         elif self.mode == ExecutionMode.PAPER and self.paper_simulator is not None:
             try:
                 # Size lots with RiskManager dual constraints

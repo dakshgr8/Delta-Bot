@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import math
 import uuid
 from collections.abc import Awaitable, Callable
 from enum import Enum
@@ -604,7 +605,7 @@ class BreakoutStrategyEngine:
                         order.close_position(OrderStatus.CLOSED_TP, order.take_profit, candle.candle_start_epoch_s)
                         await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_TP, order.take_profit)
                         self.active_position = None
-                    elif candle.low <= order.current_stop_loss and candle.close <= order.current_stop_loss:
+                    elif candle.low <= order.current_stop_loss:
                         order.close_position(OrderStatus.CLOSED_SL, order.current_stop_loss, candle.candle_start_epoch_s)
                         await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_SL, order.current_stop_loss)
                         self.active_position = None
@@ -623,7 +624,7 @@ class BreakoutStrategyEngine:
                         order.close_position(OrderStatus.CLOSED_TP, order.take_profit, candle.candle_start_epoch_s)
                         await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_TP, order.take_profit)
                         self.active_position = None
-                    elif candle.high >= order.current_stop_loss and candle.close >= order.current_stop_loss:
+                    elif candle.high >= order.current_stop_loss:
                         order.close_position(OrderStatus.CLOSED_SL, order.current_stop_loss, candle.candle_start_epoch_s)
                         await self._emit(self._on_position_close_cb, order, OrderStatus.CLOSED_SL, order.current_stop_loss)
                         self.active_position = None
@@ -858,7 +859,7 @@ class BreakoutStrategyEngine:
                 min_lot_risk = self.config.min_contracts * contract_spec.contract_value * per_unit_risk
                 if account_equity > 0 and min_lot_risk > (capital_at_risk * 1.05):
                     logger.warning(
-                        "Bullish breakout on %s skipped: min %d lot risk ($%.2f) exceeds risk budget ($%.2f)",
+                        "Bearish breakdown on %s skipped: min %d lot risk ($%.2f) exceeds risk budget ($%.2f)",
                         self.symbol,
                         self.config.min_contracts,
                         min_lot_risk,

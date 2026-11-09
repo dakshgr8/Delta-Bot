@@ -1833,18 +1833,36 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             else:
                 target_t = auth.tenant_id
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
-            if tenant and tenant.paper_simulator is not None:
-                closed = tenant.paper_simulator.close_position(product_id)
-                if not closed:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"No active position found for product_id={product_id} in tenant '{target_t}'",
+            if tenant:
+                if tenant.mode == ExecutionMode.LIVE and tenant.execution_manager is not None:
+                    target_sym = None
+                    for sym, spec in tenant.contract_specs.items():
+                        if spec.product_id == product_id:
+                            target_sym = sym
+                            break
+                    if not target_sym:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Product ID {product_id} is not mapped to any active contract symbol in tenant '{target_t}'.",
+                        )
+                    await tenant.execution_manager.emergency_flatten(symbol=target_sym)
+                    return ControlActionResponse(
+                        status="success",
+                        action="close_position",
+                        message=f"Tenant '{tenant.config.name}' live position for {target_sym} closed.",
                     )
-                return ControlActionResponse(
-                    status="success",
-                    action="close_position",
-                    message=f"Tenant '{tenant.config.name}' position for product {product_id} closed.",
-                )
+                elif tenant.paper_simulator is not None:
+                    closed = tenant.paper_simulator.close_position(product_id)
+                    if not closed:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No active position found for product_id={product_id} in tenant '{target_t}'",
+                        )
+                    return ControlActionResponse(
+                        status="success",
+                        action="close_position",
+                        message=f"Tenant '{tenant.config.name}' position for product {product_id} closed.",
+                    )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Tenant '{target_t}' position cannot be closed.",
@@ -1853,18 +1871,36 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         target_t = tenant_id or x_tenant_id
         if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
-            if tenant and tenant.paper_simulator is not None:
-                closed = tenant.paper_simulator.close_position(product_id)
-                if not closed:
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"No active position found for product_id={product_id} in tenant '{target_t}'",
+            if tenant:
+                if tenant.mode == ExecutionMode.LIVE and tenant.execution_manager is not None:
+                    target_sym = None
+                    for sym, spec in tenant.contract_specs.items():
+                        if spec.product_id == product_id:
+                            target_sym = sym
+                            break
+                    if not target_sym:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Product ID {product_id} is not mapped to any active contract symbol in tenant '{target_t}'.",
+                        )
+                    await tenant.execution_manager.emergency_flatten(symbol=target_sym)
+                    return ControlActionResponse(
+                        status="success",
+                        action="close_position",
+                        message=f"Tenant '{tenant.config.name}' live position for {target_sym} closed.",
                     )
-                return ControlActionResponse(
-                    status="success",
-                    action="close_position",
-                    message=f"Tenant '{tenant.config.name}' position for product {product_id} closed.",
-                )
+                elif tenant.paper_simulator is not None:
+                    closed = tenant.paper_simulator.close_position(product_id)
+                    if not closed:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No active position found for product_id={product_id} in tenant '{target_t}'",
+                        )
+                    return ControlActionResponse(
+                        status="success",
+                        action="close_position",
+                        message=f"Tenant '{tenant.config.name}' position for product {product_id} closed.",
+                    )
 
         if orchestrator.mode == ExecutionMode.LIVE and orchestrator.execution_manager is not None:
             target_sym = None

@@ -276,6 +276,7 @@ class TenantInstance:
             config=risk_cfg,
             initial_equity=config.initial_balance if not (active_k and active_s) else 0.0,
         )
+        self.state_manager.risk_manager = self.risk_manager
 
         # Direct execution manager on Delta Exchange (Real or Testnet Demo)
         if active_k and active_s:
@@ -338,7 +339,11 @@ class TenantInstance:
                 )
         elif self.mode == ExecutionMode.LIVE and self.execution_manager is not None:
             try:
-                await self.execution_manager.handle_trailing_stop_ratchet(intent, old_sl, new_sl)
+                await self.execution_manager.handle_trailing_stop_ratchet(
+                    order_intent=intent,
+                    new_sl=new_sl,
+                    old_sl=old_sl,
+                )
             except Exception as e:
                 logger.error("[%s:%s] Error ratcheting SL: %s", self.config.tenant_id, intent.symbol, e)
 
@@ -347,9 +352,11 @@ class TenantInstance:
             spec = self.contract_specs.get(intent.symbol)
             if spec and intent.exchange_order_id:
                 self.paper_simulator.cancel_order(spec.product_id, intent.exchange_order_id)
+            if self.risk_manager.active_positions_count > 0:
+                self.risk_manager.active_positions_count -= 1
         elif self.mode == ExecutionMode.LIVE and self.execution_manager is not None:
             try:
-                await self.execution_manager.handle_invalidation(intent)
+                await self.execution_manager.handle_invalidation(order_intent=intent, reason=reason)
             except Exception as e:
                 logger.error("[%s:%s] Error cancelling order: %s", self.config.tenant_id, intent.symbol, e)
 
@@ -572,6 +579,7 @@ class TenantInstance:
         )
         self.rest_client = DeltaRestClient(config=self.bot_config)
         self.state_manager = TradingStateManager(client=self.rest_client)
+        self.state_manager.risk_manager = self.risk_manager
 
         if active_k and active_s:
             exec_cfg = ExecutionConfig(leverage=self.config.leverage)

@@ -220,3 +220,42 @@ def test_orchestrator_initializes_with_circuit_breaker_enabled() -> None:
     orchestrator = TradingBotOrchestrator(config=config)
     assert orchestrator.risk_manager.config.enable_drawdown_circuit_breaker is True
     assert orchestrator.risk_manager.config.daily_max_drawdown_pct == 5.0
+
+
+@pytest.mark.asyncio
+async def test_tenant_live_trailing_stop_ratchet_argument_order(
+    sample_intent: OrderIntent,
+) -> None:
+    """Verifies TenantInstance._handle_sl_ratchet passes new_sl as new_sl and old_sl as old_sl."""
+    from delta_bot.tenant import TenantConfig, TenantInstance
+    t_cfg = TenantConfig(
+        tenant_id="t_test",
+        name="Test Live Tenant",
+        mode="live",
+        delta_api_key="key",
+        delta_api_secret="secret",
+    )
+    bot_cfg = BotConfig(execution_mode="live", DELTA_API_KEY="key", DELTA_API_SECRET="secret")
+    tenant = TenantInstance(t_cfg, bot_cfg)
+    mock_exec = AsyncMock()
+    tenant.execution_manager = mock_exec
+
+    await tenant._handle_sl_ratchet(sample_intent, old_sl=50000.0, new_sl=50500.0)
+
+    mock_exec.handle_trailing_stop_ratchet.assert_awaited_once_with(
+        order_intent=sample_intent,
+        new_sl=50500.0,
+        old_sl=50000.0,
+    )
+
+
+def test_state_manager_get_risk_manager_direct_or_execution() -> None:
+    """Verifies TradingStateManager.get_risk_manager returns direct risk_manager in paper mode."""
+    mock_client = AsyncMock(spec=DeltaRestClient)
+    state_mgr = TradingStateManager(client=mock_client)
+    assert state_mgr.get_risk_manager() is None
+
+    mock_rm = MagicMock()
+    state_mgr.risk_manager = mock_rm
+    assert state_mgr.get_risk_manager() is mock_rm
+
