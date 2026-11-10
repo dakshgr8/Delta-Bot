@@ -642,18 +642,20 @@ class TenantInstance:
         try:
             balances = await self.rest_client.get_wallet_balances()
             if balances:
-                # Delta India collateral assets: prioritize USDT, USD, then INR
+                # Delta India collateral assets: strictly prioritize USD (settlement asset for perpetuals), then USDT, then INR
                 positive_balances = [b for b in balances if float(b.balance) > 0]
                 target_bal = None
                 if positive_balances:
-                    target_bal = next(
-                        (b for b in positive_balances if b.asset_symbol.upper() in ("USDT", "USD", "INR")),
-                        max(positive_balances, key=lambda b: float(b.balance)),
+                    target_bal = (
+                        next((b for b in positive_balances if b.asset_symbol.upper() == "USD"), None)
+                        or next((b for b in positive_balances if b.asset_symbol.upper() == "USDT"), None)
+                        or next((b for b in positive_balances if b.asset_symbol.upper() == "INR"), None)
+                        or max(positive_balances, key=lambda b: float(b.balance))
                     )
                 else:
                     target_bal = (
-                        next((b for b in balances if b.asset_symbol.upper() == "USDT"), None)
-                        or next((b for b in balances if b.asset_symbol.upper() == "USD"), None)
+                        next((b for b in balances if b.asset_symbol.upper() == "USD"), None)
+                        or next((b for b in balances if b.asset_symbol.upper() == "USDT"), None)
                         or next((b for b in balances if b.asset_symbol.upper() == "INR"), None)
                         or balances[0]
                     )
@@ -693,6 +695,7 @@ class TenantInstance:
             # 1. Process and guard open orders
             formatted_orders: list[dict[str, Any]] = []
             active_order_ids: set[int] = set()
+            active_pos_pids = {p.product_id for p in positions if getattr(p, "size", 0) != 0}
             for o in open_orders:
                 if getattr(o, "is_open", False) or str(getattr(o, "state", "open")).lower() in ("open", "pending"):
                     active_order_ids.add(o.id)
@@ -710,7 +713,8 @@ class TenantInstance:
                     ttl_rem = max(0, ttl_bars - bars_elapsed)
 
                     # Guard: If resting entry stop order is missing attached brackets, attach them
-                    if o.stop_price is not None and (
+                    # Only attempt on open resting entry stop orders (never child protection orders for active positions)
+                    if o.product_id not in active_pos_pids and o.stop_price is not None and (
                         getattr(o, "bracket_stop_loss_price", None) is None
                         or getattr(o, "bracket_take_profit_price", None) is None
                     ):

@@ -335,6 +335,12 @@ class RiskManager:
 
         target_qty_by_risk = risk_budget_usd / per_unit_risk
         risk_based_lots = int(math.floor(target_qty_by_risk / spec.contract_value)) if spec.contract_value > 0 else 0
+        # Allow 1 contract if floor rounded to 0 but 1 lot risk is within min_lot_risk_tolerance (e.g. 1.008% vs 1.0%)
+        if risk_based_lots == 0 and spec.contract_value > 0:
+            min_1_lot_risk = 1 * spec.contract_value * per_unit_risk
+            max_allowed_risk = risk_budget_usd * self.config.min_lot_risk_tolerance
+            if min_1_lot_risk <= max_allowed_risk:
+                risk_based_lots = 1
 
         # Strict Cap: effective leverage (Notional / Equity) limit
         if self.config.max_effective_leverage > 0 and trigger_price > 0:

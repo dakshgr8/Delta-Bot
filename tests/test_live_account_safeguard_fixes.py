@@ -514,4 +514,130 @@ async def test_strategy_weekend_shield_skips_signals_on_weekend(btc_spec: Contra
     assert intent is None
 
 
+def test_risk_manager_allows_single_contract_when_sl_risk_is_slightly_above_budget_within_tolerance() -> None:
+    """Verifies that 1 contract is allowed when target lot size floors to 0 but 1 lot risk is within min_lot_risk_tolerance (e.g. 1.008% vs 1.0%)."""
+    sol_spec = ContractSpec(
+        product_id=92572,
+        symbol="SOLUSD",
+        contract_type="perpetual_futures",
+        contract_value=1.0,
+        tick_size=0.0001,
+        maker_commission_rate=0.0002,
+        taker_commission_rate=0.0005,
+        quoting_symbol="USD",
+    )
+    rm = RiskManager(
+        RiskConfig(
+            max_account_risk_pct=1.0,
+            max_leverage=50,
+            min_stop_loss_pct=0.15,
+            min_lot_risk_tolerance=1.05,
+            max_effective_leverage=5.0,
+        )
+    )
+    # Entry: 87.075, SL: 88.3811 -> risk = 1.3061 USD
+    # Equity = 129.55 USD -> 1% budget = 1.2955 USD
+    # 1.3061 / 1.2955 = 1.0081 (0.8% over budget, within 5% tolerance 1.05)
+    res = rm.size_position(
+        spec=sol_spec,
+        trigger_price=87.075,
+        stop_loss_price=88.3811,
+        account_equity=129.55,
+        available_margin=129.55,
+        risk_pct_override=1.0,
+    )
+    assert res.is_margin_sufficient is True
+    assert res.final_lots == 1
+    assert res.risk_based_lots == 1
+
+
+def test_risk_manager_rejects_single_contract_when_sl_risk_exceeds_tolerance() -> None:
+    """Verifies that 1 contract is rejected when 1 lot risk significantly exceeds risk budget tolerance."""
+    sol_spec = ContractSpec(
+        product_id=92572,
+        symbol="SOLUSD",
+        contract_type="perpetual_futures",
+        contract_value=1.0,
+        tick_size=0.0001,
+        maker_commission_rate=0.0002,
+        taker_commission_rate=0.0005,
+        quoting_symbol="USD",
+    )
+    rm = RiskManager(
+        RiskConfig(
+            max_account_risk_pct=1.0,
+            max_leverage=50,
+            min_stop_loss_pct=0.15,
+            min_lot_risk_tolerance=1.05,
+            max_effective_leverage=5.0,
+        )
+    )
+    # Entry: 87.075, SL: 89.5000 -> risk = 2.425 USD
+    # 2.425 / 1.2955 = 1.87 (87% over budget, far exceeds 1.05 tolerance)
+    res = rm.size_position(
+        spec=sol_spec,
+        trigger_price=87.075,
+        stop_loss_price=89.5000,
+        account_equity=129.55,
+        available_margin=129.55,
+        risk_pct_override=1.0,
+    )
+    assert res.is_margin_sufficient is False
+    assert res.final_lots == 0
+    assert "exceeds risk allocation" in str(res.rejection_reason)
+
+
+@pytest.mark.asyncio
+async def test_check_and_size_margin_strictly_matches_quoting_symbol_first() -> None:
+    """Verifies that check_and_size_margin prioritizes exact contract quoting asset (USD) over testnet USDT credit."""
+    from unittest.mock import AsyncMock
+    from delta_bot.execution import ExecutionManager, ExecutionConfig
+    from delta_bot.models import WalletBalance
+
+    sol_spec = ContractSpec(
+        product_id=92572,
+        symbol="SOLUSD",
+        contract_type="perpetual_futures",
+        contract_value=1.0,
+        tick_size=0.0001,
+        maker_commission_rate=0.0002,
+        taker_commission_rate=0.0005,
+        quoting_symbol="USD",
+    )
+    client_mock = AsyncMock()
+    client_mock.config.has_valid_credentials = lambda: True
+    # Even if USDT comes first in Delta API response with 1000 balance:
+    client_mock.get_wallet_balances.return_value = [
+        WalletBalance(asset_id=2, asset_symbol="USDT", balance=1000.0, available_balance=1000.0),
+        WalletBalance(asset_id=3, asset_symbol="USD", balance=129.55, available_balance=129.55),
+    ]
+
+    rm = RiskManager(
+        RiskConfig(
+            max_account_risk_pct=1.0,
+            max_leverage=50,
+            min_stop_loss_pct=0.15,
+            min_lot_risk_tolerance=1.05,
+            max_effective_leverage=5.0,
+        )
+    )
+    em = ExecutionManager(
+        client=client_mock,
+        config=ExecutionConfig(leverage=50),
+        risk_manager=rm,
+    )
+
+    res = await em.check_and_size_margin(
+        spec=sol_spec,
+        trigger_price=87.075,
+        stop_loss_price=88.3811,
+        account_equity=0.0,  # Unset equity, will resolve from wallet balance
+        risk_pct=1.0,
+    )
+    # Must use USD wallet (129.55) -> 1 lot, NOT USDT wallet (1000) -> 7 lots
+    assert res.available_margin == 129.55
+    assert res.final_lots == 1
+
+
+
 
