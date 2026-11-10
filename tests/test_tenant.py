@@ -897,6 +897,9 @@ async def test_unfunded_live_tenant_safely_skips_trading_without_circuit_breaker
 
 def test_tenant_deduplication_and_email_slug_reuse(tmp_path: Any) -> None:
     """Verifies that get_or_create_user_tenant reuses email-based tenants without duplicate generation."""
+    from unittest.mock import AsyncMock
+    from delta_bot.models import PositionInfo, WalletBalance, ExchangeOrder
+    from delta_bot.strategy import SignalType
     mgr = TenantManager(storage_path=str(tmp_path / "tenants.json"))
 
     # 1. Pre-register a tenant with tenant_id matching email handle
@@ -1158,7 +1161,9 @@ async def test_tenant_live_positions_and_resting_orders_sync_from_delta_api(mult
     """Verifies that tenant sync_live_metrics queries Delta API for active positions and resting orders."""
     import uuid
     from unittest.mock import AsyncMock
+    from unittest.mock import AsyncMock
     from delta_bot.models import PositionInfo, WalletBalance, ExchangeOrder
+    from delta_bot.strategy import SignalType
     mgr = multi_tenant_orchestrator.tenant_manager
     t_id = f"live_desk_sync_{uuid.uuid4().hex[:6]}"
     cfg = TenantConfig(
@@ -1259,6 +1264,153 @@ async def test_tenant_live_positions_and_resting_orders_sync_from_delta_api(mult
         assert summary["resting_orders_count"] == 2
     finally:
         mgr.tenants.pop(t_id, None)
+
+
+@pytest.mark.asyncio
+async def test_sync_live_metrics_reconciles_active_position_and_instant_breakeven(tmp_path: Path) -> None:
+    """
+    Verifies that live positions from Delta Exchange are reconciled into strategy.active_position,
+    directional SL/TP orders are correctly matched even with duplicate resting orders,
+    and positions that reached +1.0R immediately ratchet stop loss to break-even.
+    """
+    from unittest.mock import AsyncMock
+    from delta_bot.models import PositionInfo, WalletBalance, ExchangeOrder
+    from delta_bot.strategy import SignalType
+    mgr = TenantManager(storage_path=str(tmp_path / "tenants.json"))
+    sol_spec = ContractSpec(
+        product_id=14823,
+        symbol="SOLUSD",
+        contract_type="perpetual_futures",
+        contract_value=1.0,
+        tick_size=0.001,
+        maker_commission_rate=0.0002,
+        taker_commission_rate=0.0005,
+    )
+    t_id = "test_trailing_reconcile"
+    tenant = mgr.create_tenant(
+        TenantConfig(
+            tenant_id=t_id,
+            name="Trailing Reconcile Tenant",
+            mode="real",
+            initial_balance=100.0,
+            delta_api_key="real_k",
+            delta_api_secret="real_s",
+            symbols=["SOLUSD"],
+            leverage=10,
+            risk_pct=1.0,
+            timeframe="5m",
+            trail_trigger_rr=1.0,
+            trailing_stop=True,
+            trailing_mode="candle",
+        ),
+        contract_specs={"SOLUSD": sol_spec},
+    )
+
+    mock_balances = [
+        WalletBalance(asset_id=1, asset_symbol="USD", balance=180.0, available_balance=160.0, unrealized_pnl=5.25),
+    ]
+    # Live Short SOL position: entry 84.142, mark 82.38 (profit > 1.0R)
+    mock_positions = [
+        PositionInfo(
+            product_id=14823,
+            symbol="SOLUSD",
+            size=-3,
+            entry_price=84.142,
+            mark_price=82.38,
+            margin=4.24,
+            unrealized_pnl=5.25,
+            liquidation_price=85.135,
+        ),
+    ]
+    mock_orders = [
+        # Older resting SL
+        ExchangeOrder(
+            id=1669104284,
+            product_id=14823,
+            symbol="SOLUSD",
+            side="buy",
+            order_type="stop_market_order",
+            size=3,
+            stop_price=85.2,
+            state="open",
+        ),
+        # Older TP resting as stop order below entry price
+        ExchangeOrder(
+            id=1669104285,
+            product_id=14823,
+            symbol="SOLUSD",
+            side="buy",
+            order_type="stop_market_order",
+            size=3,
+            stop_price=77.2497,
+            state="open",
+        ),
+        # Latest real SL order above entry price
+        ExchangeOrder(
+            id=1669104550,
+            product_id=14823,
+            symbol="SOLUSD",
+            side="buy",
+            order_type="stop_market_order",
+            size=3,
+            stop_price=85.2,
+            state="open",
+        ),
+        # Active Take Profit limit order
+        ExchangeOrder(
+            id=1669104685,
+            product_id=14823,
+            symbol="SOLUSD",
+            side="buy",
+            order_type="limit_order",
+            size=3,
+            limit_price=77.2497,
+            state="open",
+        ),
+    ]
+
+    tenant.rest_client.get_wallet_balances = AsyncMock(return_value=mock_balances)
+    tenant.rest_client.get_open_positions = AsyncMock(return_value=mock_positions)
+    tenant.rest_client.get_open_orders = AsyncMock(return_value=mock_orders)
+    tenant.execution_manager.handle_trailing_stop_ratchet = AsyncMock(return_value=True)
+
+    try:
+        # Initially strategy.active_position is None (e.g. fresh reboot)
+        strat = tenant.strategies["SOLUSD"]
+        assert strat.active_position is None
+
+        # Run sync_live_metrics
+        await tenant.sync_live_metrics()
+
+        # 1. Verify active position reconstructed and bound
+        act = strat.active_position
+        assert act is not None
+        assert act.signal_type == SignalType.BEARISH_BREAKDOWN
+        assert act.contract_lots == 3
+        assert act.fill_price == 84.142
+        assert act.child_stop_loss_order_id == 1669104550
+        assert act.child_take_profit_order_id == 1669104685
+        assert act.r1_hit is True
+
+        # 2. Verify instant breakeven ratchet executed
+        assert tenant.execution_manager.handle_trailing_stop_ratchet.called
+        call_kwargs = tenant.execution_manager.handle_trailing_stop_ratchet.call_args.kwargs
+        assert call_kwargs["new_sl"] == 84.141  # 84.142 - tick_size (0.001)
+        assert call_kwargs["old_sl"] == 85.2
+        assert act.is_breakeven_locked is True
+        assert act.current_stop_loss == 84.141
+
+        # 3. Verify position clearing when position closes on Delta Exchange
+        tenant.rest_client.get_open_positions = AsyncMock(return_value=[])
+        await tenant.sync_live_metrics()
+        assert strat.active_position is None
+
+    finally:
+        tenant._is_stopped = True
+        if tenant._periodic_sync_task and not tenant._periodic_sync_task.done():
+            tenant._periodic_sync_task.cancel()
+        mgr.tenants.pop(t_id, None)
+
 
 
 

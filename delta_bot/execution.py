@@ -1063,7 +1063,7 @@ class ExecutionManager:
                 find_active_stop_loss_order(product_id, exit_side), caches it, and edits via PUT /v2/orders.
              c) Fallback: Updates position-level bracket via POST /v2/orders/bracket.
         """
-        if order_intent.exchange_order_id is None:
+        if order_intent.exchange_order_id is None and order_intent.child_stop_loss_order_id is None:
             return False
 
         # Directional Guard: never loosen risk

@@ -244,6 +244,8 @@ class TenantInstance:
         self.last_sync_error: str | None = None
         self.order_to_base_id: dict[str, str] = {}
         self.tenant_manager: Any | None = None
+        self._periodic_sync_task: asyncio.Task | None = None
+        self._is_stopped: bool = False
 
         # Active environment URLs and credentials
         active_k = config.get_active_api_key()
@@ -331,8 +333,37 @@ class TenantInstance:
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(self.sync_live_metrics())
+                if self.mode.is_real:
+                    self.start_periodic_sync()
             except RuntimeError:
                 pass
+
+    def start_periodic_sync(self) -> None:
+        """Starts background periodic sync worker for live tenants."""
+        if self._periodic_sync_task is not None and not self._periodic_sync_task.done():
+            return
+        if not self.mode.is_real or not self.config.get_active_api_key():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+            self._periodic_sync_task = loop.create_task(
+                self._periodic_sync_worker(),
+                name=f"Tenant-{self.config.tenant_id}-PeriodicSync",
+            )
+        except RuntimeError:
+            pass
+
+    async def _periodic_sync_worker(self) -> None:
+        """Periodic background sync loop ensuring live metrics and trailing state stay fresh."""
+        while not self._is_stopped:
+            try:
+                await asyncio.sleep(15.0)
+                if self.mode.is_real and self.config.get_active_api_key():
+                    await self.sync_live_metrics()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.debug("[TENANT %s] Error in periodic sync worker: %s", self.config.tenant_id, e)
 
     def _register_strategy_callbacks(self, strategy: BreakoutStrategyEngine) -> None:
         strategy.on_sl_ratchet(self._handle_sl_ratchet)
@@ -666,6 +697,8 @@ class TenantInstance:
 
     async def sync_live_metrics(self) -> None:
         """Pulls real wallet balances, available margin, and positions from Delta Exchange."""
+        if self.mode.is_real and (self._periodic_sync_task is None or self._periodic_sync_task.done()):
+            self.start_periodic_sync()
         active_k = self.config.get_active_api_key()
         active_s = self.config.get_active_api_secret()
         if not active_k or not active_s:
@@ -859,7 +892,20 @@ class TenantInstance:
                     )
 
                     exit_side = "sell" if pos.size > 0 else "buy"
-                    matching_sl = next(
+                    is_pos_short = pos.size < 0
+
+                    # Strictly directional SL matching:
+                    # For Short (exit_side=="buy"): SL must be above entry_price
+                    # For Long (exit_side=="sell"): SL must be below entry_price
+                    candidate_sl_orders = [
+                        o for o in open_orders
+                        if o.product_id == pos.product_id
+                        and str(getattr(o, "side", "")).lower() == exit_side
+                        and getattr(o, "stop_price", None) is not None
+                        and ((o.stop_price > pos.entry_price) if is_pos_short else (o.stop_price < pos.entry_price))
+                    ]
+                    candidate_sl_orders.sort(key=lambda o: getattr(o, "id", 0), reverse=True)
+                    matching_sl = candidate_sl_orders[0] if candidate_sl_orders else next(
                         (
                             o for o in open_orders
                             if o.product_id == pos.product_id
@@ -868,18 +914,22 @@ class TenantInstance:
                         ),
                         None,
                     )
-                    matching_tp = next(
-                        (
-                            o for o in open_orders
-                            if o.product_id == pos.product_id
-                            and str(getattr(o, "side", "")).lower() == exit_side
-                            and (
-                                getattr(o, "order_type", "") == "limit_order"
-                                or getattr(o, "bracket_take_profit_price", None) is not None
-                            )
-                        ),
-                        None,
-                    )
+
+                    # Strictly directional TP matching:
+                    # For Short: TP is limit or stop below entry_price
+                    # For Long: TP is limit or stop above entry_price
+                    candidate_tp_orders = [
+                        o for o in open_orders
+                        if o.product_id == pos.product_id
+                        and str(getattr(o, "side", "")).lower() == exit_side
+                        and (
+                            getattr(o, "bracket_take_profit_price", None) is not None
+                            or (getattr(o, "limit_price", None) is not None and ((o.limit_price < pos.entry_price) if is_pos_short else (o.limit_price > pos.entry_price)))
+                            or (getattr(o, "stop_price", None) is not None and ((o.stop_price < pos.entry_price) if is_pos_short else (o.stop_price > pos.entry_price)))
+                        )
+                    ]
+                    candidate_tp_orders.sort(key=lambda o: getattr(o, "id", 0), reverse=True)
+                    matching_tp = candidate_tp_orders[0] if candidate_tp_orders else None
 
                     # Guard: If active live position has NO Stop Loss on exchange, arm it immediately
                     if matching_sl is None and self.execution_manager is not None:
@@ -933,6 +983,172 @@ class TenantInstance:
                     pos_pnl_acc += pos.unrealized_pnl
 
             self.live_positions = formatted_positions
+
+            # -----------------------------------------------------------------
+            # 3. Synchronize Active Positions with In-Memory Strategy Engines
+            # -----------------------------------------------------------------
+            active_syms: set[str] = set()
+            for pos_item in formatted_positions:
+                p_sym = pos_item["symbol"]
+                active_syms.add(p_sym)
+                strat = self.strategies.get(p_sym)
+                if strat is None:
+                    continue
+
+                p_side_is_short = pos_item["side"] == "SELL"
+                entry_px = float(pos_item["entry_price"])
+                mark_px = float(pos_item["mark_price"])
+                sl_px = float(pos_item["stop_loss_price"]) if pos_item.get("stop_loss_price") is not None else None
+                tp_px = float(pos_item["take_profit_price"]) if pos_item.get("take_profit_price") is not None else None
+                child_sl_id = pos_item.get("child_stop_loss_order_id")
+                child_tp_id = pos_item.get("child_take_profit_order_id")
+                lots = int(pos_item["size"])
+                nat_val = float(pos_item["native_value"])
+                pid = int(pos_item["product_id"])
+                p_spec = self.contract_specs.get(p_sym)
+
+                # Check if an existing pending order filled
+                if strat.pending_order is not None:
+                    p_order = strat.pending_order
+                    p_order.status = OrderStatus.TRIGGERED
+                    p_order.fill_price = entry_px
+                    p_order.filled_size = lots
+                    if child_sl_id:
+                        p_order.child_stop_loss_order_id = child_sl_id
+                    if child_tp_id:
+                        p_order.child_take_profit_order_id = child_tp_id
+                    strat.active_position = p_order
+                    strat.pending_order = None
+                    logger.info(
+                        "[TENANT %s] Promoted filled order to active position for %s: Lots=%d @ %.4f",
+                        self.config.tenant_id,
+                        p_sym,
+                        lots,
+                        entry_px,
+                    )
+
+                # Reconstruct OrderIntent if missing (e.g. after restart or external fill)
+                if strat.active_position is None:
+                    calc_sl = sl_px if sl_px is not None else (
+                        p_spec.round_price(entry_px * (1.015 if p_side_is_short else 0.985)) if p_spec else round(entry_px * (1.015 if p_side_is_short else 0.985), 4)
+                    )
+                    calc_tp = tp_px if tp_px is not None else (
+                        p_spec.round_price(entry_px * (0.97 if p_side_is_short else 1.03)) if p_spec else round(entry_px * (0.97 if p_side_is_short else 1.03), 4)
+                    )
+                    intent = OrderIntent(
+                        symbol=p_sym,
+                        signal_type=SignalType.BEARISH_BREAKDOWN if p_side_is_short else SignalType.BULLISH_BREAKOUT,
+                        status=OrderStatus.TRIGGERED,
+                        trigger_price=entry_px,
+                        initial_stop_loss=calc_sl,
+                        current_stop_loss=calc_sl,
+                        take_profit=calc_tp,
+                        rr_ratio=getattr(strat.config, "rr_ratio", 2.0),
+                        contract_lots=lots,
+                        target_asset_qty=nat_val,
+                        capital_at_risk_usd=round(abs(entry_px - calc_sl) * nat_val, 4),
+                        signal_candle_high=entry_px,
+                        signal_candle_low=entry_px,
+                        signal_candle_close=entry_px,
+                        signal_bar_time=time.time(),
+                        exchange_order_id=child_sl_id or 1,
+                        child_stop_loss_order_id=child_sl_id,
+                        child_take_profit_order_id=child_tp_id,
+                        product_id=pid,
+                        leverage=float(self.config.leverage),
+                        created_at_epoch_s=time.time(),
+                        fill_price=entry_px,
+                        filled_size=lots,
+                    )
+                    # Check +1R trigger condition immediately
+                    r_dist = abs(entry_px - calc_sl)
+                    trigger_dist = r_dist * getattr(strat.config, "trail_trigger_rr", 1.0)
+                    if trigger_dist > 0:
+                        if p_side_is_short and mark_px <= (entry_px - trigger_dist):
+                            intent.r1_hit = True
+                        elif not p_side_is_short and mark_px >= (entry_px + trigger_dist):
+                            intent.r1_hit = True
+
+                    strat.active_position = intent
+                    logger.info(
+                        "[TENANT %s] Reconstructed active position for %s: %s Lots=%d @ %.4f (SL=%.4f, TP=%.4f, ChildSL=%s, r1_hit=%s)",
+                        self.config.tenant_id,
+                        p_sym,
+                        intent.signal_type.value,
+                        intent.contract_lots,
+                        intent.fill_price,
+                        intent.current_stop_loss,
+                        intent.take_profit,
+                        intent.child_stop_loss_order_id,
+                        intent.r1_hit,
+                    )
+                else:
+                    pos_obj = strat.active_position
+                    if child_sl_id and pos_obj.child_stop_loss_order_id != child_sl_id:
+                        pos_obj.child_stop_loss_order_id = child_sl_id
+                    if child_tp_id and pos_obj.child_take_profit_order_id != child_tp_id:
+                        pos_obj.child_take_profit_order_id = child_tp_id
+                    if sl_px and abs(pos_obj.current_stop_loss - sl_px) > 1e-6:
+                        pos_obj.current_stop_loss = sl_px
+
+                # Sync to state_manager
+                if hasattr(self, "state_manager") and self.state_manager is not None:
+                    self.state_manager.register_intent(strat.active_position)
+                    if child_sl_id:
+                        self.state_manager._intents_by_child_sl_id[child_sl_id] = strat.active_position
+                    if child_tp_id:
+                        self.state_manager._intents_by_child_tp_id[child_tp_id] = strat.active_position
+
+                # Instant Breakeven / Trailing check for positions where 1R target is already reached
+                act_pos = strat.active_position
+                if act_pos is not None and act_pos.r1_hit and self.execution_manager is not None:
+                    p_spec = self.contract_specs.get(p_sym)
+                    tick_sz = p_spec.tick_size if p_spec else 0.001
+                    be_px = (
+                        p_spec.round_price(entry_px - tick_sz)
+                        if (p_spec and p_side_is_short)
+                        else (
+                            p_spec.round_price(entry_px + tick_sz)
+                            if p_spec
+                            else round(entry_px + (tick_sz if not p_side_is_short else -tick_sz), 4)
+                        )
+                    )
+                    # If current SL is worse than breakeven, immediately ratchet to breakeven
+                    need_be_ratchet = (
+                        (p_side_is_short and act_pos.current_stop_loss > be_px)
+                        or (not p_side_is_short and act_pos.current_stop_loss < be_px)
+                    )
+                    if need_be_ratchet and act_pos.child_stop_loss_order_id:
+                        logger.info(
+                            "[TENANT %s] 🚀 Instant Breakeven ratchet for %s: SL %.4f -> Breakeven %.4f (1R reached)",
+                            self.config.tenant_id,
+                            p_sym,
+                            act_pos.current_stop_loss,
+                            be_px,
+                        )
+                        old_sl = act_pos.current_stop_loss
+                        if act_pos.ratchet_sl(be_px):
+                            act_pos.is_breakeven_locked = True
+                            try:
+                                await self.execution_manager.handle_trailing_stop_ratchet(
+                                    order_intent=act_pos,
+                                    new_sl=be_px,
+                                    old_sl=old_sl,
+                                )
+                                # Update displayed SL in formatted_positions
+                                pos_item["stop_loss_price"] = be_px
+                            except Exception as be_err:
+                                logger.error("[TENANT %s] Failed instant breakeven ratchet on exchange: %s", self.config.tenant_id, be_err)
+
+            # Clear strategy active_position if closed on Delta Exchange
+            for s_sym, strat in self.strategies.items():
+                if strat.active_position is not None and s_sym not in active_syms:
+                    logger.info(
+                        "[TENANT %s] Live position for %s closed on Delta Exchange. Clearing active_position.",
+                        self.config.tenant_id,
+                        s_sym,
+                    )
+                    strat.active_position = None
             if formatted_positions and self.live_unrealized_pnl == 0.0:
                 self.live_unrealized_pnl = round(pos_pnl_acc, 4)
                 self.live_equity = round(self.live_balance + self.live_unrealized_pnl, 4)
@@ -1687,8 +1903,12 @@ class TenantManager:
                 symbols = r_row.get("symbols") or d_row.get("symbols") or ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"]
                 lev = int(r_row.get("leverage") or d_row.get("leverage") or 5)
                 risk = float(r_row.get("risk_pct") or d_row.get("risk_pct") or 1.0)
-                tf = r_row.get("timeframe") or d_row.get("timeframe") or "1m"
+                tf = r_row.get("timeframe") or d_row.get("timeframe") or "5m"
                 max_dd = float(r_row.get("max_drawdown_pct") or d_row.get("max_drawdown_pct") or 4.0)
+                pd_mode = r_row.get("pd_condition_mode") or d_row.get("pd_condition_mode") or "either"
+                tr_rr = float(r_row.get("trail_trigger_rr") or d_row.get("trail_trigger_rr") or 1.0)
+                tr_stop = bool(r_row.get("trailing_stop") if r_row.get("trailing_stop") is not None else d_row.get("trailing_stop", True))
+                tr_mode = r_row.get("trailing_mode") or d_row.get("trailing_mode") or "candle"
 
                 # Determine active mode and running state from separated tables
                 r_active = bool(r_row.get("is_active", False))
@@ -1738,6 +1958,10 @@ class TenantManager:
                     risk_pct=risk,
                     leverage=lev,
                     timeframe=tf,
+                    pd_condition_mode=pd_mode,
+                    trail_trigger_rr=tr_rr,
+                    trailing_stop=tr_stop,
+                    trailing_mode=tr_mode,
                     max_drawdown_pct=max_dd,
                     symbols=symbols,
                     is_active=is_active,

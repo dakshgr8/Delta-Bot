@@ -2832,11 +2832,20 @@ async def _ws_broadcaster_worker(
                     paused_map = dict(ws_manager.connection_paused)
 
                 live_connections = [ws for ws in connections if not paused_map.get(ws, False)]
+                # Periodically refresh live metrics from Delta Exchange India for all live tenants
+                now_ts = time.time()
+                if hasattr(orchestrator, "tenant_manager"):
+                    for t_inst in orchestrator.tenant_manager.tenants.values():
+                        if t_inst.mode.is_real and t_inst.config.get_active_api_key():
+                            if now_ts - getattr(t_inst, "last_sync_time", 0.0) >= 15.0:
+                                try:
+                                    await t_inst.sync_live_metrics()
+                                except Exception as sync_e:
+                                    logger.debug("Live metrics periodic sync failed for %s: %s", t_inst.config.tenant_id, sync_e)
+
                 if not live_connections:
                     continue
 
-                # Periodically refresh live metrics from Delta Exchange India for live tenants
-                now_ts = time.time()
                 for ws in live_connections:
                     t_id = tenant_map.get(ws, "default")
                     u_id = user_map.get(ws)

@@ -866,6 +866,7 @@ class DeltaRestClient:
         self,
         product_id: int,
         side: str,
+        entry_price: float | None = None,
     ) -> ExchangeOrder | None:
         """
         Locates the active resting child Stop Loss order on Delta Exchange
@@ -873,10 +874,20 @@ class DeltaRestClient:
         """
         open_orders = await self.get_open_orders(product_id=product_id)
         clean_side = side.lower()
-        for order in open_orders:
-            if order.side.lower() == clean_side and order.stop_price is not None:
-                return order
-        return None
+        candidates = [
+            order for order in open_orders
+            if order.side.lower() == clean_side and order.stop_price is not None
+        ]
+        if entry_price is not None and len(candidates) > 1:
+            # Directional SL check: Short exits via BUY stop above entry; Long exits via SELL stop below entry
+            directional = [
+                o for o in candidates
+                if ((o.stop_price > entry_price) if clean_side == "buy" else (o.stop_price < entry_price))
+            ]
+            if directional:
+                candidates = directional
+        candidates.sort(key=lambda o: getattr(o, "id", 0), reverse=True)
+        return candidates[0] if candidates else None
 
     async def get_open_orders(self, product_id: int | None = None) -> list[ExchangeOrder]:
         """

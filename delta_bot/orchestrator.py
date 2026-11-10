@@ -620,6 +620,13 @@ class TradingBotOrchestrator:
 
             tenant.register_contract_spec(spec)
             try:
+                # Keep tenant live metrics and active position reconciled before candle close
+                if tenant.mode == ExecutionMode.LIVE and (time.time() - getattr(tenant, "last_sync_time", 0.0) > 15.0):
+                    try:
+                        await tenant.sync_live_metrics()
+                    except Exception as sync_err:
+                        logger.debug("[TENANT %s] Pre-candle sync failed: %s", t_id, sync_err)
+
                 t_equity = await tenant.get_account_equity()
                 if tenant.mode == ExecutionMode.LIVE and t_equity <= 0:
                     continue  # Unfunded live account ($0.00), skip signal evaluation
