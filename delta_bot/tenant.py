@@ -166,15 +166,25 @@ class TenantConfig(BaseModel):
 
     def get_active_api_key(self) -> str:
         if self.is_demo:
-            k = self.demo_api_key.strip()
-            return k if k else self.delta_api_key.strip()
-        return self.delta_api_key.strip()
+            raw = self.demo_api_key.strip()
+            if not raw:
+                raw = self.delta_api_key.strip()
+        else:
+            raw = self.delta_api_key.strip()
+        if raw.startswith("enc:"):
+            raw = decrypt_secret(raw)
+        return raw.strip()
 
     def get_active_api_secret(self) -> str:
         if self.is_demo:
-            s = self.demo_api_secret.strip()
-            return s if s else self.delta_api_secret.strip()
-        return self.delta_api_secret.strip()
+            raw = self.demo_api_secret.strip()
+            if not raw:
+                raw = self.delta_api_secret.strip()
+        else:
+            raw = self.delta_api_secret.strip()
+        if raw.startswith("enc:"):
+            raw = decrypt_secret(raw)
+        return raw.strip()
 
     def get_active_base_url(self) -> str:
         if self.is_demo:
@@ -342,7 +352,7 @@ class TenantInstance:
         """Starts background periodic sync worker for live tenants."""
         if self._periodic_sync_task is not None and not self._periodic_sync_task.done():
             return
-        if not self.mode.is_real or not self.config.get_active_api_key():
+        if not self.mode.is_real or not self.config.get_active_api_key() or not self.is_running:
             return
         try:
             loop = asyncio.get_running_loop()
@@ -355,10 +365,10 @@ class TenantInstance:
 
     async def _periodic_sync_worker(self) -> None:
         """Periodic background sync loop ensuring live metrics and trailing state stay fresh."""
-        while not self._is_stopped:
+        while not self._is_stopped and self.is_running:
             try:
                 await asyncio.sleep(15.0)
-                if self.mode.is_real and self.config.get_active_api_key():
+                if self.mode.is_real and self.config.get_active_api_key() and self.is_running:
                     await self.sync_live_metrics()
             except asyncio.CancelledError:
                 break
@@ -1171,6 +1181,8 @@ class TenantInstance:
             self.live_realized_pnl = 0.0
             self.live_positions = []
             self.live_orders = []
+            # Cooldown backoff on auth failure so failed keys do not flood logs or get IP banned
+            self.last_sync_time = time.time() + 45.0
             err_code = getattr(auth_err, "error_code", "")
             resp_body = getattr(auth_err, "response_body", {}) or {}
             client_ip = (resp_body.get("context") or {}).get("client_ip")
@@ -1191,6 +1203,7 @@ class TenantInstance:
                 self.last_sync_error,
             )
         except Exception as e:
+            self.last_sync_time = time.time()
             self.last_sync_error = f"Live Sync Error: {e}"
             logger.warning(
                 "[TENANT %s] Failed to sync live wallet metrics from Delta Exchange: %s",

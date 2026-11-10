@@ -2836,7 +2836,7 @@ async def _ws_broadcaster_worker(
                 now_ts = time.time()
                 if hasattr(orchestrator, "tenant_manager"):
                     for t_inst in orchestrator.tenant_manager.tenants.values():
-                        if t_inst.mode.is_real and t_inst.config.get_active_api_key():
+                        if t_inst.mode.is_real and t_inst.is_running and t_inst.config.get_active_api_key():
                             if now_ts - getattr(t_inst, "last_sync_time", 0.0) >= 15.0:
                                 try:
                                     await t_inst.sync_live_metrics()

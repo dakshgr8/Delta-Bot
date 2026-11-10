@@ -122,7 +122,7 @@ class DeltaAuthEngine:
             signature_string = METHOD + timestamp + path + query_string + payload
         Returns tuple of (signature_hex, timestamp_used).
         """
-        api_secret_raw = self._api_secret.get_secret_value()
+        api_secret_raw = self._api_secret.get_secret_value().strip()
         if not api_secret_raw:
             raise AuthenticationError(
                 message="Cannot sign request: DELTA_API_SECRET is empty or unconfigured",
@@ -179,7 +179,7 @@ class DeltaAuthEngine:
         if not is_authenticated:
             return headers
 
-        api_key_raw = self._api_key.get_secret_value()
+        api_key_raw = self._api_key.get_secret_value().strip()
         if not api_key_raw:
             raise AuthenticationError(
                 message="Authenticated endpoint requires DELTA_API_KEY",
@@ -215,7 +215,7 @@ class DeltaAuthEngine:
                 }
             }
         """
-        api_key_raw = self._api_key.get_secret_value()
+        api_key_raw = self._api_key.get_secret_value().strip()
         if not api_key_raw:
             raise AuthenticationError(
                 message="WebSocket authentication requires DELTA_API_KEY",
