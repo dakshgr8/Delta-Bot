@@ -154,6 +154,7 @@ class TenantConfig(BaseModel):
     pd_condition_mode: str = "either"
     trail_trigger_rr: float = 1.0
     trailing_stop: bool = True
+    trailing_mode: str = "candle"
     max_drawdown_pct: float = Field(default=4.0, ge=0.1, le=100.0)
     symbols: list[str] = Field(default_factory=lambda: ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"])
     is_active: bool = True
@@ -318,6 +319,7 @@ class TenantInstance:
                     enable_weekend_shield=self.bot_config.enable_weekend_shield,
                     pd_condition_mode=getattr(config, "pd_condition_mode", "either"),
                     trailing_stop=getattr(config, "trailing_stop", True),
+                    trailing_mode=getattr(config, "trailing_mode", "candle"),
                     trail_trigger_rr=getattr(config, "trail_trigger_rr", 1.0),
                 )
                 strat = BreakoutStrategyEngine(config=s_cfg)
@@ -338,15 +340,7 @@ class TenantInstance:
         strategy.on_position_close(self._handle_position_close)
 
     async def _handle_sl_ratchet(self, intent: OrderIntent, old_sl: float, new_sl: float) -> None:
-        if self.mode.is_demo and self.paper_simulator is not None:
-            spec = self.contract_specs.get(intent.symbol)
-            if spec:
-                self.paper_simulator.edit_order_stop_loss(
-                    product_id=spec.product_id,
-                    order_id=intent.exchange_order_id or 0,
-                    new_sl=new_sl,
-                )
-        elif self.mode.is_real and self.execution_manager is not None:
+        if self.execution_manager is not None:
             try:
                 await self.execution_manager.handle_trailing_stop_ratchet(
                     order_intent=intent,
@@ -355,19 +349,27 @@ class TenantInstance:
                 )
             except Exception as e:
                 logger.error("[%s:%s] Error ratcheting SL: %s", self.config.tenant_id, intent.symbol, e)
+        elif self.paper_simulator is not None:
+            spec = self.contract_specs.get(intent.symbol)
+            if spec:
+                self.paper_simulator.edit_order_stop_loss(
+                    product_id=spec.product_id,
+                    order_id=intent.exchange_order_id or 0,
+                    new_sl=new_sl,
+                )
 
     async def _handle_order_cancel(self, intent: OrderIntent, reason: str) -> None:
-        if self.mode.is_demo and self.paper_simulator is not None:
+        if self.execution_manager is not None:
+            try:
+                await self.execution_manager.handle_invalidation(order_intent=intent, reason=reason)
+            except Exception as e:
+                logger.error("[%s:%s] Error cancelling order: %s", self.config.tenant_id, intent.symbol, e)
+        elif self.paper_simulator is not None:
             spec = self.contract_specs.get(intent.symbol)
             if spec and intent.exchange_order_id:
                 self.paper_simulator.cancel_order(spec.product_id, intent.exchange_order_id)
             if self.risk_manager.active_positions_count > 0:
                 self.risk_manager.active_positions_count -= 1
-        elif self.mode.is_real and self.execution_manager is not None:
-            try:
-                await self.execution_manager.handle_invalidation(order_intent=intent, reason=reason)
-            except Exception as e:
-                logger.error("[%s:%s] Error cancelling order: %s", self.config.tenant_id, intent.symbol, e)
 
     async def _handle_position_close(self, intent: OrderIntent, status: OrderStatus, exit_price: float) -> None:
         if not getattr(intent, "is_exit_recorded", False):
@@ -523,6 +525,7 @@ class TenantInstance:
                         enable_weekend_shield=self.bot_config.enable_weekend_shield,
                         pd_condition_mode=getattr(self.config, "pd_condition_mode", "either"),
                         trailing_stop=getattr(self.config, "trailing_stop", True),
+                        trailing_mode=getattr(self.config, "trailing_mode", "candle"),
                         trail_trigger_rr=getattr(self.config, "trail_trigger_rr", 1.0),
                     )
                     strat = BreakoutStrategyEngine(config=s_cfg)
@@ -547,6 +550,13 @@ class TenantInstance:
             self.config.trailing_stop = t_stop
             for strat in self.strategies.values():
                 strat.config = strat.config.model_copy(update={"trailing_stop": t_stop})
+
+        if "trailing_mode" in updates and isinstance(updates["trailing_mode"], str):
+            t_mode = updates["trailing_mode"].strip().lower()
+            if t_mode in ("candle", "atr"):
+                self.config.trailing_mode = t_mode
+                for strat in self.strategies.values():
+                    strat.config = strat.config.model_copy(update={"trailing_mode": t_mode})
 
     async def get_account_equity(self) -> float:
         """Retrieves total floating equity for this tenant."""

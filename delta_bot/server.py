@@ -78,6 +78,10 @@ class ConfigUpdateRequest(BaseModel):
         default=None,
         description="Stop loss mode: 'trailing' or 'fixed'",
     )
+    trailing_mode: str | None = Field(
+        default=None,
+        description="Trailing stop mode: 'candle' (Trading-Academy V2) or 'atr'",
+    )
     pd_condition_mode: str | None = Field(
         default=None,
         description="Previous day level condition mode: 'either' (Trading-Academy V2) or 'strict_breakout'",
@@ -195,6 +199,7 @@ class TenantCreateRequest(BaseModel):
     leverage: int = Field(default=5, ge=1, le=100, description="Default leverage tier")
     timeframe: str = Field(default="5m", description="Resolution timeframe (e.g. 1m, 3m, 5m, 15m)")
     pd_condition_mode: str = Field(default="either", description="Previous day level condition mode: 'either' or 'strict_breakout'")
+    trailing_mode: str = Field(default="candle", description="Trailing stop mode: 'candle' (Trading-Academy V2) or 'atr'")
     trail_trigger_rr: float = Field(default=1.0, ge=0.0, description="Minimum RR profit before trailing activates")
     max_drawdown_pct: float = Field(default=4.0, ge=0.5, le=50.0, description="Daily max drawdown limit %")
     symbols: list[str] = Field(default_factory=lambda: ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"])
@@ -218,6 +223,7 @@ class TenantUpdateRequest(BaseModel):
     leverage: int | None = Field(default=None, ge=1, le=100)
     timeframe: str | None = None
     pd_condition_mode: str | None = None
+    trailing_mode: str | None = None
     trail_trigger_rr: float | None = None
     max_drawdown_pct: float | None = Field(default=None, ge=0.1, le=100.0)
     symbols: list[str] | None = None
@@ -2317,6 +2323,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 updates["pd_condition_mode"] = payload.pd_condition_mode
             if payload.trail_trigger_rr is not None:
                 updates["trail_trigger_rr"] = payload.trail_trigger_rr
+            if payload.trailing_mode is not None:
+                updates["trailing_mode"] = payload.trailing_mode
             if payload.trailing_sl_enabled is not None:
                 updates["trailing_stop"] = payload.trailing_sl_enabled
             if updates and hasattr(orchestrator, "tenant_manager"):
@@ -2352,6 +2360,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 updates["pd_condition_mode"] = payload.pd_condition_mode
             if payload.trail_trigger_rr is not None:
                 updates["trail_trigger_rr"] = payload.trail_trigger_rr
+            if payload.trailing_mode is not None:
+                updates["trailing_mode"] = payload.trailing_mode
             if payload.trailing_sl_enabled is not None:
                 updates["trailing_stop"] = payload.trailing_sl_enabled
             if updates:
@@ -2412,6 +2422,19 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             for s in orchestrator.strategies.values():
                 s.config = s.config.model_copy(update={"trailing_stop": is_trailing})
             updated.append(f"stop_loss_mode={payload.stop_loss_mode}")
+
+        if payload.trailing_mode is not None:
+            t_mode = payload.trailing_mode.strip().lower()
+            if t_mode in ("candle", "atr"):
+                orchestrator.config.trailing_mode = t_mode
+                for s in orchestrator.strategies.values():
+                    s.config = s.config.model_copy(update={"trailing_mode": t_mode})
+                if hasattr(orchestrator, "tenant_manager"):
+                    for t in orchestrator.tenant_manager.tenants.values():
+                        t.config.trailing_mode = t_mode
+                        for s in t.strategies.values():
+                            s.config = s.config.model_copy(update={"trailing_mode": t_mode})
+                updated.append(f"trailing_mode={t_mode}")
 
         if payload.trailing_stop_atr_mult is not None:
             orchestrator.config.trailing_atr_multiplier = payload.trailing_stop_atr_mult

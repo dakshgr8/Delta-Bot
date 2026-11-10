@@ -605,7 +605,9 @@ async def test_position_take_profit_and_stop_loss(strategy_config: StrategyConfi
 @pytest.mark.asyncio
 async def test_trailing_stop_ratchet(strategy_config: StrategyConfig, btc_spec: ContractSpec) -> None:
     """Verifies trailing stop ratchet moves stop loss favorably without ever loosening risk."""
-    trailing_cfg = strategy_config.model_copy(update={"trailing_stop": True, "trailing_stop_atr_mult": 1.0, "trail_trigger_rr": 0.0})
+    trailing_cfg = strategy_config.model_copy(
+        update={"trailing_stop": True, "trailing_stop_atr_mult": 1.0, "trail_trigger_rr": 0.0, "trailing_mode": "atr"}
+    )
     engine = BreakoutStrategyEngine(trailing_cfg)
     bar_cache = CircularBarCache(capacity=500)
     seed_synthetic_cache(bar_cache, count=45, base_price=50000.0, step=20.0)
@@ -1097,9 +1099,9 @@ async def test_trading_academy_v2_delayed_trailing_stop_and_breakeven_lock(
     await engine.on_candle_close(surge_bar, session_anchor, btc_spec, bar_cache, account_equity=10000.0)
 
     assert engine.active_position.r1_hit
-    # Stop loss must have ratcheted up to at least Breakeven (51001.0)
-    assert intent.current_stop_loss >= (intent.trigger_price + btc_spec.tick_size)
-    assert len(ratchets) >= 1
+    assert len(ratchets) == 1
+    # In Trading-Academy 'candle' mode: candidate_sl = max(51001.0, 51200.0 - 0.5) = 51199.5
+    assert intent.current_stop_loss == 51199.5
     locked_sl = intent.current_stop_loss
 
     # 5. Bar 3 pulls back: High=51350, Low=51100, Close=51200.
@@ -1124,6 +1126,7 @@ def test_v2_system_wide_defaults() -> None:
     assert s_cfg.risk_per_trade_pct == 1.0
     assert s_cfg.rr_ratio == 2.0
     assert s_cfg.trailing_stop is True
+    assert s_cfg.trailing_mode == "candle"
 
     # BotConfig defaults
     b_cfg = BotConfig()
@@ -1132,6 +1135,7 @@ def test_v2_system_wide_defaults() -> None:
     assert b_cfg.trail_trigger_rr == 1.0
     assert b_cfg.default_risk_pct == 1.0
     assert b_cfg.trailing_stop is True
+    assert b_cfg.trailing_mode == "candle"
 
     # TenantConfig defaults
     t_cfg = TenantConfig(tenant_id="t_test", name="Test Tenant")
@@ -1140,4 +1144,5 @@ def test_v2_system_wide_defaults() -> None:
     assert t_cfg.trail_trigger_rr == 1.0
     assert t_cfg.risk_pct == 1.0
     assert t_cfg.trailing_stop is True
+    assert t_cfg.trailing_mode == "candle"
 

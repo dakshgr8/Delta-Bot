@@ -162,6 +162,7 @@ class TradingBotOrchestrator:
                 enable_weekend_shield=self.config.enable_weekend_shield,
                 pd_condition_mode=self.config.pd_condition_mode,
                 trailing_stop=self.config.trailing_stop,
+                trailing_mode=getattr(self.config, "trailing_mode", "candle"),
                 trail_trigger_rr=self.config.trail_trigger_rr,
             )
             strat = BreakoutStrategyEngine(config=strat_cfg)
@@ -423,6 +424,7 @@ class TradingBotOrchestrator:
                     enable_weekend_shield=self.config.enable_weekend_shield,
                     pd_condition_mode=self.config.pd_condition_mode,
                     trailing_stop=self.config.trailing_stop,
+                    trailing_mode=getattr(self.config, "trailing_mode", "candle"),
                     trail_trigger_rr=self.config.trail_trigger_rr,
                 )
                 strategy = BreakoutStrategyEngine(config=strat_cfg)

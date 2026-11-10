@@ -221,6 +221,11 @@ class BotConfig(BaseSettings):
         validation_alias=AliasChoices("TRAILING_STOP", "trailing_stop", "TRAILING_SL_ENABLED", "trailing_sl_enabled"),
         description="Whether dynamic trailing stop ratchet is enabled",
     )
+    trailing_mode: str = Field(
+        default="candle",
+        validation_alias=AliasChoices("TRAILING_MODE", "trailing_mode"),
+        description="Trailing stop calculation mode: 'candle' (Trading-Academy V2) or 'atr'",
+    )
     trail_trigger_rr: float = Field(
         default=1.0,
         validation_alias=AliasChoices("TRAIL_TRIGGER_RR", "trail_trigger_rr"),
