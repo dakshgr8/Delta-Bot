@@ -150,7 +150,10 @@ class TenantConfig(BaseModel):
     demo_ws_url: str = "wss://socket-ind.testnet.deltaex.org"
     risk_pct: float = Field(default=1.0, ge=0.1, le=50.0)
     leverage: int = Field(default=5, ge=1, le=100)
-    timeframe: str = "1m"
+    timeframe: str = "5m"
+    pd_condition_mode: str = "either"
+    trail_trigger_rr: float = 1.0
+    trailing_stop: bool = True
     max_drawdown_pct: float = Field(default=4.0, ge=0.1, le=100.0)
     symbols: list[str] = Field(default_factory=lambda: ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"])
     is_active: bool = True
@@ -313,6 +316,9 @@ class TenantInstance:
                     min_stop_loss_pct=self.bot_config.min_stop_loss_pct,
                     min_stop_loss_atr_mult=self.bot_config.min_stop_loss_atr_mult,
                     enable_weekend_shield=self.bot_config.enable_weekend_shield,
+                    pd_condition_mode=getattr(config, "pd_condition_mode", "either"),
+                    trailing_stop=getattr(config, "trailing_stop", True),
+                    trail_trigger_rr=getattr(config, "trail_trigger_rr", 1.0),
                 )
                 strat = BreakoutStrategyEngine(config=s_cfg)
                 self._register_strategy_callbacks(strat)
@@ -515,10 +521,32 @@ class TenantInstance:
                         min_stop_loss_pct=self.bot_config.min_stop_loss_pct,
                         min_stop_loss_atr_mult=self.bot_config.min_stop_loss_atr_mult,
                         enable_weekend_shield=self.bot_config.enable_weekend_shield,
+                        pd_condition_mode=getattr(self.config, "pd_condition_mode", "either"),
+                        trailing_stop=getattr(self.config, "trailing_stop", True),
+                        trail_trigger_rr=getattr(self.config, "trail_trigger_rr", 1.0),
                     )
                     strat = BreakoutStrategyEngine(config=s_cfg)
                     self._register_strategy_callbacks(strat)
                     self.strategies[s] = strat
+
+        if "pd_condition_mode" in updates and isinstance(updates["pd_condition_mode"], str):
+            pd_mode = updates["pd_condition_mode"].strip().lower()
+            if pd_mode in ("either", "strict_breakout"):
+                self.config.pd_condition_mode = pd_mode
+                for strat in self.strategies.values():
+                    strat.config = strat.config.model_copy(update={"pd_condition_mode": pd_mode})
+
+        if "trail_trigger_rr" in updates and updates["trail_trigger_rr"] is not None:
+            tr_rr = float(updates["trail_trigger_rr"])
+            self.config.trail_trigger_rr = tr_rr
+            for strat in self.strategies.values():
+                strat.config = strat.config.model_copy(update={"trail_trigger_rr": tr_rr})
+
+        if "trailing_stop" in updates and updates["trailing_stop"] is not None:
+            t_stop = bool(updates["trailing_stop"])
+            self.config.trailing_stop = t_stop
+            for strat in self.strategies.values():
+                strat.config = strat.config.model_copy(update={"trailing_stop": t_stop})
 
     async def get_account_equity(self) -> float:
         """Retrieves total floating equity for this tenant."""

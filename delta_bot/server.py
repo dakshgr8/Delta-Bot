@@ -78,6 +78,15 @@ class ConfigUpdateRequest(BaseModel):
         default=None,
         description="Stop loss mode: 'trailing' or 'fixed'",
     )
+    pd_condition_mode: str | None = Field(
+        default=None,
+        description="Previous day level condition mode: 'either' (Trading-Academy V2) or 'strict_breakout'",
+    )
+    trail_trigger_rr: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Minimum RR profit required before trailing stop activates (1.0 = 1:1 RR)",
+    )
     trailing_stop_atr_mult: float | None = Field(
         default=None,
         validation_alias=AliasChoices("trailing_stop_atr_mult", "atr_multiplier"),
@@ -184,7 +193,9 @@ class TenantCreateRequest(BaseModel):
     demo_ws_url: str = Field(default="wss://socket-ind.testnet.deltaex.org", description="Delta Exchange Demo WebSocket URL")
     risk_pct: float = Field(default=1.0, ge=0.1, le=10.0, description="Risk percentage per breakout trade")
     leverage: int = Field(default=5, ge=1, le=100, description="Default leverage tier")
-    timeframe: str = Field(default="1m", description="Resolution timeframe (e.g. 1m, 3m, 5m, 15m)")
+    timeframe: str = Field(default="5m", description="Resolution timeframe (e.g. 1m, 3m, 5m, 15m)")
+    pd_condition_mode: str = Field(default="either", description="Previous day level condition mode: 'either' or 'strict_breakout'")
+    trail_trigger_rr: float = Field(default=1.0, ge=0.0, description="Minimum RR profit before trailing activates")
     max_drawdown_pct: float = Field(default=4.0, ge=0.5, le=50.0, description="Daily max drawdown limit %")
     symbols: list[str] = Field(default_factory=lambda: ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"])
     is_active: bool = Field(default=True, description="Whether trading signal evaluation is active")
@@ -206,6 +217,8 @@ class TenantUpdateRequest(BaseModel):
     risk_pct: float | None = Field(default=None, ge=0.1, le=50.0)
     leverage: int | None = Field(default=None, ge=1, le=100)
     timeframe: str | None = None
+    pd_condition_mode: str | None = None
+    trail_trigger_rr: float | None = None
     max_drawdown_pct: float | None = Field(default=None, ge=0.1, le=100.0)
     symbols: list[str] | None = None
     is_active: bool | None = None
@@ -888,6 +901,8 @@ def get_full_state_packet(
                 "leverage": lev,
                 "timeframe": timeframe,
                 "max_drawdown_pct": max_dd,
+                "pd_condition_mode": next((s.config.pd_condition_mode for s in orchestrator.strategies.values()), "either"),
+                "trail_trigger_rr": next((s.config.trail_trigger_rr for s in orchestrator.strategies.values()), 1.0),
                 "max_pending_bars": next((s.config.max_pending_bars for s in orchestrator.strategies.values()), 3),
                 "trailing_sl_enabled": next((s.config.trailing_stop for s in orchestrator.strategies.values()), True),
                 "trailing_stop_atr_mult": next((s.config.trailing_stop_atr_mult for s in orchestrator.strategies.values()), 2.0),
@@ -2298,6 +2313,12 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 updates["demo_api_key"] = payload.demo_api_key
             if payload.demo_api_secret is not None:
                 updates["demo_api_secret"] = payload.demo_api_secret
+            if payload.pd_condition_mode is not None:
+                updates["pd_condition_mode"] = payload.pd_condition_mode
+            if payload.trail_trigger_rr is not None:
+                updates["trail_trigger_rr"] = payload.trail_trigger_rr
+            if payload.trailing_sl_enabled is not None:
+                updates["trailing_stop"] = payload.trailing_sl_enabled
             if updates and hasattr(orchestrator, "tenant_manager"):
                 orchestrator.tenant_manager.update_tenant(target_t, updates)
                 return ControlActionResponse(
@@ -2327,6 +2348,12 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 updates["demo_api_key"] = payload.demo_api_key
             if payload.demo_api_secret is not None:
                 updates["demo_api_secret"] = payload.demo_api_secret
+            if payload.pd_condition_mode is not None:
+                updates["pd_condition_mode"] = payload.pd_condition_mode
+            if payload.trail_trigger_rr is not None:
+                updates["trail_trigger_rr"] = payload.trail_trigger_rr
+            if payload.trailing_sl_enabled is not None:
+                updates["trailing_stop"] = payload.trailing_sl_enabled
             if updates:
                 orchestrator.tenant_manager.update_tenant(target_t, updates)
                 return ControlActionResponse(
@@ -2438,6 +2465,31 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                     for s in t.strategies.values():
                         s.config = s.config.model_copy(update={"enable_weekend_shield": payload.enable_weekend_shield})
             updated.append(f"enable_weekend_shield={payload.enable_weekend_shield}")
+
+        if payload.pd_condition_mode is not None:
+            pd_mode = payload.pd_condition_mode.strip().lower()
+            if pd_mode in ("either", "strict_breakout"):
+                orchestrator.config.pd_condition_mode = pd_mode
+                for s in orchestrator.strategies.values():
+                    s.config = s.config.model_copy(update={"pd_condition_mode": pd_mode})
+                if hasattr(orchestrator, "tenant_manager"):
+                    for t in orchestrator.tenant_manager.tenants.values():
+                        t.config.pd_condition_mode = pd_mode
+                        for s in t.strategies.values():
+                            s.config = s.config.model_copy(update={"pd_condition_mode": pd_mode})
+                updated.append(f"pd_condition_mode={pd_mode}")
+
+        if payload.trail_trigger_rr is not None:
+            tr_rr = float(payload.trail_trigger_rr)
+            orchestrator.config.trail_trigger_rr = tr_rr
+            for s in orchestrator.strategies.values():
+                s.config = s.config.model_copy(update={"trail_trigger_rr": tr_rr})
+            if hasattr(orchestrator, "tenant_manager"):
+                for t in orchestrator.tenant_manager.tenants.values():
+                    t.config.trail_trigger_rr = tr_rr
+                    for s in t.strategies.values():
+                        s.config = s.config.model_copy(update={"trail_trigger_rr": tr_rr})
+            updated.append(f"trail_trigger_rr={tr_rr}")
 
         # Handle API keys update or reset
         if payload.reset_keys:

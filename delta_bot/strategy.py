@@ -73,7 +73,7 @@ class StrategyConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     symbol: str = Field(description="Target contract symbol (e.g. BTCUSD, ETHUSD, XAUTUSD)")
-    resolution: str = Field(default="1m", description="Candle timeframe resolution")
+    resolution: str = Field(default="5m", description="Candle timeframe resolution")
 
     # Indicator Parameters
     ema_period: int = Field(default=20, ge=2, description="EMA period for trend baseline")
@@ -82,6 +82,10 @@ class StrategyConfig(BaseModel):
     adx_period: int = Field(default=14, ge=2, description="ADX period for regime classification")
     adx_threshold: float = Field(
         default=20.0, ge=0.0, description="Minimum ADX required to confirm non-consolidation"
+    )
+    pd_condition_mode: str = Field(
+        default="either",
+        description="Previous day level condition mode: 'either' (Trading-Academy V2 trend continuation) or 'strict_breakout'",
     )
 
     # Entry Trigger & Buffer Parameters
@@ -118,7 +122,12 @@ class StrategyConfig(BaseModel):
 
     # Trailing Stop & Break-Even Configuration
     trailing_stop: bool = Field(
-        default=False, description="Enable bar-by-bar trailing stop ratchet once triggered"
+        default=True, description="Enable bar-by-bar trailing stop ratchet once triggered"
+    )
+    trail_trigger_rr: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="Minimum RR profit required before trailing stop activates (1.0 = 1:1 RR, 0 = immediate)",
     )
     trailing_stop_atr_mult: float = Field(
         default=1.0, gt=0.0, description="ATR multiplier used to ratchet trailing stop loss"
@@ -186,6 +195,7 @@ class OrderIntent(BaseModel):
     filled_size: int | None = Field(default=None, description="Actual executed contract lots from private user feed")
     realized_pnl: float | None = Field(default=None, description="Realized PnL of closed position in USD")
     is_breakeven_locked: bool = Field(default=False, description="Flag indicating SL has been advanced to break-even")
+    r1_hit: bool = Field(default=False, description="Flag indicating trail_trigger_rr (+1.0R) profit has been breached")
     is_exit_recorded: bool = Field(default=False, description="Flag indicating exit has been accounted for in RiskManager")
 
     @property
@@ -520,14 +530,31 @@ class BreakoutStrategyEngine:
                     await self._emit(self._on_position_close_cb, pos, OrderStatus.CLOSED_SL, pos.current_stop_loss)
                     self.active_position = None
                 else:
-                    # Automated Break-Even Auto-Ratchet (1.0R / 1.5R)
                     entry_px = pos.fill_price if (pos.fill_price and pos.fill_price > 0) else pos.trigger_price
                     r_dist = abs(entry_px - pos.initial_stop_loss)
+
+                    # Check +1.0R / trail_trigger_rr profit breach
+                    if not pos.r1_hit and self.config.trail_trigger_rr > 0 and r_dist > 0 and entry_px > 0:
+                        trigger_dist = r_dist * self.config.trail_trigger_rr
+                        if candle.high >= entry_px + trigger_dist:
+                            pos.r1_hit = True
+                            logger.info(
+                                "🚀 %s LONG reached +%.1fR profit target (High=%.4f >= Target=%.4f)",
+                                pos.symbol,
+                                self.config.trail_trigger_rr,
+                                candle.high,
+                                entry_px + trigger_dist,
+                            )
+
+                    # Automated Break-Even Auto-Ratchet (1.0R / 1.5R)
                     if (
                         self.config.enable_breakeven
                         and not pos.is_breakeven_locked
                         and r_dist > 0
-                        and candle.high >= entry_px + (self.config.breakeven_trigger_r * r_dist)
+                        and (
+                            pos.r1_hit
+                            or candle.high >= entry_px + (self.config.breakeven_trigger_r * r_dist)
+                        )
                     ):
                         be_price = contract_spec.round_price(entry_px + contract_spec.tick_size)
                         old_sl = pos.current_stop_loss
@@ -542,10 +569,12 @@ class BreakoutStrategyEngine:
                             )
                             await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
 
-                    # Trailing Stop Ratchet
-                    if self.config.trailing_stop:
-                        proposed_sl = candle.low - (self.config.trailing_stop_atr_mult * snapshot.atr_14)
-                        quantized_sl = contract_spec.round_price(proposed_sl)
+                    # Trailing Stop Ratchet (delayed activation: only after +1.0R / trail_trigger_rr reached)
+                    should_trail = self.config.trailing_stop and (self.config.trail_trigger_rr <= 0 or pos.r1_hit)
+                    if should_trail:
+                        raw_sl = candle.low - (self.config.trailing_stop_atr_mult * snapshot.atr_14)
+                        candidate_sl = max(entry_px + contract_spec.tick_size, raw_sl) if pos.r1_hit else raw_sl
+                        quantized_sl = contract_spec.round_price(candidate_sl)
                         old_sl = pos.current_stop_loss
                         if pos.ratchet_sl(quantized_sl):
                             await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
@@ -562,14 +591,31 @@ class BreakoutStrategyEngine:
                     await self._emit(self._on_position_close_cb, pos, OrderStatus.CLOSED_SL, pos.current_stop_loss)
                     self.active_position = None
                 else:
-                    # Automated Break-Even Auto-Ratchet (1.0R / 1.5R)
                     entry_px = pos.fill_price if (pos.fill_price and pos.fill_price > 0) else pos.trigger_price
                     r_dist = abs(entry_px - pos.initial_stop_loss)
+
+                    # Check +1.0R / trail_trigger_rr profit breach
+                    if not pos.r1_hit and self.config.trail_trigger_rr > 0 and r_dist > 0 and entry_px > 0:
+                        trigger_dist = r_dist * self.config.trail_trigger_rr
+                        if candle.low <= entry_px - trigger_dist:
+                            pos.r1_hit = True
+                            logger.info(
+                                "🚀 %s SHORT reached +%.1fR profit target (Low=%.4f <= Target=%.4f)",
+                                pos.symbol,
+                                self.config.trail_trigger_rr,
+                                candle.low,
+                                entry_px - trigger_dist,
+                            )
+
+                    # Automated Break-Even Auto-Ratchet (1.0R / 1.5R)
                     if (
                         self.config.enable_breakeven
                         and not pos.is_breakeven_locked
                         and r_dist > 0
-                        and candle.low <= entry_px - (self.config.breakeven_trigger_r * r_dist)
+                        and (
+                            pos.r1_hit
+                            or candle.low <= entry_px - (self.config.breakeven_trigger_r * r_dist)
+                        )
                     ):
                         be_price = contract_spec.round_price(entry_px - contract_spec.tick_size)
                         old_sl = pos.current_stop_loss
@@ -584,10 +630,12 @@ class BreakoutStrategyEngine:
                             )
                             await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
 
-                    # Trailing Stop Ratchet
-                    if self.config.trailing_stop:
-                        proposed_sl = candle.high + (self.config.trailing_stop_atr_mult * snapshot.atr_14)
-                        quantized_sl = contract_spec.round_price(proposed_sl)
+                    # Trailing Stop Ratchet (delayed activation: only after +1.0R / trail_trigger_rr reached)
+                    should_trail = self.config.trailing_stop and (self.config.trail_trigger_rr <= 0 or pos.r1_hit)
+                    if should_trail:
+                        raw_sl = candle.high + (self.config.trailing_stop_atr_mult * snapshot.atr_14)
+                        candidate_sl = min(entry_px - contract_spec.tick_size, raw_sl) if pos.r1_hit else raw_sl
+                        quantized_sl = contract_spec.round_price(candidate_sl)
                         old_sl = pos.current_stop_loss
                         if pos.ratchet_sl(quantized_sl):
                             await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
@@ -680,27 +728,44 @@ class BreakoutStrategyEngine:
         # Strategy Rules:
         # 1. Close > EMA 20 (Bull) or Close < EMA 20 (Bear)
         # 2. Close > Session VWAP (Bull) or Close < Session VWAP (Bear)
-        # 3. Close > PDH (Bull) or Close < PDL (Bear) - True daily breakout avoiding inside-day chop
+        # 3. Previous Day Level Condition:
+        #    - 'either' (Trading-Academy V2): Close > PDH or Close > PDL (Bull); Close < PDH or Close < PDL (Bear)
+        #    - 'strict_breakout': Close > PDH (Bull); Close < PDL (Bear)
         # 4. ADX >= 20.0 (Consolidation Guard) AND ATR >= SMA(ATR, 20) (Volatility Expansion Check)
         # 5. Fresh Signal: Condition met on bar t, but was FALSE on bar t-1.
 
         has_pdh = snapshot.pdh is not None and snapshot.pdh > 0
         has_pdl = snapshot.pdl is not None and snapshot.pdl > 0
 
+        if self.config.pd_condition_mode == "strict_breakout":
+            c_pd_bull = bool(has_pdh and candle.close > snapshot.pdh)
+            c_pd_bear = bool(has_pdl and candle.close < snapshot.pdl)
+        else:
+            # Trading-Academy V2 "either" mode:
+            # Bull: (Close > PDH) or (Close > PDL) (if both present, or whichever is present)
+            c_pd_bull = bool(
+                (has_pdh and candle.close > snapshot.pdh)
+                or (has_pdl and candle.close > snapshot.pdl)
+            )
+            c_pd_bear = bool(
+                (has_pdh and candle.close < snapshot.pdh)
+                or (has_pdl and candle.close < snapshot.pdl)
+            )
+
         bullish_condition = bool(
-            has_pdh
+            (has_pdh or has_pdl)
             and (candle.close > snapshot.ema_20)
             and (candle.close > snapshot.session_vwap)
-            and (snapshot.pdh is not None and candle.close > snapshot.pdh)
+            and c_pd_bull
             and (snapshot.adx_14 >= self.config.adx_threshold)
             and snapshot.is_volatility_expanded
         )
 
         bearish_condition = bool(
-            has_pdl
+            (has_pdh or has_pdl)
             and (candle.close < snapshot.ema_20)
             and (candle.close < snapshot.session_vwap)
-            and (snapshot.pdl is not None and candle.close < snapshot.pdl)
+            and c_pd_bear
             and (snapshot.adx_14 >= self.config.adx_threshold)
             and snapshot.is_volatility_expanded
         )

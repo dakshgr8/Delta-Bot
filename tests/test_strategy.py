@@ -305,8 +305,9 @@ async def test_filter_suppression_low_adx(strategy_config: StrategyConfig, btc_s
 
 @pytest.mark.asyncio
 async def test_filter_suppression_inside_day(strategy_config: StrategyConfig, btc_spec: ContractSpec) -> None:
-    """Verifies that signals are suppressed when close is inside PDH/PDL."""
-    engine = BreakoutStrategyEngine(strategy_config)
+    """Verifies that signals are suppressed in strict_breakout mode when close is inside PDH/PDL."""
+    strict_cfg = strategy_config.model_copy(update={"pd_condition_mode": "strict_breakout"})
+    engine = BreakoutStrategyEngine(strict_cfg)
     bar_cache = CircularBarCache(capacity=500)
     seed_synthetic_cache(bar_cache, count=45, base_price=50000.0, step=20.0)
 
@@ -604,7 +605,7 @@ async def test_position_take_profit_and_stop_loss(strategy_config: StrategyConfi
 @pytest.mark.asyncio
 async def test_trailing_stop_ratchet(strategy_config: StrategyConfig, btc_spec: ContractSpec) -> None:
     """Verifies trailing stop ratchet moves stop loss favorably without ever loosening risk."""
-    trailing_cfg = strategy_config.model_copy(update={"trailing_stop": True, "trailing_stop_atr_mult": 1.0})
+    trailing_cfg = strategy_config.model_copy(update={"trailing_stop": True, "trailing_stop_atr_mult": 1.0, "trail_trigger_rr": 0.0})
     engine = BreakoutStrategyEngine(trailing_cfg)
     bar_cache = CircularBarCache(capacity=500)
     seed_synthetic_cache(bar_cache, count=45, base_price=50000.0, step=20.0)
@@ -885,4 +886,258 @@ async def test_strategy_skips_breakout_with_sub_atr_stop_loss(
 
     # Must be cleanly skipped!
     assert intent is None
+
+
+# -----------------------------------------------------------------------------
+# 11. Trading-Academy V2 Strategy Architecture Tests
+# -----------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_trading_academy_v2_pd_either_mode_bullish_continuation(
+    strategy_config: StrategyConfig, btc_spec: ContractSpec
+) -> None:
+    """
+    Verifies Trading-Academy V2 'either' mode allows intraday trend continuation
+    when price is inside the prior day range (between PDL and PDH) with EMA & VWAP aligned.
+    """
+    v2_cfg = strategy_config.model_copy(update={"pd_condition_mode": "either", "resolution": "5m"})
+    engine = BreakoutStrategyEngine(v2_cfg)
+    bar_cache = CircularBarCache(capacity=500)
+    seed_synthetic_cache(bar_cache, count=45, base_price=50000.0, step=20.0)
+
+    # Price at 50,950 is INSIDE the prior day range: 48,000 (PDL) < 50,950 < 55,000 (PDH)
+    session_anchor = SessionAnchorData(
+        symbol="BTCUSDT",
+        session_date="2026-11-06",
+        session_start_epoch_s=1700000000.0,
+        prior_day_high=55000.0,
+        prior_day_low=48000.0,
+        session_vwap=50200.0,
+    )
+
+    signal_bar = make_candle(
+        open_p=50700.0,
+        high_p=51000.0,
+        low_p=50600.0,
+        close_p=50950.0,
+        epoch_s=1700000000.0 + (46 * 60),
+    )
+    bar_cache.append(signal_bar)
+
+    intent = await engine.on_candle_close(
+        candle=signal_bar,
+        session_anchor=session_anchor,
+        contract_spec=btc_spec,
+        bar_cache=bar_cache,
+        account_equity=10000.0,
+    )
+
+    assert intent is not None
+    assert intent.signal_type == SignalType.BULLISH_BREAKOUT
+    assert intent.trigger_price == 51000.5
+    assert intent.initial_stop_loss == 50600.0
+    assert intent.take_profit == 51000.5 + (2.0 * (51000.5 - 50600.0))  # 1:2 RR
+
+
+@pytest.mark.asyncio
+async def test_trading_academy_v2_pd_either_mode_bearish_continuation(
+    strategy_config: StrategyConfig, btc_spec: ContractSpec
+) -> None:
+    """
+    Verifies Trading-Academy V2 'either' mode allows intraday bearish trend continuation
+    when price is inside the prior day range with downward EMA & VWAP alignment.
+    """
+    v2_cfg = strategy_config.model_copy(update={"pd_condition_mode": "either", "resolution": "5m"})
+    engine = BreakoutStrategyEngine(v2_cfg)
+    bar_cache = CircularBarCache(capacity=500)
+    seed_synthetic_cache(bar_cache, count=45, base_price=50000.0, step=-20.0)
+
+    # Price at 49,050 is INSIDE the prior day range: 45,000 (PDL) < 49,050 < 52,000 (PDH)
+    session_anchor = SessionAnchorData(
+        symbol="BTCUSDT",
+        session_date="2026-11-06",
+        session_start_epoch_s=1700000000.0,
+        prior_day_high=52000.0,
+        prior_day_low=45000.0,
+        session_vwap=49800.0,
+    )
+
+    signal_bar = make_candle(
+        open_p=49300.0,
+        high_p=49400.0,
+        low_p=49000.0,
+        close_p=49050.0,
+        epoch_s=1700000000.0 + (46 * 60),
+    )
+    bar_cache.append(signal_bar)
+
+    intent = await engine.on_candle_close(
+        candle=signal_bar,
+        session_anchor=session_anchor,
+        contract_spec=btc_spec,
+        bar_cache=bar_cache,
+        account_equity=10000.0,
+    )
+
+    assert intent is not None
+    assert intent.signal_type == SignalType.BEARISH_BREAKDOWN
+    assert intent.trigger_price == 48999.5
+    assert intent.initial_stop_loss == 49400.0
+
+
+@pytest.mark.asyncio
+async def test_trading_academy_v2_pd_either_mode_suppression_below_pdl(
+    strategy_config: StrategyConfig, btc_spec: ContractSpec
+) -> None:
+    """
+    Verifies that when price is below PDL (e.g. 47,000 < 48,000), a bullish signal
+    is cleanly suppressed in 'either' mode because price is neither > PDH nor > PDL.
+    """
+    v2_cfg = strategy_config.model_copy(update={"pd_condition_mode": "either"})
+    engine = BreakoutStrategyEngine(v2_cfg)
+    bar_cache = CircularBarCache(capacity=500)
+    seed_synthetic_cache(bar_cache, count=45, base_price=46000.0, step=20.0)
+
+    session_anchor = SessionAnchorData(
+        symbol="BTCUSDT",
+        session_date="2026-11-06",
+        session_start_epoch_s=1700000000.0,
+        prior_day_high=55000.0,
+        prior_day_low=48000.0,
+        session_vwap=46500.0,
+    )
+
+    # Candle close at 47,000 is BELOW PDL (48,000)
+    signal_bar = make_candle(
+        open_p=46800.0,
+        high_p=47100.0,
+        low_p=46700.0,
+        close_p=47000.0,
+        epoch_s=1700000000.0 + (46 * 60),
+    )
+    bar_cache.append(signal_bar)
+
+    intent = await engine.on_candle_close(
+        candle=signal_bar,
+        session_anchor=session_anchor,
+        contract_spec=btc_spec,
+        bar_cache=bar_cache,
+        account_equity=10000.0,
+    )
+    assert intent is None
+
+
+@pytest.mark.asyncio
+async def test_trading_academy_v2_delayed_trailing_stop_and_breakeven_lock(
+    strategy_config: StrategyConfig, btc_spec: ContractSpec
+) -> None:
+    """
+    Verifies Trading-Academy V2 delayed trailing stop activation:
+    1. Before +1.0R is reached, trailing stop does NOT ratchet, protecting against premature stopouts.
+    2. When price reaches +1.0R profit, Stop Loss locks Breakeven (+1 tick) immediately.
+    3. On subsequent bars continuing in profit, Stop Loss trails behind candle extremes.
+    4. On pullbacks, Stop Loss never loosens below the locked level.
+    """
+    v2_cfg = strategy_config.model_copy(
+        update={
+            "trailing_stop": True,
+            "trail_trigger_rr": 1.0,
+            "enable_breakeven": True,
+            "breakeven_trigger_r": 1.0,
+            "trailing_stop_atr_mult": 1.0,
+        }
+    )
+    engine = BreakoutStrategyEngine(v2_cfg)
+    bar_cache = CircularBarCache(capacity=500)
+    seed_synthetic_cache(bar_cache, count=45, base_price=50000.0, step=20.0)
+
+    session_anchor = SessionAnchorData(
+        symbol="BTCUSDT",
+        session_date="2026-11-06",
+        session_start_epoch_s=1700000000.0,
+        prior_day_high=55000.0,
+        prior_day_low=48000.0,
+        session_vwap=50200.0,
+    )
+
+    # 1. Signal Candle: High=51000, Low=50600, Close=50950
+    sig_bar = make_candle(high_p=51000.0, low_p=50600.0, close_p=50950.0)
+    bar_cache.append(sig_bar)
+    intent = await engine.on_candle_close(sig_bar, session_anchor, btc_spec, bar_cache, account_equity=10000.0)
+    assert intent is not None
+    assert intent.trigger_price == 51000.5
+    assert intent.initial_stop_loss == 50600.0
+    risk_dist = intent.trigger_price - intent.initial_stop_loss  # 400.5
+
+    # 2. Trigger Candle: High breaches trigger
+    trig_bar = make_candle(high_p=51050.0, low_p=50900.0, close_p=51020.0)
+    bar_cache.append(trig_bar)
+    await engine.on_candle_close(trig_bar, session_anchor, btc_spec, bar_cache, account_equity=10000.0)
+    assert engine.active_position is not None
+    assert not engine.active_position.r1_hit
+    assert not engine.active_position.is_breakeven_locked
+
+    ratchets: list[tuple[float, float]] = []
+    engine.on_sl_ratchet(lambda order, old_sl, new_sl: ratchets.append((old_sl, new_sl)))
+
+    # 3. Bar 1 climbs modestly: High=51300 (+299.5 profit < +1.0R = 400.5).
+    # Trailing stop must NOT trigger yet!
+    modest_bar = make_candle(high_p=51300.0, low_p=51100.0, close_p=51250.0)
+    bar_cache.append(modest_bar)
+    await engine.on_candle_close(modest_bar, session_anchor, btc_spec, bar_cache, account_equity=10000.0)
+
+    assert not engine.active_position.r1_hit
+    assert intent.current_stop_loss == 50600.0
+    assert len(ratchets) == 0
+
+    # 4. Bar 2 surges past +1.0R: High=51450 (entry 51000.5 + 400.5 = 51401.0).
+    # +1.0R is breached! Stop Loss must lock Breakeven (+1 tick: 51001.0) and trail.
+    surge_bar = make_candle(high_p=51450.0, low_p=51200.0, close_p=51420.0)
+    bar_cache.append(surge_bar)
+    await engine.on_candle_close(surge_bar, session_anchor, btc_spec, bar_cache, account_equity=10000.0)
+
+    assert engine.active_position.r1_hit
+    # Stop loss must have ratcheted up to at least Breakeven (51001.0)
+    assert intent.current_stop_loss >= (intent.trigger_price + btc_spec.tick_size)
+    assert len(ratchets) >= 1
+    locked_sl = intent.current_stop_loss
+
+    # 5. Bar 3 pulls back: High=51350, Low=51100, Close=51200.
+    # Stop Loss must never loosen!
+    pullback_bar = make_candle(high_p=51350.0, low_p=51100.0, close_p=51200.0)
+    bar_cache.append(pullback_bar)
+    await engine.on_candle_close(pullback_bar, session_anchor, btc_spec, bar_cache, account_equity=10000.0)
+
+    assert intent.current_stop_loss == locked_sl
+
+
+def test_v2_system_wide_defaults() -> None:
+    """Verifies default parameters align with Trading-Academy V2 across models."""
+    from delta_bot.config import BotConfig
+    from delta_bot.tenant import TenantConfig
+
+    # StrategyConfig defaults
+    s_cfg = StrategyConfig(symbol="BTCUSD")
+    assert s_cfg.resolution == "5m"
+    assert s_cfg.pd_condition_mode == "either"
+    assert s_cfg.trail_trigger_rr == 1.0
+    assert s_cfg.risk_per_trade_pct == 1.0
+    assert s_cfg.rr_ratio == 2.0
+    assert s_cfg.trailing_stop is True
+
+    # BotConfig defaults
+    b_cfg = BotConfig()
+    assert b_cfg.timeframe == "5m"
+    assert b_cfg.pd_condition_mode == "either"
+    assert b_cfg.trail_trigger_rr == 1.0
+    assert b_cfg.default_risk_pct == 1.0
+    assert b_cfg.trailing_stop is True
+
+    # TenantConfig defaults
+    t_cfg = TenantConfig(tenant_id="t_test", name="Test Tenant")
+    assert t_cfg.timeframe == "5m"
+    assert t_cfg.pd_condition_mode == "either"
+    assert t_cfg.trail_trigger_rr == 1.0
+    assert t_cfg.risk_pct == 1.0
+    assert t_cfg.trailing_stop is True
 

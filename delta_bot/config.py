@@ -193,7 +193,7 @@ class BotConfig(BaseSettings):
         description="Comma-separated target assets on Delta Exchange India (e.g. BTCUSD,ETHUSD,SOLUSD,XRPUSD,XAUTUSD)",
     )
     timeframe: str = Field(
-        default="1m",
+        default="5m",
         validation_alias=AliasChoices("TIMEFRAME", "timeframe"),
         description="Candle resolution timeframe (e.g. 1m, 5m, 15m)",
     )
@@ -210,6 +210,22 @@ class BotConfig(BaseSettings):
         ge=0.1,
         le=10.0,
         description="Account equity percentage at risk per breakout trade",
+    )
+    pd_condition_mode: str = Field(
+        default="either",
+        validation_alias=AliasChoices("PD_CONDITION_MODE", "pd_condition_mode"),
+        description="Previous day level condition mode: 'either' (Trading-Academy V2) or 'strict_breakout'",
+    )
+    trailing_stop: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("TRAILING_STOP", "trailing_stop", "TRAILING_SL_ENABLED", "trailing_sl_enabled"),
+        description="Whether dynamic trailing stop ratchet is enabled",
+    )
+    trail_trigger_rr: float = Field(
+        default=1.0,
+        validation_alias=AliasChoices("TRAIL_TRIGGER_RR", "trail_trigger_rr"),
+        ge=0.0,
+        description="Minimum RR profit required before trailing stop activates (default: 1.0 -> 1:1 RR)",
     )
     status_interval_sec: float = Field(
         default=60.0,

@@ -112,7 +112,7 @@ def parse_cli_args() -> argparse.Namespace:
     parser.add_argument(
         "--timeframe",
         type=str,
-        default="1m",
+        default="5m",
         help="Candle resolution timeframe (e.g. 1m, 3m, 5m, 15m)",
     )
     parser.add_argument(

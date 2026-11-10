@@ -160,6 +160,9 @@ class TradingBotOrchestrator:
                 min_stop_loss_pct=self.config.min_stop_loss_pct,
                 min_stop_loss_atr_mult=self.config.min_stop_loss_atr_mult,
                 enable_weekend_shield=self.config.enable_weekend_shield,
+                pd_condition_mode=self.config.pd_condition_mode,
+                trailing_stop=self.config.trailing_stop,
+                trail_trigger_rr=self.config.trail_trigger_rr,
             )
             strat = BreakoutStrategyEngine(config=strat_cfg)
             self._register_strategy_callbacks(strat)
@@ -418,6 +421,9 @@ class TradingBotOrchestrator:
                     min_stop_loss_pct=self.config.min_stop_loss_pct,
                     min_stop_loss_atr_mult=self.config.min_stop_loss_atr_mult,
                     enable_weekend_shield=self.config.enable_weekend_shield,
+                    pd_condition_mode=self.config.pd_condition_mode,
+                    trailing_stop=self.config.trailing_stop,
+                    trail_trigger_rr=self.config.trail_trigger_rr,
                 )
                 strategy = BreakoutStrategyEngine(config=strat_cfg)
                 self._register_strategy_callbacks(strategy)
