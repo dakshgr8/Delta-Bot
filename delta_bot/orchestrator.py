@@ -165,6 +165,7 @@ class TradingBotOrchestrator:
                 trailing_stop=self.config.trailing_stop,
                 trailing_mode=getattr(self.config, "trailing_mode", "candle"),
                 trail_trigger_rr=self.config.trail_trigger_rr,
+                r1_sl_offset_r=getattr(self.config, "r1_sl_offset_r", -0.5),
             )
             strat = BreakoutStrategyEngine(config=strat_cfg)
             self._register_strategy_callbacks(strat)
@@ -473,6 +474,7 @@ class TradingBotOrchestrator:
                     trailing_stop=self.config.trailing_stop,
                     trailing_mode=getattr(self.config, "trailing_mode", "candle"),
                     trail_trigger_rr=self.config.trail_trigger_rr,
+                    r1_sl_offset_r=getattr(self.config, "r1_sl_offset_r", -0.5),
                 )
                 strategy = BreakoutStrategyEngine(config=strat_cfg)
                 self._register_strategy_callbacks(strategy)

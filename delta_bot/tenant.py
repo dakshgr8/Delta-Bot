@@ -153,6 +153,7 @@ class TenantConfig(BaseModel):
     timeframe: str = "5m"
     pd_condition_mode: str = "either"
     trail_trigger_rr: float = 1.0
+    r1_sl_offset_r: float = -0.5
     trailing_stop: bool = True
     trailing_mode: str = "candle"
     max_drawdown_pct: float = Field(default=4.0, ge=0.1, le=100.0)
@@ -334,6 +335,7 @@ class TenantInstance:
                     trailing_stop=getattr(config, "trailing_stop", True),
                     trailing_mode=getattr(config, "trailing_mode", "candle"),
                     trail_trigger_rr=getattr(config, "trail_trigger_rr", 1.0),
+                    r1_sl_offset_r=getattr(config, "r1_sl_offset_r", -0.5),
                 )
                 strat = BreakoutStrategyEngine(config=s_cfg)
                 self._register_strategy_callbacks(strat)
@@ -629,6 +631,7 @@ class TenantInstance:
                         trailing_stop=getattr(self.config, "trailing_stop", True),
                         trailing_mode=getattr(self.config, "trailing_mode", "candle"),
                         trail_trigger_rr=getattr(self.config, "trail_trigger_rr", 1.0),
+                        r1_sl_offset_r=getattr(self.config, "r1_sl_offset_r", -0.5),
                     )
                     strat = BreakoutStrategyEngine(config=s_cfg)
                     self._register_strategy_callbacks(strat)
@@ -646,6 +649,12 @@ class TenantInstance:
             self.config.trail_trigger_rr = tr_rr
             for strat in self.strategies.values():
                 strat.config = strat.config.model_copy(update={"trail_trigger_rr": tr_rr})
+
+        if "r1_sl_offset_r" in updates and updates["r1_sl_offset_r"] is not None:
+            r1_off = float(updates["r1_sl_offset_r"])
+            self.config.r1_sl_offset_r = r1_off
+            for strat in self.strategies.values():
+                strat.config = strat.config.model_copy(update={"r1_sl_offset_r": r1_off})
 
         if "trailing_stop" in updates and updates["trailing_stop"] is not None:
             t_stop = bool(updates["trailing_stop"])
@@ -1245,55 +1254,73 @@ class TenantInstance:
                     if child_tp_id:
                         self.state_manager._intents_by_child_tp_id[child_tp_id] = strat.active_position
 
-                # Instant Breakeven / Trailing check for positions where 1R target is already reached
+                # Instant Risk-Recovery (-0.5R) / Trailing check for positions where 1R target is already reached
                 act_pos = strat.active_position
                 if act_pos is not None and act_pos.r1_hit and getattr(strat.config, "enable_breakeven", True) and self.execution_manager is not None:
                     p_spec = self.contract_specs.get(p_sym)
                     tick_sz = p_spec.tick_size if p_spec else 0.001
-                    be_px = (
-                        p_spec.round_price(entry_px - tick_sz)
-                        if (p_spec and p_side_is_short)
-                        else (
-                            p_spec.round_price(entry_px + tick_sz)
-                            if p_spec
-                            else round(entry_px + (tick_sz if not p_side_is_short else -tick_sz), 4)
+                    r1_offset_r = getattr(strat.config, "r1_sl_offset_r", -0.5)
+                    entry_val = act_pos.fill_price if (act_pos.fill_price and act_pos.fill_price > 0) else entry_px
+                    r_dist = abs(entry_val - act_pos.initial_stop_loss)
+                    if r_dist <= 0 and act_pos.take_profit and getattr(strat.config, "rr_ratio", 2.0) > 0:
+                        r_dist = abs(act_pos.take_profit - entry_val) / strat.config.rr_ratio
+
+                    if r1_offset_r == 0.0:
+                        target_sl_px = (
+                            p_spec.round_price(entry_px - tick_sz)
+                            if (p_spec and p_side_is_short)
+                            else (
+                                p_spec.round_price(entry_px + tick_sz)
+                                if p_spec
+                                else round(entry_px + (tick_sz if not p_side_is_short else -tick_sz), 4)
+                            )
                         )
-                    )
-                    # If current SL is worse than breakeven, immediately ratchet to breakeven
-                    # Safety Guard: Only ratchet to breakeven if mark_price is safely beyond breakeven
+                    else:
+                        # Recover 50% initial risk (SL at -0.5R):
+                        raw_px = (
+                            entry_val + abs(r1_offset_r) * r_dist
+                            if p_side_is_short
+                            else entry_val - abs(r1_offset_r) * r_dist
+                        )
+                        target_sl_px = p_spec.round_price(raw_px) if p_spec else round(raw_px, 4)
+
+                    # If current SL is worse than target recovered SL, immediately ratchet
+                    # Safety Guard: Only ratchet if mark_price is safely beyond target_sl_px
                     # to prevent immediately triggering market liquidation on exchange!
-                    is_safe_be = (
-                        (p_side_is_short and mark_px < (be_px - tick_sz * 2))
-                        or (not p_side_is_short and mark_px > (be_px + tick_sz * 2))
+                    is_safe_sl = (
+                        (p_side_is_short and mark_px < (target_sl_px - tick_sz * 2))
+                        or (not p_side_is_short and mark_px > (target_sl_px + tick_sz * 2))
                     )
-                    need_be_ratchet = (
-                        is_safe_be
+                    need_ratchet = (
+                        is_safe_sl
                         and (
-                            (p_side_is_short and act_pos.current_stop_loss > be_px)
-                            or (not p_side_is_short and act_pos.current_stop_loss < be_px)
+                            (p_side_is_short and act_pos.current_stop_loss > target_sl_px)
+                            or (not p_side_is_short and act_pos.current_stop_loss < target_sl_px)
                         )
                     )
-                    if need_be_ratchet and act_pos.child_stop_loss_order_id:
+                    if need_ratchet and act_pos.child_stop_loss_order_id:
                         logger.info(
-                            "[TENANT %s] 🚀 Instant Breakeven ratchet for %s: SL %.4f -> Breakeven %.4f (1R reached)",
+                            "[TENANT %s] 🚀 Instant Risk-Recovery ratchet for %s: SL %.4f -> Target SL %.4f (-0.5R, 1R reached)",
                             self.config.tenant_id,
                             p_sym,
                             act_pos.current_stop_loss,
-                            be_px,
+                            target_sl_px,
                         )
                         old_sl = act_pos.current_stop_loss
-                        if act_pos.ratchet_sl(be_px):
-                            act_pos.is_breakeven_locked = True
+                        if act_pos.ratchet_sl(target_sl_px):
+                            act_pos.is_risk_recovered = True
+                            if r1_offset_r == 0.0 or (not p_side_is_short and target_sl_px >= entry_px) or (p_side_is_short and target_sl_px <= entry_px):
+                                act_pos.is_breakeven_locked = True
                             try:
                                 await self.execution_manager.handle_trailing_stop_ratchet(
                                     order_intent=act_pos,
-                                    new_sl=be_px,
+                                    new_sl=target_sl_px,
                                     old_sl=old_sl,
                                 )
                                 # Update displayed SL in formatted_positions
-                                pos_item["stop_loss_price"] = be_px
+                                pos_item["stop_loss_price"] = target_sl_px
                             except Exception as be_err:
-                                logger.error("[TENANT %s] Failed instant breakeven ratchet on exchange: %s", self.config.tenant_id, be_err)
+                                logger.error("[TENANT %s] Failed instant risk recovery ratchet on exchange: %s", self.config.tenant_id, be_err)
 
             # Clear strategy active_position if closed on Delta Exchange
             for s_sym, strat in self.strategies.items():
@@ -2083,6 +2110,7 @@ class TenantManager:
                 max_dd = float(r_row.get("max_drawdown_pct") or d_row.get("max_drawdown_pct") or 4.0)
                 pd_mode = r_row.get("pd_condition_mode") or d_row.get("pd_condition_mode") or "either"
                 tr_rr = float(r_row.get("trail_trigger_rr") or d_row.get("trail_trigger_rr") or 1.0)
+                r1_off = float(r_row.get("r1_sl_offset_r") or d_row.get("r1_sl_offset_r") or -0.5)
                 tr_stop = bool(r_row.get("trailing_stop") if r_row.get("trailing_stop") is not None else d_row.get("trailing_stop", True))
                 tr_mode = r_row.get("trailing_mode") or d_row.get("trailing_mode") or "candle"
 
@@ -2136,6 +2164,7 @@ class TenantManager:
                     timeframe=tf,
                     pd_condition_mode=pd_mode,
                     trail_trigger_rr=tr_rr,
+                    r1_sl_offset_r=r1_off,
                     trailing_stop=tr_stop,
                     trailing_mode=tr_mode,
                     max_drawdown_pct=max_dd,

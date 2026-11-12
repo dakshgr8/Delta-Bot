@@ -575,10 +575,10 @@ async def test_tenant_live_reconciliation_only_breakevens_after_1r(btc_spec: Con
 
     await tenant.sync_live_metrics()
 
-    # Must have unlocked 1R and dispatched breakeven ratchet!
+    # Must have unlocked 1R and dispatched risk-recovery (-0.5R) ratchet!
     assert intent.r1_hit is True
-    assert intent.is_breakeven_locked is True
-    assert intent.current_stop_loss == 73500.5  # Entry + 1 tick
+    assert intent.is_risk_recovered is True
+    assert intent.current_stop_loss == 73250.0  # Entry 73500 - 0.5 * 500 = 73250 (-0.5R)
     assert tenant.execution_manager.handle_trailing_stop_ratchet.await_count == 1
 
 

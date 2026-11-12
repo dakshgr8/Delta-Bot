@@ -232,6 +232,11 @@ class BotConfig(BaseSettings):
         ge=0.0,
         description="Minimum RR profit required before trailing stop activates (default: 1.0 -> 1:1 RR)",
     )
+    r1_sl_offset_r: float = Field(
+        default=-0.5,
+        validation_alias=AliasChoices("R1_SL_OFFSET_R", "r1_sl_offset_r"),
+        description="Stop Loss R-multiple level when +1R profit is reached (-0.5 = recover 50% initial risk / SL at -0.5R, 0.0 = breakeven)",
+    )
     status_interval_sec: float = Field(
         default=60.0,
         validation_alias=AliasChoices("STATUS_INTERVAL_SEC", "status_interval_sec"),

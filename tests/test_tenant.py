@@ -1392,13 +1392,13 @@ async def test_sync_live_metrics_reconciles_active_position_and_instant_breakeve
         assert act.child_take_profit_order_id == 1669104685
         assert act.r1_hit is True
 
-        # 2. Verify instant breakeven ratchet executed
+        # 2. Verify instant risk-recovery (-0.5R) ratchet executed
         assert tenant.execution_manager.handle_trailing_stop_ratchet.called
         call_kwargs = tenant.execution_manager.handle_trailing_stop_ratchet.call_args.kwargs
-        assert call_kwargs["new_sl"] == 84.141  # 84.142 - tick_size (0.001)
+        assert call_kwargs["new_sl"] == 84.671  # 50% risk recovered: 84.142 + 0.5 * 1.058
         assert call_kwargs["old_sl"] == 85.2
-        assert act.is_breakeven_locked is True
-        assert act.current_stop_loss == 84.141
+        assert act.is_risk_recovered is True
+        assert act.current_stop_loss == 84.671
 
         # 3. Verify position clearing when position closes on Delta Exchange
         tenant.rest_client.get_open_positions = AsyncMock(return_value=[])

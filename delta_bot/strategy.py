@@ -137,10 +137,14 @@ class StrategyConfig(BaseModel):
         default=1.0, gt=0.0, description="ATR multiplier used to ratchet trailing stop loss in atr mode"
     )
     enable_breakeven: bool = Field(
-        default=True, description="Auto-ratchet Stop Loss to break-even (+1 tick) upon reaching target R profit"
+        default=True, description="Auto-ratchet Stop Loss to recover risk / break-even upon reaching target R profit"
     )
     breakeven_trigger_r: float = Field(
         default=1.0, gt=0.0, description="R-multiple floating profit required to trigger break-even ratchet (e.g. 1.0R or 1.5R)"
+    )
+    r1_sl_offset_r: float = Field(
+        default=-0.5,
+        description="Stop Loss R-multiple level when +1R profit is reached (-0.5 = recover 50% initial risk / SL at -0.5R, 0.0 = breakeven)",
     )
     enable_weekend_shield: bool = Field(
         default=True, description="Whether to block new breakout signal generation on Saturday and Sunday (UTC weekend filter)"
@@ -199,6 +203,7 @@ class OrderIntent(BaseModel):
     filled_size: int | None = Field(default=None, description="Actual executed contract lots from private user feed")
     realized_pnl: float | None = Field(default=None, description="Realized PnL of closed position in USD")
     is_breakeven_locked: bool = Field(default=False, description="Flag indicating SL has been advanced to break-even")
+    is_risk_recovered: bool = Field(default=False, description="Flag indicating SL has been advanced to recover risk (e.g. -0.5R)")
     r1_hit: bool = Field(default=False, description="Flag indicating trail_trigger_rr (+1.0R) profit has been breached")
     is_exit_recorded: bool = Field(default=False, description="Flag indicating exit has been accounted for in RiskManager")
 
@@ -549,16 +554,22 @@ class BreakoutStrategyEngine:
                             if candle.high >= entry_px + trigger_dist:
                                 pos.r1_hit = True
                                 logger.info(
-                                    "🚀 %s LONG reached +1.0R profit target (High=%.4f >= 1R Target=%.4f). Unlocking Break-Even & Trailing Stop.",
+                                    "🚀 %s LONG reached +1.0R profit target (High=%.4f >= 1R Target=%.4f). Unlocking Risk Recovery (-0.5R) & Trailing Stop.",
                                     pos.symbol,
                                     candle.high,
                                     entry_px + trigger_dist,
                                 )
 
-                    # STRICT RULE: Break-Even and Trailing Stop ONLY activate AFTER 1.0R is hit!
+                    # STRICT RULE: Risk-Recovery (-0.5R) and Trailing Stop ONLY activate AFTER 1.0R is hit!
                     candidate_sl: float | None = None
                     if pos.r1_hit:
-                        be_price = contract_spec.round_price(entry_px + contract_spec.tick_size) if getattr(self.config, "enable_breakeven", True) else None
+                        r1_offset = getattr(self.config, "r1_sl_offset_r", -0.5)
+                        if r1_offset == 0.0:
+                            protected_sl = contract_spec.round_price(entry_px + contract_spec.tick_size) if getattr(self.config, "enable_breakeven", True) else None
+                        else:
+                            # Recover 50% initial risk (SL at -0.5R): entry_px + (-0.5) * r_dist = entry_px - 0.5 * r_dist
+                            protected_sl = contract_spec.round_price(entry_px + r1_offset * r_dist)
+
                         if self.config.trailing_stop:
                             if self.config.trailing_mode == "atr":
                                 raw_trailing = candle.low - (self.config.trailing_stop_atr_mult * snapshot.atr_14)
@@ -566,10 +577,10 @@ class BreakoutStrategyEngine:
                                 buffer_val = self.config.price_buffer_ticks * contract_spec.tick_size
                                 raw_trailing = candle.low - buffer_val
 
-                            # Lock at least break-even (+1 tick) if breakeven is enabled, and trail higher with candle lows
-                            candidate_sl = max(be_price, raw_trailing) if be_price is not None else raw_trailing
+                            # Lock at least recovered risk level (SL at -0.5R), and trail higher with candle lows
+                            candidate_sl = max(protected_sl, raw_trailing) if protected_sl is not None else raw_trailing
                         else:
-                            candidate_sl = be_price
+                            candidate_sl = protected_sl
 
                     if candidate_sl is not None:
                         # Safety Guard: Stop loss for long position must never be set at or above candle close
@@ -578,7 +589,8 @@ class BreakoutStrategyEngine:
                         if quantized_sl > pos.current_stop_loss:
                             old_sl = pos.current_stop_loss
                             if pos.ratchet_sl(quantized_sl):
-                                if be_price is not None and quantized_sl >= be_price:
+                                pos.is_risk_recovered = True
+                                if quantized_sl >= entry_px:
                                     pos.is_breakeven_locked = True
                                 await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
 
@@ -609,16 +621,22 @@ class BreakoutStrategyEngine:
                             if candle.low <= entry_px - trigger_dist:
                                 pos.r1_hit = True
                                 logger.info(
-                                    "🚀 %s SHORT reached +1.0R profit target (Low=%.4f <= 1R Target=%.4f). Unlocking Break-Even & Trailing Stop.",
+                                    "🚀 %s SHORT reached +1.0R profit target (Low=%.4f <= 1R Target=%.4f). Unlocking Risk Recovery (-0.5R) & Trailing Stop.",
                                     pos.symbol,
                                     candle.low,
                                     entry_px - trigger_dist,
                                 )
 
-                    # STRICT RULE: Break-Even and Trailing Stop ONLY activate AFTER 1.0R is hit!
+                    # STRICT RULE: Risk-Recovery (-0.5R) and Trailing Stop ONLY activate AFTER 1.0R is hit!
                     candidate_sl: float | None = None
                     if pos.r1_hit:
-                        be_price = contract_spec.round_price(entry_px - contract_spec.tick_size) if getattr(self.config, "enable_breakeven", True) else None
+                        r1_offset = getattr(self.config, "r1_sl_offset_r", -0.5)
+                        if r1_offset == 0.0:
+                            protected_sl = contract_spec.round_price(entry_px - contract_spec.tick_size) if getattr(self.config, "enable_breakeven", True) else None
+                        else:
+                            # Recover 50% initial risk (SL at -0.5R): entry_px - (-0.5) * r_dist = entry_px + 0.5 * r_dist
+                            protected_sl = contract_spec.round_price(entry_px - r1_offset * r_dist)
+
                         if self.config.trailing_stop:
                             if self.config.trailing_mode == "atr":
                                 raw_trailing = candle.high + (self.config.trailing_stop_atr_mult * snapshot.atr_14)
@@ -626,10 +644,10 @@ class BreakoutStrategyEngine:
                                 buffer_val = self.config.price_buffer_ticks * contract_spec.tick_size
                                 raw_trailing = candle.high + buffer_val
 
-                            # Lock at least break-even (-1 tick) if breakeven is enabled, and trail lower with candle highs
-                            candidate_sl = min(be_price, raw_trailing) if be_price is not None else raw_trailing
+                            # Lock at least recovered risk level (SL at -0.5R), and trail lower with candle highs
+                            candidate_sl = min(protected_sl, raw_trailing) if protected_sl is not None else raw_trailing
                         else:
-                            candidate_sl = be_price
+                            candidate_sl = protected_sl
 
                     if candidate_sl is not None and candidate_sl > 0:
                         # Safety Guard: Stop loss for short position must never be set at or below candle close
@@ -638,7 +656,8 @@ class BreakoutStrategyEngine:
                         if quantized_sl < pos.current_stop_loss:
                             old_sl = pos.current_stop_loss
                             if pos.ratchet_sl(quantized_sl):
-                                if be_price is not None and quantized_sl <= be_price:
+                                pos.is_risk_recovered = True
+                                if quantized_sl <= entry_px:
                                     pos.is_breakeven_locked = True
                                 await self._emit(self._on_sl_ratchet_cb, pos, old_sl, pos.current_stop_loss)
 

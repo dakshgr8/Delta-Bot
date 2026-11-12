@@ -91,6 +91,10 @@ class ConfigUpdateRequest(BaseModel):
         ge=0.0,
         description="Minimum RR profit required before trailing stop activates (1.0 = 1:1 RR)",
     )
+    r1_sl_offset_r: float | None = Field(
+        default=None,
+        description="Stop Loss R-multiple when +1R profit is reached (-0.5 = recover 50% initial risk)",
+    )
     trailing_stop_atr_mult: float | None = Field(
         default=None,
         validation_alias=AliasChoices("trailing_stop_atr_mult", "atr_multiplier"),
@@ -201,6 +205,7 @@ class TenantCreateRequest(BaseModel):
     pd_condition_mode: str = Field(default="either", description="Previous day level condition mode: 'either' or 'strict_breakout'")
     trailing_mode: str = Field(default="candle", description="Trailing stop mode: 'candle' (Trading-Academy V2) or 'atr'")
     trail_trigger_rr: float = Field(default=1.0, ge=0.0, description="Minimum RR profit before trailing activates")
+    r1_sl_offset_r: float = Field(default=-0.5, description="Stop Loss R-multiple level when +1R profit is reached (-0.5 = recover 50% initial risk)")
     max_drawdown_pct: float = Field(default=4.0, ge=0.5, le=50.0, description="Daily max drawdown limit %")
     symbols: list[str] = Field(default_factory=lambda: ["BTCUSD", "ETHUSD", "SOLUSD", "XRPUSD", "XAUTUSD"])
     is_active: bool = Field(default=True, description="Whether trading signal evaluation is active")
@@ -225,6 +230,7 @@ class TenantUpdateRequest(BaseModel):
     pd_condition_mode: str | None = None
     trailing_mode: str | None = None
     trail_trigger_rr: float | None = None
+    r1_sl_offset_r: float | None = None
     max_drawdown_pct: float | None = Field(default=None, ge=0.1, le=100.0)
     symbols: list[str] | None = None
     is_active: bool | None = None
@@ -946,6 +952,7 @@ def get_full_state_packet(
                 "max_drawdown_pct": max_dd,
                 "pd_condition_mode": next((s.config.pd_condition_mode for s in orchestrator.strategies.values()), "either"),
                 "trail_trigger_rr": next((s.config.trail_trigger_rr for s in orchestrator.strategies.values()), 1.0),
+                "r1_sl_offset_r": next((getattr(s.config, "r1_sl_offset_r", -0.5) for s in orchestrator.strategies.values()), -0.5),
                 "max_pending_bars": next((s.config.max_pending_bars for s in orchestrator.strategies.values()), 3),
                 "trailing_sl_enabled": next((s.config.trailing_stop for s in orchestrator.strategies.values()), True),
                 "trailing_stop_atr_mult": next((s.config.trailing_stop_atr_mult for s in orchestrator.strategies.values()), 2.0),
@@ -2524,6 +2531,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 updates["pd_condition_mode"] = payload.pd_condition_mode
             if payload.trail_trigger_rr is not None:
                 updates["trail_trigger_rr"] = payload.trail_trigger_rr
+            if payload.r1_sl_offset_r is not None:
+                updates["r1_sl_offset_r"] = payload.r1_sl_offset_r
             if payload.trailing_mode is not None:
                 updates["trailing_mode"] = payload.trailing_mode
             if payload.trailing_sl_enabled is not None:
@@ -2561,6 +2570,8 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 updates["pd_condition_mode"] = payload.pd_condition_mode
             if payload.trail_trigger_rr is not None:
                 updates["trail_trigger_rr"] = payload.trail_trigger_rr
+            if payload.r1_sl_offset_r is not None:
+                updates["r1_sl_offset_r"] = payload.r1_sl_offset_r
             if payload.trailing_mode is not None:
                 updates["trailing_mode"] = payload.trailing_mode
             if payload.trailing_sl_enabled is not None:
@@ -2724,6 +2735,18 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                     for s in t.strategies.values():
                         s.config = s.config.model_copy(update={"trail_trigger_rr": tr_rr})
             updated.append(f"trail_trigger_rr={tr_rr}")
+
+        if payload.r1_sl_offset_r is not None:
+            r1_off = float(payload.r1_sl_offset_r)
+            orchestrator.config.r1_sl_offset_r = r1_off
+            for s in orchestrator.strategies.values():
+                s.config = s.config.model_copy(update={"r1_sl_offset_r": r1_off})
+            if hasattr(orchestrator, "tenant_manager"):
+                for t in orchestrator.tenant_manager.tenants.values():
+                    t.config.r1_sl_offset_r = r1_off
+                    for s in t.strategies.values():
+                        s.config = s.config.model_copy(update={"r1_sl_offset_r": r1_off})
+            updated.append(f"r1_sl_offset_r={r1_off}")
 
         # Handle API keys update or reset
         if payload.reset_keys:
