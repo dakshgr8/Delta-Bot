@@ -343,6 +343,17 @@ class RingBufferLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = self.format(record)
+            # Filter out spammy heartbeat/keep-alive frames from ring buffer so trading logs aren't flushed
+            if record.levelno < logging.INFO and any(
+                spam in msg for spam in (
+                    "keep-alive",
+                    "heartbeat",
+                    "Clock offset updated",
+                    "Dispatched heartbeat",
+                    "Constructed HMAC signature",
+                )
+            ):
+                return
             entry = {
                 "timestamp": record.created,
                 "time_str": datetime.fromtimestamp(record.created, tz=timezone.utc).strftime(
@@ -395,7 +406,7 @@ class RingBufferLogHandler(logging.Handler):
 
 
 # Global singleton log handler attached to root/bot loggers
-log_handler = RingBufferLogHandler(capacity=200)
+log_handler = RingBufferLogHandler(capacity=1000)
 formatter = logging.Formatter("%(message)s")
 log_handler.setFormatter(formatter)
 log_handler.setLevel(logging.DEBUG)
@@ -925,9 +936,9 @@ def get_full_state_packet(
             "delta_api_key_masked": current_tenant_dict.get("delta_api_key_masked", ""),
             "demo_api_key_masked": current_tenant_dict.get("demo_api_key_masked", ""),
             "last_sync_error": tenant.last_sync_error if tenant else None,
-            "delta_base_url": orchestrator.config.delta_base_url,
-            "delta_demo_base_url": orchestrator.config.delta_demo_base_url,
-            "active_base_url": orchestrator.config.active_base_url,
+            "delta_base_url": tenant.config.delta_base_url if tenant else orchestrator.config.delta_base_url,
+            "delta_demo_base_url": tenant.config.demo_base_url if tenant else orchestrator.config.delta_demo_base_url,
+            "active_base_url": tenant.config.get_active_base_url() if tenant else orchestrator.config.active_base_url,
             "config": {
                 "risk_pct": risk_pct,
                 "leverage": lev,
@@ -1609,7 +1620,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
 
     @app.get("/api/logs")
     async def get_system_logs(
-        limit: int = Query(default=50, ge=1, le=200),
+        limit: int = Query(default=100, ge=1, le=1000),
         level: str | None = Query(default=None),
         tenant_id: str | None = Query(default=None),
         x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
@@ -1621,6 +1632,55 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             target_t = auth.tenant_id
         logs = log_handler.get_logs(limit=limit, level=level, tenant_id=target_t)
         return JSONResponse(content={"count": len(logs), "logs": logs})
+
+    @app.get("/api/tenants/{tenant_id}/exchange-history")
+    async def get_tenant_exchange_history(
+        tenant_id: str,
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> JSONResponse:
+        """Queries Delta Exchange directly for closed orders and fills history for a tenant."""
+        tenant = resolve_tenant(orchestrator, tenant_id)
+        if not tenant:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+        if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
+
+        client = tenant.rest_client or (tenant.execution_manager.client if tenant.execution_manager else None)
+        if not client or not client.config.has_valid_credentials():
+            return JSONResponse(content={"tenant_id": tenant.config.tenant_id, "orders": [], "fills": [], "message": "No valid exchange credentials."})
+
+        orders_res: Any = None
+        fills_res: Any = None
+        try:
+            orders_res = await client._http_engine.request(
+                method="GET",
+                path="/v2/orders/history",
+                is_authenticated=True,
+            )
+        except Exception as e:
+            try:
+                orders_res = await client._http_engine.request(
+                    method="GET",
+                    path="/v2/orders?state=closed",
+                    is_authenticated=True,
+                )
+            except Exception as e2:
+                orders_res = {"error": str(e), "error_fallback": str(e2)}
+
+        try:
+            fills_res = await client._http_engine.request(
+                method="GET",
+                path="/v2/fills",
+                is_authenticated=True,
+            )
+        except Exception as e:
+            fills_res = {"error": str(e)}
+
+        return JSONResponse(content={
+            "tenant_id": tenant.config.tenant_id,
+            "orders": orders_res,
+            "fills": fills_res,
+        })
 
     @app.post(
         "/api/control/reset-circuit-breaker",

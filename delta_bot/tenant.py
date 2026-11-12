@@ -423,6 +423,55 @@ class TenantInstance:
                 symbol=intent.symbol,
             )
 
+        # Cancel counterpart / leftover child protection orders on exchange to prevent orphaned fills
+        if self.execution_manager is not None:
+            pid = intent.product_id
+            if pid is None:
+                spec = self.contract_specs.get(intent.symbol)
+                pid = spec.product_id if spec else None
+            if pid:
+                if status == OrderStatus.CLOSED_TP and intent.child_stop_loss_order_id:
+                    try:
+                        logger.info(
+                            "[TENANT %s] Position %s closed by TP; cancelling child SL order #%d",
+                            self.config.tenant_id,
+                            intent.symbol,
+                            intent.child_stop_loss_order_id,
+                        )
+                        await self.execution_manager.client.cancel_order(
+                            product_id=pid,
+                            order_id=intent.child_stop_loss_order_id,
+                        )
+                    except Exception as c_err:
+                        logger.debug("[TENANT %s] Failed cancelling child SL after TP: %s", self.config.tenant_id, c_err)
+                elif status == OrderStatus.CLOSED_SL and intent.child_take_profit_order_id:
+                    try:
+                        logger.info(
+                            "[TENANT %s] Position %s closed by SL; cancelling child TP order #%d",
+                            self.config.tenant_id,
+                            intent.symbol,
+                            intent.child_take_profit_order_id,
+                        )
+                        await self.execution_manager.client.cancel_order(
+                            product_id=pid,
+                            order_id=intent.child_take_profit_order_id,
+                        )
+                    except Exception as c_err:
+                        logger.debug("[TENANT %s] Failed cancelling child TP after SL: %s", self.config.tenant_id, c_err)
+                elif status in (OrderStatus.CLOSED_MANUAL, OrderStatus.CLOSED_CIRCUIT_BREAKER, OrderStatus.CLOSED_TIMEOUT):
+                    for cid in (intent.child_stop_loss_order_id, intent.child_take_profit_order_id):
+                        if cid:
+                            try:
+                                logger.info(
+                                    "[TENANT %s] Position %s closed manually/CB; cancelling child order #%d",
+                                    self.config.tenant_id,
+                                    intent.symbol,
+                                    cid,
+                                )
+                                await self.execution_manager.client.cancel_order(product_id=pid, order_id=cid)
+                            except Exception as c_err:
+                                logger.debug("[TENANT %s] Failed cancelling child order after manual close: %s", self.config.tenant_id, c_err)
+
     def register_contract_spec(self, spec: ContractSpec) -> None:
         """Caches contract specification and registers with paper simulator (perpetual futures only)."""
         if spec.contract_type != "perpetual_futures":
@@ -805,11 +854,34 @@ class TenantInstance:
                     ttl_bars = intent.ttl_bars if intent else (strategy.config.max_pending_bars if strategy else 3)
                     ttl_rem = max(0, ttl_bars - bars_elapsed)
 
-                    # Guard: If resting entry stop order is missing attached brackets, attach them
+                    # Guard 1: Purge orphaned child protection/reduce-only orders if there is NO open position for this product
+                    if o.product_id not in active_pos_pids and (
+                        getattr(o, "reduce_only", False)
+                        or str(getattr(o, "stop_order_type", "")).lower() in ("stop_loss_order", "take_profit_order")
+                    ):
+                        logger.warning(
+                            "[TENANT %s] Purging orphaned child exit order #%d for %s (no active position on exchange)",
+                            self.config.tenant_id,
+                            o.id,
+                            sym or o.product_id,
+                        )
+                        try:
+                            await self.rest_client.cancel_order(product_id=o.product_id, order_id=o.id)
+                        except Exception as c_err:
+                            logger.debug("[TENANT %s] Failed cancelling orphaned exit order #%d: %s", self.config.tenant_id, o.id, c_err)
+                        continue
+
+                    # Guard 2: If resting entry stop order is missing attached brackets, attach them
                     # Only attempt on open resting entry stop orders (never child protection orders for active positions)
-                    if o.product_id not in active_pos_pids and o.stop_price is not None and (
-                        getattr(o, "bracket_stop_loss_price", None) is None
-                        or getattr(o, "bracket_take_profit_price", None) is None
+                    if (
+                        o.product_id not in active_pos_pids
+                        and not getattr(o, "reduce_only", False)
+                        and str(getattr(o, "stop_order_type", "")).lower() not in ("stop_loss_order", "take_profit_order")
+                        and o.stop_price is not None
+                        and (
+                            getattr(o, "bracket_stop_loss_price", None) is None
+                            or getattr(o, "bracket_take_profit_price", None) is None
+                        )
                     ):
                         calc_sl = (
                             intent.initial_stop_loss
@@ -1051,9 +1123,29 @@ class TenantInstance:
 
                 # Reconstruct OrderIntent if missing (e.g. after restart or external fill)
                 if strat.active_position is None:
-                    calc_sl = sl_px if sl_px is not None else (
-                        p_spec.round_price(entry_px * (1.015 if p_side_is_short else 0.985)) if p_spec else round(entry_px * (1.015 if p_side_is_short else 0.985), 4)
+                    # Check if position on exchange was already ratcheted to breakeven or trailing stop before bot restart
+                    is_already_be = (
+                        (sl_px is not None)
+                        and (
+                            (not p_side_is_short and sl_px >= entry_px)
+                            or (p_side_is_short and sl_px <= entry_px)
+                        )
                     )
+                    if is_already_be:
+                        calc_sl = (
+                            p_spec.round_price(entry_px * (1.015 if p_side_is_short else 0.985))
+                            if p_spec
+                            else round(entry_px * (1.015 if p_side_is_short else 0.985), 4)
+                        )
+                        current_sl = sl_px
+                    else:
+                        calc_sl = sl_px if sl_px is not None else (
+                            p_spec.round_price(entry_px * (1.015 if p_side_is_short else 0.985))
+                            if p_spec
+                            else round(entry_px * (1.015 if p_side_is_short else 0.985), 4)
+                        )
+                        current_sl = calc_sl
+
                     calc_tp = tp_px if tp_px is not None else (
                         p_spec.round_price(entry_px * (0.97 if p_side_is_short else 1.03)) if p_spec else round(entry_px * (0.97 if p_side_is_short else 1.03), 4)
                     )
@@ -1063,7 +1155,7 @@ class TenantInstance:
                         status=OrderStatus.TRIGGERED,
                         trigger_price=entry_px,
                         initial_stop_loss=calc_sl,
-                        current_stop_loss=calc_sl,
+                        current_stop_loss=current_sl,
                         take_profit=calc_tp,
                         rr_ratio=getattr(strat.config, "rr_ratio", 2.0),
                         contract_lots=lots,
@@ -1082,14 +1174,18 @@ class TenantInstance:
                         fill_price=entry_px,
                         filled_size=lots,
                     )
-                    # Check +1R trigger condition immediately
-                    r_dist = abs(entry_px - calc_sl)
-                    trigger_dist = r_dist * getattr(strat.config, "trail_trigger_rr", 1.0)
-                    if trigger_dist > 0:
-                        if p_side_is_short and mark_px <= (entry_px - trigger_dist):
-                            intent.r1_hit = True
-                        elif not p_side_is_short and mark_px >= (entry_px + trigger_dist):
-                            intent.r1_hit = True
+                    if is_already_be:
+                        intent.is_breakeven_locked = True
+                        intent.r1_hit = True
+                    else:
+                        # Check +1R trigger condition immediately
+                        r_dist = abs(entry_px - calc_sl)
+                        trigger_dist = r_dist * getattr(strat.config, "trail_trigger_rr", 1.0)
+                        if trigger_dist > 0:
+                            if p_side_is_short and mark_px <= (entry_px - trigger_dist):
+                                intent.r1_hit = True
+                            elif not p_side_is_short and mark_px >= (entry_px + trigger_dist):
+                                intent.r1_hit = True
 
                     strat.active_position = intent
                     logger.info(
@@ -1113,6 +1209,34 @@ class TenantInstance:
                     if sl_px and abs(pos_obj.current_stop_loss - sl_px) > 1e-6:
                         pos_obj.current_stop_loss = sl_px
 
+                    # Check +1.0R profit target breach from live mark price
+                    if not pos_obj.r1_hit:
+                        entry_val = pos_obj.fill_price if (pos_obj.fill_price and pos_obj.fill_price > 0) else entry_px
+                        r_dist = abs(entry_val - pos_obj.initial_stop_loss)
+                        tr_trigger = getattr(strat.config, "trail_trigger_rr", 1.0)
+                        if tr_trigger <= 0:
+                            pos_obj.r1_hit = True
+                        elif r_dist > 0:
+                            trigger_dist = r_dist * tr_trigger
+                            if p_side_is_short and mark_px <= (entry_val - trigger_dist):
+                                pos_obj.r1_hit = True
+                                logger.info(
+                                    "[TENANT %s] 🚀 %s SHORT reached +1.0R profit target (Mark=%.4f <= Target=%.4f). Unlocking Break-Even & Trailing.",
+                                    self.config.tenant_id,
+                                    p_sym,
+                                    mark_px,
+                                    entry_val - trigger_dist,
+                                )
+                            elif not p_side_is_short and mark_px >= (entry_val + trigger_dist):
+                                pos_obj.r1_hit = True
+                                logger.info(
+                                    "[TENANT %s] 🚀 %s LONG reached +1.0R profit target (Mark=%.4f >= Target=%.4f). Unlocking Break-Even & Trailing.",
+                                    self.config.tenant_id,
+                                    p_sym,
+                                    mark_px,
+                                    entry_val + trigger_dist,
+                                )
+
                 # Sync to state_manager
                 if hasattr(self, "state_manager") and self.state_manager is not None:
                     self.state_manager.register_intent(strat.active_position)
@@ -1123,7 +1247,7 @@ class TenantInstance:
 
                 # Instant Breakeven / Trailing check for positions where 1R target is already reached
                 act_pos = strat.active_position
-                if act_pos is not None and act_pos.r1_hit and self.execution_manager is not None:
+                if act_pos is not None and act_pos.r1_hit and getattr(strat.config, "enable_breakeven", True) and self.execution_manager is not None:
                     p_spec = self.contract_specs.get(p_sym)
                     tick_sz = p_spec.tick_size if p_spec else 0.001
                     be_px = (
@@ -1136,9 +1260,18 @@ class TenantInstance:
                         )
                     )
                     # If current SL is worse than breakeven, immediately ratchet to breakeven
+                    # Safety Guard: Only ratchet to breakeven if mark_price is safely beyond breakeven
+                    # to prevent immediately triggering market liquidation on exchange!
+                    is_safe_be = (
+                        (p_side_is_short and mark_px < (be_px - tick_sz * 2))
+                        or (not p_side_is_short and mark_px > (be_px + tick_sz * 2))
+                    )
                     need_be_ratchet = (
-                        (p_side_is_short and act_pos.current_stop_loss > be_px)
-                        or (not p_side_is_short and act_pos.current_stop_loss < be_px)
+                        is_safe_be
+                        and (
+                            (p_side_is_short and act_pos.current_stop_loss > be_px)
+                            or (not p_side_is_short and act_pos.current_stop_loss < be_px)
+                        )
                     )
                     if need_be_ratchet and act_pos.child_stop_loss_order_id:
                         logger.info(
@@ -1165,11 +1298,29 @@ class TenantInstance:
             # Clear strategy active_position if closed on Delta Exchange
             for s_sym, strat in self.strategies.items():
                 if strat.active_position is not None and s_sym not in active_syms:
+                    pos_obj = strat.active_position
                     logger.info(
                         "[TENANT %s] Live position for %s closed on Delta Exchange. Clearing active_position.",
                         self.config.tenant_id,
                         s_sym,
                     )
+                    # Cleanup leftover child orders on exchange so they never turn into rogue trades
+                    if self.execution_manager is not None:
+                        for child_id in (pos_obj.child_stop_loss_order_id, pos_obj.child_take_profit_order_id):
+                            if child_id:
+                                try:
+                                    logger.info(
+                                        "[TENANT %s] Cancelling leftover child order #%d for closed %s position",
+                                        self.config.tenant_id,
+                                        child_id,
+                                        s_sym,
+                                    )
+                                    await self.execution_manager.client.cancel_order(
+                                        product_id=pos_obj.product_id,
+                                        order_id=child_id,
+                                    )
+                                except Exception as c_err:
+                                    logger.debug("[TENANT %s] Cleanup child order #%d failed: %s", self.config.tenant_id, child_id, c_err)
                     strat.active_position = None
             if formatted_positions and self.live_unrealized_pnl == 0.0:
                 self.live_unrealized_pnl = round(pos_pnl_acc, 4)

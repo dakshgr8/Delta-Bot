@@ -299,11 +299,37 @@ class OrderRouter:
             if err.error_code == "immediate_execution_stop_order":
                 logger.warning(
                     "[BREAKOUT GATEWAY] Stop trigger %.4f on %s (%s) was already breached (immediate_execution_stop_order). "
-                    "Falling back to immediate market order entry with attached brackets.",
+                    "Checking mark price slippage before market fallback...",
                     stop_price,
                     symbol,
                     side,
                 )
+                curr_mark = 0.0
+                try:
+                    ticker = await self.client.get_ticker(symbol)
+                    mp = getattr(ticker, "mark_price", 0.0)
+                    if isinstance(mp, (int, float)):
+                        curr_mark = float(mp)
+                except Exception:
+                    pass
+
+                # If mark price has run away past 0.3% of trigger or 25% of risk distance, abort to prevent chasing!
+                if curr_mark > 0:
+                    per_unit_risk = abs(stop_price - bracket_stop_loss_price) if bracket_stop_loss_price else (stop_price * 0.01)
+                    max_slip = min(per_unit_risk * 0.25, stop_price * 0.003)
+                    slip = (curr_mark - stop_price) if str(side).lower() == "buy" else (stop_price - curr_mark)
+                    if slip > max_slip:
+                        logger.error(
+                            "[BREAKOUT GATEWAY] Aborting market order fallback for %s: price has already run away by %.4f "
+                            "(current_mark=%.4f vs stop_price=%.4f, max_allowed=%.4f). Chasing now risks immediate peak drawdown!",
+                            symbol,
+                            slip,
+                            curr_mark,
+                            stop_price,
+                            max_slip,
+                        )
+                        raise
+
                 fallback_cid = f"{client_order_id[:29]}_m" if client_order_id else None
                 market_order = await self.client.place_order(
                     product_id=product_id,
@@ -401,30 +427,70 @@ class OrderRouter:
 
         if not attached:
             if not has_sl and stop_loss_price is not None:
+                # Mark Price Inversion Guard for fallback child SL:
+                # A Sell Stop Loss order MUST be strictly below current mark price.
+                # A Buy Stop Loss order MUST be strictly above current mark price.
+                is_safe_sl = True
+                curr_mark = 0.0
                 try:
-                    sl_res = await self.client.place_order(
-                        product_id=product_id,
-                        size=size,
-                        side=exit_side,
-                        order_type="market_order",
-                        stop_price=stop_loss_price,
-                        stop_order_type="stop_loss_order",
-                        reduce_only=True,
-                        time_in_force="gtc",
-                        symbol=symbol,
-                    )
-                    logger.info(
-                        "[PROTECTION GUARD] Placed fallback child Stop Loss order ID=%d for %s at %.4f",
-                        sl_res.id,
-                        symbol,
-                        stop_loss_price,
-                    )
-                except Exception as sl_exc:
-                    logger.critical(
-                        "[PROTECTION GUARD] Failed to place child SL order for %s: %s! Position may be unprotected!",
-                        symbol,
-                        sl_exc,
-                    )
+                    ticker = await self.client.get_ticker(symbol)
+                    mp = getattr(ticker, "mark_price", 0.0)
+                    if isinstance(mp, (int, float)):
+                        curr_mark = float(mp)
+                except Exception:
+                    pass
+
+                if curr_mark > 0:
+                    spec = None
+                    try:
+                        spec = self.client.get_cached_contract_spec(symbol)
+                    except Exception:
+                        pass
+                    t_sz = spec.tick_size if (spec and isinstance(getattr(spec, "tick_size", None), (int, float))) else 0.001
+                    if exit_side == "sell" and stop_loss_price >= (curr_mark - t_sz):
+                        logger.error(
+                            "[PROTECTION GUARD] Refusing unsafe child Sell Stop order at %.4f for %s: mark price is %.4f! "
+                            "Placing it now would cause instant liquidation!",
+                            stop_loss_price,
+                            symbol,
+                            curr_mark,
+                        )
+                        is_safe_sl = False
+                    elif exit_side == "buy" and stop_loss_price <= (curr_mark + t_sz):
+                        logger.error(
+                            "[PROTECTION GUARD] Refusing unsafe child Buy Stop order at %.4f for %s: mark price is %.4f! "
+                            "Placing it now would cause instant liquidation!",
+                            stop_loss_price,
+                            symbol,
+                            curr_mark,
+                        )
+                        is_safe_sl = False
+
+                if is_safe_sl:
+                    try:
+                        sl_res = await self.client.place_order(
+                            product_id=product_id,
+                            size=size,
+                            side=exit_side,
+                            order_type="market_order",
+                            stop_price=stop_loss_price,
+                            stop_order_type="stop_loss_order",
+                            reduce_only=True,
+                            time_in_force="gtc",
+                            symbol=symbol,
+                        )
+                        logger.info(
+                            "[PROTECTION GUARD] Placed fallback child Stop Loss order ID=%d for %s at %.4f",
+                            sl_res.id,
+                            symbol,
+                            stop_loss_price,
+                        )
+                    except Exception as sl_exc:
+                        logger.critical(
+                            "[PROTECTION GUARD] Failed to place child SL order for %s: %s! Position may be unprotected!",
+                            symbol,
+                            sl_exc,
+                        )
 
             if not has_tp and take_profit_price is not None:
                 try:
@@ -1103,9 +1169,58 @@ class ExecutionManager:
                     return False
 
         product_id = order_intent.product_id
+        spec = None
         if product_id is None:
             spec = await self.resolve_product_spec(order_intent.symbol)
             product_id = spec.product_id
+        else:
+            try:
+                spec = self.client.get_cached_contract_spec(order_intent.symbol)
+            except Exception:
+                spec = None
+
+        # Mark Price Inversion Guard:
+        # A Sell Stop Loss order MUST be strictly below current market/mark price.
+        # A Buy Stop Loss order MUST be strictly above current market/mark price.
+        # Setting a Stop Loss across the market price triggers immediate execution on Delta Exchange!
+        tick_sz = spec.tick_size if (spec and isinstance(getattr(spec, "tick_size", None), (int, float))) else 0.001
+        current_mark = 0.0
+        if self.state_manager is not None and hasattr(self.state_manager, "_cached_mark_prices"):
+            val = self.state_manager._cached_mark_prices.get(order_intent.symbol, 0.0)
+            if isinstance(val, (int, float)):
+                current_mark = float(val)
+        if current_mark <= 0.0 and self.client is not None:
+            try:
+                ticker = await self.client.get_ticker(order_intent.symbol)
+                mp = getattr(ticker, "mark_price", 0.0)
+                if isinstance(mp, (int, float)):
+                    current_mark = float(mp)
+            except Exception:
+                pass
+
+        if current_mark > 0:
+            if order_intent.signal_type == SignalType.BULLISH_BREAKOUT:
+                # Long position: SL must be strictly below current_mark
+                if new_sl >= (current_mark - tick_sz):
+                    logger.warning(
+                        "[STOP LOSS GUARD] Rejected unsafe Long SL ratchet for %s: new_sl (%.4f) >= mark_price (%.4f) - 1 tick. "
+                        "Ratcheting now would trigger immediate market liquidation!",
+                        order_intent.symbol,
+                        new_sl,
+                        current_mark,
+                    )
+                    return False
+            elif order_intent.signal_type == SignalType.BEARISH_BREAKDOWN:
+                # Short position: SL must be strictly above current_mark
+                if new_sl <= (current_mark + tick_sz):
+                    logger.warning(
+                        "[STOP LOSS GUARD] Rejected unsafe Short SL ratchet for %s: new_sl (%.4f) <= mark_price (%.4f) + 1 tick. "
+                        "Ratcheting now would trigger immediate market liquidation!",
+                        order_intent.symbol,
+                        new_sl,
+                        current_mark,
+                    )
+                    return False
 
         # ---------------------------------------------------------------------
         # Tier 1: Pending Entry Order (Parent resting on order book)

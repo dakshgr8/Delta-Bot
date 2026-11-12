@@ -539,52 +539,42 @@ class BreakoutStrategyEngine:
                     if r_dist <= 0 and pos.take_profit and self.config.rr_ratio > 0:
                         r_dist = abs(pos.take_profit - entry_px) / self.config.rr_ratio
 
-                    # Check +1.0R / trail_trigger_rr profit breach
-                    if not pos.r1_hit and self.config.trail_trigger_rr > 0 and r_dist > 0 and entry_px > 0:
-                        trigger_dist = r_dist * self.config.trail_trigger_rr
-                        if candle.high >= entry_px + trigger_dist:
+                    # Check +1.0R profit target breach
+                    if not pos.r1_hit and r_dist > 0 and entry_px > 0:
+                        tr_trigger = getattr(self.config, "trail_trigger_rr", 1.0)
+                        if tr_trigger <= 0:
                             pos.r1_hit = True
-                            logger.info(
-                                "🚀 %s LONG reached +%.1fR profit target (High=%.4f >= Target=%.4f)",
-                                pos.symbol,
-                                self.config.trail_trigger_rr,
-                                candle.high,
-                                entry_px + trigger_dist,
-                            )
+                        else:
+                            trigger_dist = r_dist * tr_trigger
+                            if candle.high >= entry_px + trigger_dist:
+                                pos.r1_hit = True
+                                logger.info(
+                                    "🚀 %s LONG reached +1.0R profit target (High=%.4f >= 1R Target=%.4f). Unlocking Break-Even & Trailing Stop.",
+                                    pos.symbol,
+                                    candle.high,
+                                    entry_px + trigger_dist,
+                                )
 
-                    # Automated Break-Even condition check
-                    be_triggered = bool(
-                        self.config.enable_breakeven
-                        and r_dist > 0
-                        and (
-                            pos.r1_hit
-                            or candle.high >= entry_px + (self.config.breakeven_trigger_r * r_dist)
-                        )
-                    )
-                    be_price = contract_spec.round_price(entry_px + contract_spec.tick_size) if be_triggered else None
-
-                    # Unified Trailing Stop & Break-Even Evaluation (Single Ratchet Emission)
+                    # STRICT RULE: Break-Even and Trailing Stop ONLY activate AFTER 1.0R is hit!
                     candidate_sl: float | None = None
-                    should_trail = self.config.trailing_stop and (self.config.trail_trigger_rr <= 0 or pos.r1_hit)
-                    if should_trail:
-                        if self.config.trailing_mode == "atr":
-                            raw_trailing = candle.low - (self.config.trailing_stop_atr_mult * snapshot.atr_14)
-                        else:
-                            # Trading-Academy V2 candle extreme trailing mode
-                            buffer_val = self.config.price_buffer_ticks * contract_spec.tick_size
-                            raw_trailing = candle.low - buffer_val
+                    if pos.r1_hit:
+                        be_price = contract_spec.round_price(entry_px + contract_spec.tick_size) if getattr(self.config, "enable_breakeven", True) else None
+                        if self.config.trailing_stop:
+                            if self.config.trailing_mode == "atr":
+                                raw_trailing = candle.low - (self.config.trailing_stop_atr_mult * snapshot.atr_14)
+                            else:
+                                buffer_val = self.config.price_buffer_ticks * contract_spec.tick_size
+                                raw_trailing = candle.low - buffer_val
 
-                        if pos.r1_hit or be_triggered:
-                            # Lock at least breakeven (+1 tick), and trail higher with candle lows above breakeven
-                            candidate_sl = max(be_price or (entry_px + contract_spec.tick_size), raw_trailing)
+                            # Lock at least break-even (+1 tick) if breakeven is enabled, and trail higher with candle lows
+                            candidate_sl = max(be_price, raw_trailing) if be_price is not None else raw_trailing
                         else:
-                            candidate_sl = raw_trailing
-
-                    elif be_triggered and not pos.is_breakeven_locked:
-                        candidate_sl = be_price
+                            candidate_sl = be_price
 
                     if candidate_sl is not None:
-                        quantized_sl = contract_spec.round_price(candidate_sl)
+                        # Safety Guard: Stop loss for long position must never be set at or above candle close
+                        max_allowed_sl = contract_spec.round_price(candle.close - contract_spec.tick_size)
+                        quantized_sl = min(contract_spec.round_price(candidate_sl), max_allowed_sl)
                         if quantized_sl > pos.current_stop_loss:
                             old_sl = pos.current_stop_loss
                             if pos.ratchet_sl(quantized_sl):
@@ -609,52 +599,42 @@ class BreakoutStrategyEngine:
                     if r_dist <= 0 and pos.take_profit and self.config.rr_ratio > 0:
                         r_dist = abs(pos.take_profit - entry_px) / self.config.rr_ratio
 
-                    # Check +1.0R / trail_trigger_rr profit breach
-                    if not pos.r1_hit and self.config.trail_trigger_rr > 0 and r_dist > 0 and entry_px > 0:
-                        trigger_dist = r_dist * self.config.trail_trigger_rr
-                        if candle.low <= entry_px - trigger_dist:
+                    # Check +1.0R profit target breach
+                    if not pos.r1_hit and r_dist > 0 and entry_px > 0:
+                        tr_trigger = getattr(self.config, "trail_trigger_rr", 1.0)
+                        if tr_trigger <= 0:
                             pos.r1_hit = True
-                            logger.info(
-                                "🚀 %s SHORT reached +%.1fR profit target (Low=%.4f <= Target=%.4f)",
-                                pos.symbol,
-                                self.config.trail_trigger_rr,
-                                candle.low,
-                                entry_px - trigger_dist,
-                            )
+                        else:
+                            trigger_dist = r_dist * tr_trigger
+                            if candle.low <= entry_px - trigger_dist:
+                                pos.r1_hit = True
+                                logger.info(
+                                    "🚀 %s SHORT reached +1.0R profit target (Low=%.4f <= 1R Target=%.4f). Unlocking Break-Even & Trailing Stop.",
+                                    pos.symbol,
+                                    candle.low,
+                                    entry_px - trigger_dist,
+                                )
 
-                    # Automated Break-Even condition check
-                    be_triggered = bool(
-                        self.config.enable_breakeven
-                        and r_dist > 0
-                        and (
-                            pos.r1_hit
-                            or candle.low <= entry_px - (self.config.breakeven_trigger_r * r_dist)
-                        )
-                    )
-                    be_price = contract_spec.round_price(entry_px - contract_spec.tick_size) if be_triggered else None
-
-                    # Unified Trailing Stop & Break-Even Evaluation (Single Ratchet Emission)
+                    # STRICT RULE: Break-Even and Trailing Stop ONLY activate AFTER 1.0R is hit!
                     candidate_sl: float | None = None
-                    should_trail = self.config.trailing_stop and (self.config.trail_trigger_rr <= 0 or pos.r1_hit)
-                    if should_trail:
-                        if self.config.trailing_mode == "atr":
-                            raw_trailing = candle.high + (self.config.trailing_stop_atr_mult * snapshot.atr_14)
-                        else:
-                            # Trading-Academy V2 candle extreme trailing mode
-                            buffer_val = self.config.price_buffer_ticks * contract_spec.tick_size
-                            raw_trailing = candle.high + buffer_val
+                    if pos.r1_hit:
+                        be_price = contract_spec.round_price(entry_px - contract_spec.tick_size) if getattr(self.config, "enable_breakeven", True) else None
+                        if self.config.trailing_stop:
+                            if self.config.trailing_mode == "atr":
+                                raw_trailing = candle.high + (self.config.trailing_stop_atr_mult * snapshot.atr_14)
+                            else:
+                                buffer_val = self.config.price_buffer_ticks * contract_spec.tick_size
+                                raw_trailing = candle.high + buffer_val
 
-                        if pos.r1_hit or be_triggered:
-                            # Lock at least breakeven (-1 tick), and trail lower with candle highs below breakeven
-                            candidate_sl = min(be_price or (entry_px - contract_spec.tick_size), raw_trailing)
+                            # Lock at least break-even (-1 tick) if breakeven is enabled, and trail lower with candle highs
+                            candidate_sl = min(be_price, raw_trailing) if be_price is not None else raw_trailing
                         else:
-                            candidate_sl = raw_trailing
-
-                    elif be_triggered and not pos.is_breakeven_locked:
-                        candidate_sl = be_price
+                            candidate_sl = be_price
 
                     if candidate_sl is not None and candidate_sl > 0:
-                        quantized_sl = contract_spec.round_price(candidate_sl)
+                        # Safety Guard: Stop loss for short position must never be set at or below candle close
+                        min_allowed_sl = contract_spec.round_price(candle.close + contract_spec.tick_size)
+                        quantized_sl = max(contract_spec.round_price(candidate_sl), min_allowed_sl)
                         if quantized_sl < pos.current_stop_loss:
                             old_sl = pos.current_stop_loss
                             if pos.ratchet_sl(quantized_sl):

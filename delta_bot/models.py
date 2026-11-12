@@ -338,6 +338,8 @@ class ExchangeOrder(BaseModel):
     stop_trigger_method: str | None = Field(default="mark_price", description="Trigger reference")
     bracket_stop_loss_price: float | None = Field(default=None, description="Attached Bracket Stop Loss price")
     bracket_take_profit_price: float | None = Field(default=None, description="Attached Bracket Take Profit price")
+    reduce_only: bool = Field(default=False, description="Reduce-only order flag")
+    close_on_trigger: bool = Field(default=False, description="Close-on-trigger order flag")
     state: str = Field(default="open", description="State: open, pending, closed, cancelled, rejected")
     created_at: float = Field(default=0.0, description="Creation epoch timestamp in seconds")
 
@@ -374,7 +376,7 @@ class ExchangeOrder(BaseModel):
             id=_to_int(data.get("id")),
             client_order_id=data.get("client_order_id"),
             product_id=_to_int(data.get("product_id")),
-            symbol=symbol or str(data.get("product_symbol", "")),
+            symbol=symbol or str(data.get("symbol") or data.get("product_symbol") or (data.get("product") or {}).get("symbol") or ""),
             side=str(data.get("side", "")).lower(),
             order_type=str(data.get("order_type", "")),
             size=_to_int(data.get("size")),
@@ -385,6 +387,8 @@ class ExchangeOrder(BaseModel):
             stop_trigger_method=data.get("stop_trigger_method", "mark_price"),
             bracket_stop_loss_price=_to_float(data.get("bracket_stop_loss_price")),
             bracket_take_profit_price=_to_float(data.get("bracket_take_profit_price")),
+            reduce_only=bool(data.get("reduce_only", False) or data.get("close_on_trigger", False)),
+            close_on_trigger=bool(data.get("close_on_trigger", False)),
             state=str(data.get("state", "open")).lower(),
             created_at=_to_float(data.get("created_at")) or 0.0,
         )
@@ -438,7 +442,7 @@ class PositionInfo(BaseModel):
 
         return cls(
             product_id=int(data.get("product_id", 0)),
-            symbol=symbol or str(data.get("product_symbol", "")),
+            symbol=symbol or str(data.get("symbol") or data.get("product_symbol") or (data.get("product") or {}).get("symbol") or ""),
             size=int(data.get("size", 0)),
             entry_price=_to_float(data.get("entry_price")),
             mark_price=_to_float(data.get("mark_price")),

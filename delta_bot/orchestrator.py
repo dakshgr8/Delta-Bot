@@ -383,6 +383,52 @@ class TradingBotOrchestrator:
                 symbol=intent.symbol,
             )
 
+        # Cancel counterpart / leftover child protection orders on exchange to prevent orphaned fills
+        if self.execution_manager is not None:
+            pid = intent.product_id
+            if pid is None:
+                spec = self.contract_specs.get(intent.symbol)
+                pid = spec.product_id if spec else None
+            if pid:
+                if status == OrderStatus.CLOSED_TP and intent.child_stop_loss_order_id:
+                    try:
+                        logger.info(
+                            "[%s] Position closed by TP; cancelling child SL order #%d",
+                            intent.symbol,
+                            intent.child_stop_loss_order_id,
+                        )
+                        await self.execution_manager.client.cancel_order(
+                            product_id=pid,
+                            order_id=intent.child_stop_loss_order_id,
+                        )
+                    except Exception as c_err:
+                        logger.debug("[%s] Failed cancelling child SL after TP: %s", intent.symbol, c_err)
+                elif status == OrderStatus.CLOSED_SL and intent.child_take_profit_order_id:
+                    try:
+                        logger.info(
+                            "[%s] Position closed by SL; cancelling child TP order #%d",
+                            intent.symbol,
+                            intent.child_take_profit_order_id,
+                        )
+                        await self.execution_manager.client.cancel_order(
+                            product_id=pid,
+                            order_id=intent.child_take_profit_order_id,
+                        )
+                    except Exception as c_err:
+                        logger.debug("[%s] Failed cancelling child TP after SL: %s", intent.symbol, c_err)
+                elif status in (OrderStatus.CLOSED_MANUAL, OrderStatus.CLOSED_CIRCUIT_BREAKER, OrderStatus.CLOSED_TIMEOUT):
+                    for cid in (intent.child_stop_loss_order_id, intent.child_take_profit_order_id):
+                        if cid:
+                            try:
+                                logger.info(
+                                    "[%s] Position closed manually/CB; cancelling child order #%d",
+                                    intent.symbol,
+                                    cid,
+                                )
+                                await self.execution_manager.client.cancel_order(product_id=pid, order_id=cid)
+                            except Exception as c_err:
+                                logger.debug("[%s] Failed cancelling child order after manual close: %s", intent.symbol, c_err)
+
     # -------------------------------------------------------------------------
     # Public & Private WebSocket Event Handlers
     # -------------------------------------------------------------------------
