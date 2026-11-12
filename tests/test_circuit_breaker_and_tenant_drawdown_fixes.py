@@ -143,7 +143,7 @@ async def test_control_endpoints_reset_circuit_breaker() -> None:
     mock_orch.config = BotConfig(dashboard_auth_token_str="")
     mock_orch.mode = ExecutionMode.PAPER
     mock_orch.is_running = True
-    mock_orch.paper_simulator = MagicMock(current_equity=10000.0)
+    mock_orch.get_account_equity = AsyncMock(return_value=10000.0)
     mock_orch.risk_manager = RiskManager(
         RiskConfig(daily_max_drawdown_pct=5.0, enable_drawdown_circuit_breaker=True),
         initial_equity=10000.0,
@@ -185,7 +185,7 @@ async def test_control_start_automatically_resets_tripped_circuit_breaker() -> N
     mock_orch.config = BotConfig(dashboard_auth_token_str="")
     mock_orch.mode = ExecutionMode.PAPER
     mock_orch.is_running = False
-    mock_orch.paper_simulator = MagicMock(current_equity=10000.0)
+    mock_orch.get_account_equity = AsyncMock(return_value=10000.0)
     mock_orch.risk_manager = RiskManager(
         RiskConfig(daily_max_drawdown_pct=5.0, enable_drawdown_circuit_breaker=True),
         initial_equity=10000.0,
