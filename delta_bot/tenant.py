@@ -292,6 +292,7 @@ class TenantInstance:
         self.risk_manager = risk_manager or RiskManager(
             config=risk_cfg,
             initial_equity=config.initial_balance if not (active_k and active_s) else 0.0,
+            name=config.tenant_id,
         )
         self.state_manager.risk_manager = self.risk_manager
 
@@ -542,6 +543,17 @@ class TenantInstance:
             self.risk_manager.config = self.risk_manager.config.model_copy(
                 update={"daily_max_drawdown_pct": maxdd}
             )
+            if (
+                self.risk_manager.circuit_breaker.is_tripped
+                and self.risk_manager.circuit_breaker.current_drawdown_pct < maxdd
+            ):
+                self.risk_manager.reset_circuit_breaker(self.live_equity if self.mode.is_real else None)
+                logger.info(
+                    "[TENANT %s] Circuit breaker automatically reset after daily_max_drawdown_pct increased to %.2f%% (current DD: %.2f%%)",
+                    self.config.tenant_id,
+                    maxdd,
+                    self.risk_manager.circuit_breaker.current_drawdown_pct,
+                )
 
         if "timeframe" in updates and updates["timeframe"] is not None:
             tf = str(updates["timeframe"]).strip()

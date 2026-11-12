@@ -358,13 +358,39 @@ class RingBufferLogHandler(logging.Handler):
             logger.debug("Failed to record log in RingBufferLogHandler: %s", err)
 
     def get_logs(
-        self, limit: int = 50, level: str | None = None
+        self,
+        limit: int = 50,
+        level: str | None = None,
+        tenant_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Returns recent formatted log entries with optional level filtering."""
+        """Returns recent formatted log entries with optional level and tenant filtering."""
         logs = list(self.buffer)
         if level:
             lvl_upper = level.upper()
             logs = [e for e in logs if e["level"] == lvl_upper]
+        if tenant_id and tenant_id != "default":
+            filtered = []
+            target_tag = f"[TENANT {tenant_id}"
+            user_target_tag = f"TENANT {tenant_id}]"
+            for e in logs:
+                msg = e.get("message", "")
+                if target_tag in msg or user_target_tag in msg:
+                    filtered.append(e)
+                elif "[TENANT " not in msg and "[USER " not in msg:
+                    # Do not leak global/paper circuit breaker trip logs to custom tenant
+                    if "CIRCUIT BREAKER TRIPPED" in msg:
+                        continue
+                    filtered.append(e)
+            logs = filtered
+        elif tenant_id == "default":
+            logs = [
+                e
+                for e in logs
+                if not (
+                    "[TENANT " in e.get("message", "")
+                    and "[TENANT default" not in e.get("message", "")
+                )
+            ]
         return logs[-limit:] if limit > 0 else logs
 
 
@@ -483,7 +509,7 @@ def get_all_positions_summary(
         target_sim = orchestrator.paper_simulator
         target_sm = orchestrator.state_manager
         lev = orchestrator.config.default_leverage
-        if orchestrator.mode == ExecutionMode.LIVE and hasattr(orchestrator, "tenant_manager"):
+        if orchestrator.mode.is_real and hasattr(orchestrator, "tenant_manager"):
             def_t = orchestrator.tenant_manager.get_tenant("default")
             if def_t and getattr(def_t, "live_positions", None):
                 return list(def_t.live_positions)
@@ -935,7 +961,8 @@ def get_full_state_packet(
         "current_tenant": current_tenant_dict,
     }
     if include_logs:
-        packet["logs"] = log_handler.get_logs(limit=25)
+        target_log_t = tenant.config.tenant_id if tenant else (tenant_id or "default")
+        packet["logs"] = log_handler.get_logs(limit=25, tenant_id=target_log_t)
     return packet
 
 
@@ -1410,6 +1437,10 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         tenant.is_running = True
         tenant.config.is_active = True
+        if tenant.risk_manager.circuit_breaker.is_tripped:
+            eq = tenant.live_equity if tenant.mode.is_real else (tenant.paper_simulator.current_equity if tenant.paper_simulator else tenant.config.initial_balance)
+            tenant.risk_manager.reset_circuit_breaker(eq)
+            logger.info("[TENANT %s] Circuit breaker reset on tenant start (anchored at $%.2f)", tenant.config.tenant_id, eq)
         if hasattr(orchestrator, "tenant_manager"):
             orchestrator.tenant_manager.save_to_disk()
             orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
@@ -1464,6 +1495,34 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             status="success",
             action="flatten",
             message=f"Tenant '{tenant.config.name}' flattened: {res['closed_positions']} positions closed, {res['cancelled_orders']} orders cancelled.",
+        )
+
+    @app.post(
+        "/api/tenants/{tenant_id}/control/reset-circuit-breaker",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+    )
+    async def tenant_reset_circuit_breaker(
+        tenant_id: str,
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> ControlActionResponse:
+        tenant = resolve_tenant(orchestrator, tenant_id)
+        if not tenant and auth.auth_type == "user" and auth.user_id and hasattr(orchestrator, "tenant_manager"):
+            tenant = orchestrator.tenant_manager.get_tenant_by_user_id(auth.user_id)
+        if not tenant:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{tenant_id}' not found.")
+        if auth.auth_type == "user" and tenant.config.user_id and tenant.config.user_id != auth.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
+        eq = tenant.live_equity if tenant.mode.is_real else (tenant.paper_simulator.current_equity if tenant.paper_simulator else tenant.config.initial_balance)
+        tenant.risk_manager.reset_circuit_breaker(eq)
+        if hasattr(orchestrator, "tenant_manager"):
+            orchestrator.tenant_manager.save_to_disk()
+            orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
+        logger.info("[TENANT %s] Circuit breaker manually reset (anchored at $%.2f)", tenant.config.tenant_id, eq)
+        return ControlActionResponse(
+            status="success",
+            action="reset_circuit_breaker",
+            message=f"Tenant '{tenant.config.name}' circuit breaker reset. Ready to trade.",
         )
 
     @app.post(
@@ -1522,7 +1581,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         if not hasattr(orchestrator, "tenant_manager"):
             raise HTTPException(status_code=500, detail="TenantManager not initialized.")
         res = await orchestrator.tenant_manager.flatten_all_tenants()
-        if orchestrator.mode == ExecutionMode.LIVE and orchestrator.execution_manager is not None:
+        if orchestrator.mode.is_real and orchestrator.execution_manager is not None:
             try:
                 await orchestrator.execution_manager.emergency_flatten()
             except Exception:
@@ -1552,10 +1611,71 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
     async def get_system_logs(
         limit: int = Query(default=50, ge=1, le=200),
         level: str | None = Query(default=None),
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
     ) -> JSONResponse:
         """Retrieves formatted entries from the in-memory RingBuffer log handler."""
-        logs = log_handler.get_logs(limit=limit, level=level)
+        target_t = tenant_id or x_tenant_id
+        if auth.auth_type == "user" and auth.tenant_id:
+            target_t = auth.tenant_id
+        logs = log_handler.get_logs(limit=limit, level=level, tenant_id=target_t)
         return JSONResponse(content={"count": len(logs), "logs": logs})
+
+    @app.post(
+        "/api/control/reset-circuit-breaker",
+        response_model=ControlActionResponse,
+        dependencies=[Depends(verify_dashboard_auth)],
+    )
+    async def control_reset_circuit_breaker(
+        tenant_id: str | None = Query(default=None),
+        x_tenant_id: str | None = Header(default=None, alias="X-Tenant-ID"),
+        auth: AuthIdentity = Depends(get_current_auth),
+    ) -> ControlActionResponse:
+        """Manually resets the daily drawdown circuit breaker for a tenant or orchestrator."""
+        target_t = tenant_id or x_tenant_id
+        if auth.auth_type == "user" and auth.tenant_id:
+            if target_t and target_t != auth.tenant_id:
+                t = resolve_tenant(orchestrator, target_t)
+                if not t or (t.config.user_id and t.config.user_id != auth.user_id):
+                    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
+            else:
+                target_t = auth.tenant_id
+
+        if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
+            tenant = orchestrator.tenant_manager.get_tenant(target_t)
+            if not tenant and auth.user_id:
+                tenant = orchestrator.tenant_manager.get_tenant_by_user_id(auth.user_id)
+            if tenant:
+                eq = tenant.live_equity if tenant.mode.is_real else (tenant.paper_simulator.current_equity if tenant.paper_simulator else tenant.config.initial_balance)
+                tenant.risk_manager.reset_circuit_breaker(eq)
+                if hasattr(orchestrator, "tenant_manager"):
+                    orchestrator.tenant_manager.save_to_disk()
+                    orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
+                logger.info("[CONTROL API] Tenant '%s' circuit breaker reset (anchored at $%.2f)", tenant.config.tenant_id, eq)
+                return ControlActionResponse(
+                    status="success",
+                    action="reset_circuit_breaker",
+                    message=f"Tenant '{tenant.config.name}' circuit breaker reset. Ready to trade.",
+                )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tenant '{target_t}' not found.")
+
+        # Default orchestrator reset
+        eq = orchestrator.paper_simulator.current_equity if orchestrator.paper_simulator else orchestrator.config.initial_balance
+        orchestrator.risk_manager.reset_circuit_breaker(eq)
+        if hasattr(orchestrator, "tenant_manager"):
+            def_t = orchestrator.tenant_manager.get_tenant("default")
+            if def_t:
+                def_eq = def_t.live_equity if def_t.mode.is_real else (def_t.paper_simulator.current_equity if def_t.paper_simulator else def_t.config.initial_balance)
+                def_t.risk_manager.reset_circuit_breaker(def_eq)
+                orchestrator.tenant_manager.save_to_disk()
+                orchestrator.tenant_manager.sync_tenant_to_supabase(def_t)
+        logger.info("[CONTROL API] Master orchestrator circuit breaker reset (anchored at $%.2f)", eq)
+        return ControlActionResponse(
+            status="success",
+            action="reset_circuit_breaker",
+            message="Circuit breaker reset. Daily session re-anchored and ready to trade.",
+        )
 
     @app.post(
         "/api/control/start",
@@ -1590,6 +1710,10 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             if tenant:
                 tenant.is_running = True
                 tenant.config.is_active = True
+                if tenant.risk_manager.circuit_breaker.is_tripped:
+                    eq = tenant.live_equity if tenant.mode.is_real else (tenant.paper_simulator.current_equity if tenant.paper_simulator else tenant.config.initial_balance)
+                    tenant.risk_manager.reset_circuit_breaker(eq)
+                    logger.info("[USER %s TENANT %s] Circuit breaker reset on resume (anchored at $%.2f)", auth.user_id, target_t, eq)
                 if hasattr(orchestrator, "tenant_manager"):
                     orchestrator.tenant_manager.save_to_disk()
                     orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
@@ -1605,6 +1729,12 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         if all_tenants and hasattr(orchestrator, "tenant_manager"):
             count = orchestrator.tenant_manager.resume_all_tenants()
             orchestrator.is_running = True
+            for t in orchestrator.tenant_manager.tenants.values():
+                if t.risk_manager.circuit_breaker.is_tripped:
+                    eq = t.live_equity if t.mode.is_real else (t.paper_simulator.current_equity if t.paper_simulator else t.config.initial_balance)
+                    t.risk_manager.reset_circuit_breaker(eq)
+            if orchestrator.risk_manager.circuit_breaker.is_tripped:
+                orchestrator.risk_manager.reset_circuit_breaker(orchestrator.paper_simulator.current_equity if orchestrator.paper_simulator else orchestrator.config.initial_balance)
             logger.info("[CONTROL API] Resumed all %d tenants and master orchestrator", count)
             return ControlActionResponse(
                 status="success",
@@ -1618,6 +1748,9 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             if tenant:
                 tenant.is_running = True
                 tenant.config.is_active = True
+                if tenant.risk_manager.circuit_breaker.is_tripped:
+                    eq = tenant.live_equity if tenant.mode.is_real else (tenant.paper_simulator.current_equity if tenant.paper_simulator else tenant.config.initial_balance)
+                    tenant.risk_manager.reset_circuit_breaker(eq)
                 if hasattr(orchestrator, "tenant_manager"):
                     orchestrator.tenant_manager.save_to_disk()
                     orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
@@ -1628,11 +1761,18 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                     message=f"Tenant '{tenant.config.name}' trading resumed.",
                 )
         orchestrator.is_running = True
+        if orchestrator.risk_manager.circuit_breaker.is_tripped:
+            eq = orchestrator.paper_simulator.current_equity if orchestrator.paper_simulator else orchestrator.config.initial_balance
+            orchestrator.risk_manager.reset_circuit_breaker(eq)
+            logger.info("[CONTROL API] Master orchestrator circuit breaker reset on resume")
         if hasattr(orchestrator, "tenant_manager"):
             def_t = orchestrator.tenant_manager.get_tenant("default")
             if def_t:
                 def_t.is_running = True
                 def_t.config.is_active = True
+                if def_t.risk_manager.circuit_breaker.is_tripped:
+                    eq = def_t.live_equity if def_t.mode.is_real else (def_t.paper_simulator.current_equity if def_t.paper_simulator else def_t.config.initial_balance)
+                    def_t.risk_manager.reset_circuit_breaker(eq)
                 orchestrator.tenant_manager.save_to_disk()
                 orchestrator.tenant_manager.sync_tenant_to_supabase(def_t)
         logger.info("[CONTROL API] Trading loop STARTED via web interface")
@@ -1767,7 +1907,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         # Admin Global All-Tenants Scope
         if all_tenants and hasattr(orchestrator, "tenant_manager"):
             res = await orchestrator.tenant_manager.flatten_all_tenants()
-            if orchestrator.mode == ExecutionMode.LIVE and orchestrator.execution_manager is not None:
+            if orchestrator.mode.is_real and orchestrator.execution_manager is not None:
                 try:
                     await orchestrator.execution_manager.emergency_flatten(symbol=symbol)
                 except Exception:
@@ -1796,7 +1936,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             "[CONTROL API] Emergency Flatten requested via web interface (Target: %s)",
             symbol or "ALL",
         )
-        if orchestrator.mode == ExecutionMode.LIVE and orchestrator.execution_manager is not None:
+        if orchestrator.mode.is_real and orchestrator.execution_manager is not None:
             try:
                 res = await orchestrator.execution_manager.emergency_flatten(symbol=symbol)
                 count = len(res.get("flattened_positions", []))
@@ -1859,7 +1999,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 target_t = auth.tenant_id
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
             if tenant:
-                if tenant.mode == ExecutionMode.LIVE and tenant.execution_manager is not None:
+                if tenant.mode.is_real and tenant.execution_manager is not None:
                     target_sym = None
                     for sym, spec in tenant.contract_specs.items():
                         if spec.product_id == product_id:
@@ -1897,7 +2037,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
         if target_t and target_t != "default" and hasattr(orchestrator, "tenant_manager"):
             tenant = orchestrator.tenant_manager.get_tenant(target_t)
             if tenant:
-                if tenant.mode == ExecutionMode.LIVE and tenant.execution_manager is not None:
+                if tenant.mode.is_real and tenant.execution_manager is not None:
                     target_sym = None
                     for sym, spec in tenant.contract_specs.items():
                         if spec.product_id == product_id:
@@ -1927,7 +2067,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                         message=f"Tenant '{tenant.config.name}' position for product {product_id} closed.",
                     )
 
-        if orchestrator.mode == ExecutionMode.LIVE and orchestrator.execution_manager is not None:
+        if orchestrator.mode.is_real and orchestrator.execution_manager is not None:
             target_sym = None
             for sym, spec in orchestrator.contract_specs.items():
                 if spec.product_id == product_id:
@@ -2249,7 +2389,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 logger.debug("Non-numeric order_id %s for paper cancellation", order_id)
 
         # 3. Check live execution manager
-        if orchestrator.mode == ExecutionMode.LIVE and orchestrator.execution_manager is not None:
+        if orchestrator.mode.is_real and orchestrator.execution_manager is not None:
             try:
                 numeric_id = int(order_id)
                 for ao in orchestrator.execution_manager.registry.active_orders():
@@ -2405,7 +2545,7 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                 orchestrator.execution_manager._configured_leverages.clear()
             if hasattr(orchestrator, "tenant_manager") and "default" in orchestrator.tenant_manager.tenants:
                 orchestrator.tenant_manager.tenants["default"].apply_config_updates({"leverage": lev})
-            if orchestrator.mode == ExecutionMode.LIVE and orchestrator.rest_client.config.has_valid_credentials():
+            if orchestrator.mode.is_real and orchestrator.rest_client.config.has_valid_credentials():
                 try:
                     asyncio.create_task(orchestrator.sync_exchange_leverage(lev))
                 except RuntimeError:
@@ -2462,6 +2602,16 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
                     "enable_drawdown_circuit_breaker": True,
                 }
             )
+            if (
+                orchestrator.risk_manager.circuit_breaker.is_tripped
+                and orchestrator.risk_manager.circuit_breaker.current_drawdown_pct < payload.max_drawdown_pct
+            ):
+                orchestrator.risk_manager.reset_circuit_breaker()
+                logger.info(
+                    "[CONTROL API] Master orchestrator circuit breaker reset after max_drawdown_pct increased to %.2f%% (current DD: %.2f%%)",
+                    payload.max_drawdown_pct,
+                    orchestrator.risk_manager.circuit_breaker.current_drawdown_pct,
+                )
             if hasattr(orchestrator, "tenant_manager") and "default" in orchestrator.tenant_manager.tenants:
                 orchestrator.tenant_manager.tenants["default"].apply_config_updates({"max_drawdown_pct": payload.max_drawdown_pct})
             updated.append(f"max_drawdown_pct={payload.max_drawdown_pct}%")

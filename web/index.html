@@ -642,6 +642,22 @@
         </button>
       </div>
 
+      <!-- Action Required Notice: Daily Max Drawdown Circuit Breaker Tripped -->
+      <div id="banner-circuit-breaker" class="hidden dp-panel p-4 border-l-2 border-l-rose-500 bg-rose-950/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div class="space-y-0.5">
+          <div class="text-xs font-semibold text-rose-300 flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-rose-400 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            Daily Max Drawdown Circuit Breaker Tripped
+          </div>
+          <p id="banner-circuit-breaker-text" class="text-xs text-rose-200/90 leading-relaxed">
+            Trading is temporarily halted to protect capital after daily drawdown limit was reached. You can reset the session or adjust your max drawdown in settings.
+          </p>
+        </div>
+        <button type="button" onclick="resetCircuitBreaker()" class="btn-secondary text-xs py-1.5 px-3 shrink-0 border-rose-500/50 hover:border-rose-400 text-rose-200">
+          Reset Circuit Breaker
+        </button>
+      </div>
+
       <!-- Ruled Summary Row: Essential Financial Metrics -->
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-[var(--dp-spacing-gap)]">
         <div class="dp-panel p-4">
@@ -874,7 +890,7 @@
             <span>Daily Max Drawdown:</span>
             <span id="label-maxdd" class="text-white font-medium">4.0%</span>
           </div>
-          <input type="range" id="input-maxdd" min="1.0" max="10.0" step="0.5" value="4.0" class="w-full accent-white" oninput="document.getElementById('label-maxdd').textContent = this.value + '%'">
+          <input type="range" id="input-maxdd" min="1.0" max="25.0" step="0.5" value="4.0" class="w-full accent-white" oninput="document.getElementById('label-maxdd').textContent = this.value + '%'">
         </div>
       </div>
 
@@ -1442,6 +1458,13 @@
         if (errText && syncErr) errText.textContent = syncErr;
       }
 
+      // Circuit Breaker Status Banner
+      const cbTripped = Boolean(status.circuit_breaker_tripped);
+      const cbBanner = document.getElementById('banner-circuit-breaker');
+      if (cbBanner) {
+        cbBanner.classList.toggle('hidden', !cbTripped);
+      }
+
       // Equity & PnL
       const eq = Number(col.equity ?? col.balance ?? 0);
       const upnl = Number(col.unrealized_pnl ?? 0);
@@ -1665,6 +1688,29 @@
         await forceFetchStatus();
       } catch (err) {
         alert(`Flatten error: ${err.message || err}`);
+        await forceFetchStatus();
+      }
+    }
+
+    async function resetCircuitBreaker() {
+      const activeTenant = (currentTenantId && currentTenantId !== 'default') 
+        ? currentTenantId 
+        : (localStorage.getItem('tenant_id') || 'default');
+      try {
+        const endpoint = (activeTenant && activeTenant !== 'default')
+          ? `${BACKEND_URL}/api/tenants/${activeTenant}/control/reset-circuit-breaker`
+          : `${BACKEND_URL}/api/control/reset-circuit-breaker`;
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: getAuthHeaders()
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || data.message || `Server returned ${res.status}`);
+        }
+        await forceFetchStatus();
+      } catch (err) {
+        alert(`Failed to reset circuit breaker: ${err.message || err}`);
         await forceFetchStatus();
       }
     }

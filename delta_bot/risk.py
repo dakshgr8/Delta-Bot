@@ -89,9 +89,9 @@ class RiskConfig(BaseModel):
         description="Max allowed risk / budget ratio to prevent oversized min-lot positions (default: 1.05)",
     )
     min_stop_loss_pct: float = Field(
-        default=0.10,
+        default=0.05,
         ge=0.0,
-        description="Minimum stop-loss distance percentage (e.g. 0.10%) required for pre-trade verification",
+        description="Minimum stop-loss distance percentage (e.g. 0.05%) required for pre-trade verification",
     )
     max_effective_leverage: float = Field(
         default=5.0,
@@ -114,16 +114,20 @@ class CircuitBreakerState(BaseModel):
     peak_daily_equity: float = 0.0
     current_drawdown_pct: float = 0.0
 
-    def trip(self, reason: str, timestamp: float | None = None) -> None:
+    def trip(self, reason: str, timestamp: float | None = None, name: str | None = None) -> None:
         """Trips the circuit breaker and halts all new trading activity."""
+        was_tripped = self.is_tripped
         self.is_tripped = True
         self.trip_reason = reason
         self.tripped_at = timestamp or time.time()
-        logger.critical(
-            "*** CIRCUIT BREAKER TRIPPED *** Reason: %s (Halted at %s)",
-            reason,
-            self.tripped_at,
-        )
+        if not was_tripped:
+            tag = f"[TENANT {name}] " if name else ""
+            logger.critical(
+                "*** CIRCUIT BREAKER TRIPPED *** %sReason: %s (Halted at %s)",
+                tag,
+                reason,
+                self.tripped_at,
+            )
 
     def reset(self, new_session_equity: float) -> None:
         """Resets circuit breaker for a new session."""
@@ -146,8 +150,14 @@ class RiskManager:
     and daily drawdown circuit breakers.
     """
 
-    def __init__(self, config: RiskConfig | None = None, initial_equity: float = 0.0) -> None:
+    def __init__(
+        self,
+        config: RiskConfig | None = None,
+        initial_equity: float = 0.0,
+        name: str = "",
+    ) -> None:
         self.config: RiskConfig = config or RiskConfig()
+        self.name: str = name
         self.circuit_breaker: CircuitBreakerState = CircuitBreakerState(
             session_start_equity=initial_equity,
             peak_daily_equity=initial_equity,
@@ -166,6 +176,26 @@ class RiskManager:
         """Anchors daily session equity at 00:00 UTC rollover."""
         self.daily_realized_pnl = 0.0
         self.circuit_breaker.reset(current_equity)
+
+    def reset_circuit_breaker(self, current_equity: float | None = None) -> None:
+        """Resets the circuit breaker and re-anchors session equity."""
+        eq = (
+            current_equity
+            if (current_equity is not None and current_equity > 0)
+            else self.circuit_breaker.peak_daily_equity
+        )
+        if eq <= 0:
+            eq = self.circuit_breaker.session_start_equity
+        self.circuit_breaker.reset(eq if eq > 0 else 0.0)
+
+    def reset_daily_circuit_breaker(self, current_equity: float | None = None) -> None:
+        """Resets daily circuit breaker session (alias for reset_daily_session / reset_circuit_breaker)."""
+        eq = (
+            current_equity
+            if (current_equity is not None and current_equity > 0)
+            else self.circuit_breaker.session_start_equity
+        )
+        self.reset_daily_session(eq if eq > 0 else 0.0)
 
     def update_daily_equity(self, current_equity: float) -> bool:
         """
@@ -197,8 +227,11 @@ class RiskManager:
                     f"Daily max drawdown breached: {drawdown_pct:.2f}% loss "
                     f"(Threshold: {self.config.daily_max_drawdown_pct:.2f}%)"
                 )
-                self.circuit_breaker.trip(reason)
+                if not self.circuit_breaker.is_tripped:
+                    self.circuit_breaker.trip(reason, name=self.name)
                 return False
+        elif start_eq > 0 and current_equity >= start_eq:
+            self.circuit_breaker.current_drawdown_pct = 0.0
 
         return not self.circuit_breaker.is_tripped
 

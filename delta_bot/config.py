@@ -275,11 +275,11 @@ class BotConfig(BaseSettings):
         description="Candle bar TTL before un-triggered breakout order invalidation",
     )
     min_stop_loss_pct: float = Field(
-        default=0.15,
+        default=0.05,
         validation_alias=AliasChoices("MIN_STOP_LOSS_PCT", "min_stop_loss_pct"),
         ge=0.0,
         le=10.0,
-        description="Minimum stop loss distance percentage (e.g. 0.15%) to skip noise stop-outs and prevent oversized sizing",
+        description="Minimum stop loss distance percentage (e.g. 0.05%) to skip noise stop-outs and prevent oversized sizing",
     )
     min_stop_loss_atr_mult: float = Field(
         default=0.25,

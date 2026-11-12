@@ -82,9 +82,9 @@ class TradingBotOrchestrator:
             self.mode = ExecutionMode.from_str(self.config.execution_mode)
 
         # Enforce API Credential Safety in Live Mode
-        if self.mode == ExecutionMode.LIVE and not self.config.has_valid_credentials():
+        if self.mode.is_real and not self.config.has_valid_credentials():
             raise ConfigurationError(
-                "ExecutionMode.LIVE requires valid DELTA_API_KEY and DELTA_API_SECRET. "
+                "ExecutionMode.LIVE/REAL requires valid DELTA_API_KEY and DELTA_API_SECRET. "
                 "Configure valid credentials in your environment or use ExecutionMode.PAPER."
             )
 
@@ -107,12 +107,13 @@ class TradingBotOrchestrator:
         self.risk_manager: RiskManager = risk_manager or RiskManager(
             config=risk_cfg,
             initial_equity=0.0,
+            name="default",
         )
         if self.state_manager is not None:
             self.state_manager.risk_manager = self.risk_manager
 
         # Execution Engine based on Mode
-        if self.mode == ExecutionMode.LIVE:
+        if self.mode.is_real:
             self.private_ws: PrivateWebSocketClient | None = (
                 private_ws or PrivateWebSocketClient(config=self.config)
             )
@@ -312,7 +313,7 @@ class TradingBotOrchestrator:
             old_sl,
             new_sl,
         )
-        if self.mode == ExecutionMode.LIVE and self.execution_manager is not None:
+        if self.mode.is_real and self.execution_manager is not None:
             try:
                 await self.execution_manager.handle_trailing_stop_ratchet(
                     order_intent=intent,
@@ -343,7 +344,7 @@ class TradingBotOrchestrator:
             intent.intent_id,
             reason,
         )
-        if self.mode == ExecutionMode.LIVE and self.execution_manager is not None:
+        if self.mode.is_real and self.execution_manager is not None:
             try:
                 await self.execution_manager.handle_invalidation(intent, reason=reason)
             except Exception as e:
@@ -441,7 +442,7 @@ class TradingBotOrchestrator:
         session_anchor = self.public_ws.get_session_anchor(clean_symbol)
         account_equity = await self.get_account_equity()
 
-        if self.mode == ExecutionMode.LIVE and account_equity <= 0:
+        if self.mode.is_real and account_equity <= 0:
             logger.debug(
                 "[%s] Live account equity is $0.00 on Delta Exchange India. Skipping signal evaluation (no fallback demo values).",
                 clean_symbol,
@@ -520,7 +521,7 @@ class TradingBotOrchestrator:
             return
 
         # Execution Dispatch (Live vs Paper)
-        if self.mode == ExecutionMode.LIVE and self.execution_manager is not None:
+        if self.mode.is_real and self.execution_manager is not None:
             try:
                 res = await self.execution_manager.execute_signal(
                     order_intent=order_intent,
@@ -621,14 +622,14 @@ class TradingBotOrchestrator:
             tenant.register_contract_spec(spec)
             try:
                 # Keep tenant live metrics and active position reconciled before candle close
-                if tenant.mode == ExecutionMode.LIVE and (time.time() - getattr(tenant, "last_sync_time", 0.0) > 15.0):
+                if tenant.mode.is_real and (time.time() - getattr(tenant, "last_sync_time", 0.0) > 15.0):
                     try:
                         await tenant.sync_live_metrics()
                     except Exception as sync_err:
                         logger.debug("[TENANT %s] Pre-candle sync failed: %s", t_id, sync_err)
 
                 t_equity = await tenant.get_account_equity()
-                if tenant.mode == ExecutionMode.LIVE and t_equity <= 0:
+                if tenant.mode.is_real and t_equity <= 0:
                     continue  # Unfunded live account ($0.00), skip signal evaluation
 
                 t_intent = await t_strat.on_candle_close(
@@ -769,7 +770,7 @@ class TradingBotOrchestrator:
                 low=candle.low,
                 orderbook=ob,
             )
-        elif self.mode == ExecutionMode.LIVE:
+        elif self.mode.is_real:
             await self.state_manager.update_market_context(
                 symbol=clean_symbol,
                 mark_price=candle.close,
@@ -781,7 +782,7 @@ class TradingBotOrchestrator:
             for t_id, tenant in self.tenant_manager.tenants.items():
                 if t_id == "default":
                     continue
-                if tenant.mode == ExecutionMode.PAPER and tenant.paper_simulator is not None:
+                if tenant.mode.is_demo and tenant.paper_simulator is not None:
                     await tenant.paper_simulator.on_tick(
                         symbol=clean_symbol,
                         mark_price=candle.close,
@@ -789,7 +790,7 @@ class TradingBotOrchestrator:
                         low=candle.low,
                         orderbook=ob,
                     )
-                elif tenant.mode == ExecutionMode.LIVE:
+                elif tenant.mode.is_real:
                     await tenant.state_manager.update_market_context(
                         symbol=clean_symbol,
                         mark_price=candle.close,
@@ -812,7 +813,7 @@ class TradingBotOrchestrator:
                 mark_price=ticker.mark_price,
                 orderbook=ob,
             )
-        elif self.mode == ExecutionMode.LIVE:
+        elif self.mode.is_real:
             await self.state_manager.update_market_context(
                 symbol=clean_symbol,
                 mark_price=ticker.mark_price,
@@ -822,13 +823,13 @@ class TradingBotOrchestrator:
             for t_id, tenant in self.tenant_manager.tenants.items():
                 if t_id == "default":
                     continue
-                if tenant.mode == ExecutionMode.PAPER and tenant.paper_simulator is not None:
+                if tenant.mode.is_demo and tenant.paper_simulator is not None:
                     await tenant.paper_simulator.on_tick(
                         symbol=clean_symbol,
                         mark_price=ticker.mark_price,
                         orderbook=ob,
                     )
-                elif tenant.mode == ExecutionMode.LIVE:
+                elif tenant.mode.is_real:
                     await tenant.state_manager.update_market_context(
                         symbol=clean_symbol,
                         mark_price=ticker.mark_price,
@@ -1029,7 +1030,7 @@ class TradingBotOrchestrator:
             logger.info("Orderbook streaming disabled via ENABLE_ORDERBOOK_STREAM=false (conserving bandwidth)")
 
         # 6. Initialize Live Subsystems (Tasks 2 & 4)
-        if self.mode == ExecutionMode.LIVE and self.private_ws is not None:
+        if self.mode.is_real and self.private_ws is not None:
             self.private_ws.on_order(self._handle_private_order_update)
             self.private_ws.on_position(self._handle_private_position_update)
             self.private_ws.on_trade(self._handle_private_user_trade)
@@ -1100,7 +1101,7 @@ class TradingBotOrchestrator:
 
         # 1. Cancel resting stop orders across all target symbols
         logger.info("[SHUTDOWN] Cancelling resting pending breakout orders...")
-        if self.mode == ExecutionMode.LIVE and self.execution_manager is not None:
+        if self.mode.is_real and self.execution_manager is not None:
             try:
                 cancelled = await self.execution_manager.order_router.cancel_all_orders()
                 logger.info("[SHUTDOWN] Cancelled %d resting live orders", len(cancelled))
@@ -1116,7 +1117,7 @@ class TradingBotOrchestrator:
         # 2. Evaluate FLATTEN_ON_SHUTDOWN policy
         if self.config.flatten_on_shutdown:
             logger.warning("[SHUTDOWN] FLATTEN_ON_SHUTDOWN is ENABLED: Closing active positions at market...")
-            if self.mode == ExecutionMode.LIVE and self.execution_manager is not None:
+            if self.mode.is_real and self.execution_manager is not None:
                 try:
                     res = await self.execution_manager.emergency_flatten()
                     logger.info("[SHUTDOWN] Emergency live flatten result: %s", res)
