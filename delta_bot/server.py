@@ -1459,6 +1459,20 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             eq = await tenant.get_account_equity()
             tenant.risk_manager.reset_circuit_breaker(eq)
             logger.info("[TENANT %s] Circuit breaker reset on tenant start (anchored at $%.2f)", tenant.config.tenant_id, eq)
+        if hasattr(tenant, "state_manager") and tenant.state_manager is not None:
+            active_pids = {p.get("product_id") for p in getattr(tenant, "live_positions", []) if p.get("size", 0) != 0}
+            active_ord_pids = {o.get("product_id") for o in getattr(tenant, "live_orders", [])}
+            for spec in getattr(tenant, "contract_specs", {}).values():
+                if spec.product_id not in active_pids and spec.product_id not in active_ord_pids:
+                    stale = tenant.state_manager.get_active_intent_for_product(spec.product_id)
+                    if stale and stale.is_active:
+                        stale.cancel("Tenant start state reconciliation purge", OrderStatus.CANCELLED_MANUAL)
+                        tenant.state_manager.unregister_intent(stale.intent_id)
+            for strat in getattr(tenant, "strategies", {}).values():
+                if strat.active_position and getattr(strat.active_position, "product_id", None) not in active_pids:
+                    strat.active_position = None
+                if strat.pending_order and getattr(strat.pending_order, "product_id", None) not in active_ord_pids:
+                    strat.pending_order = None
         if hasattr(orchestrator, "tenant_manager"):
             orchestrator.tenant_manager.save_to_disk()
             orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)
@@ -1533,6 +1547,20 @@ def create_app(orchestrator: TradingBotOrchestrator) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: unauthorized tenant.")
         eq = await tenant.get_account_equity()
         tenant.risk_manager.reset_circuit_breaker(eq)
+        if hasattr(tenant, "state_manager") and tenant.state_manager is not None:
+            active_pids = {p.get("product_id") for p in getattr(tenant, "live_positions", []) if p.get("size", 0) != 0}
+            active_ord_pids = {o.get("product_id") for o in getattr(tenant, "live_orders", [])}
+            for spec in getattr(tenant, "contract_specs", {}).values():
+                if spec.product_id not in active_pids and spec.product_id not in active_ord_pids:
+                    stale = tenant.state_manager.get_active_intent_for_product(spec.product_id)
+                    if stale and stale.is_active:
+                        stale.cancel("Circuit breaker reset purge", OrderStatus.CANCELLED_MANUAL)
+                        tenant.state_manager.unregister_intent(stale.intent_id)
+            for strat in getattr(tenant, "strategies", {}).values():
+                if strat.active_position and getattr(strat.active_position, "product_id", None) not in active_pids:
+                    strat.active_position = None
+                if strat.pending_order and getattr(strat.pending_order, "product_id", None) not in active_ord_pids:
+                    strat.pending_order = None
         if hasattr(orchestrator, "tenant_manager"):
             orchestrator.tenant_manager.save_to_disk()
             orchestrator.tenant_manager.sync_tenant_to_supabase(tenant)

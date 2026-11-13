@@ -136,6 +136,32 @@ class TradingStateManager:
             intent.status.value,
         )
 
+    def unregister_intent(self, intent_id: str) -> None:
+        """Removes an OrderIntent from all internal lookup maps."""
+        intent = self._intents_by_id.pop(intent_id, None)
+        if intent:
+            if intent.exchange_order_id is not None:
+                self._intents_by_exchange_id.pop(intent.exchange_order_id, None)
+            if intent.child_stop_loss_order_id is not None:
+                self._intents_by_child_sl_id.pop(intent.child_stop_loss_order_id, None)
+            if intent.child_take_profit_order_id is not None:
+                self._intents_by_child_tp_id.pop(intent.child_take_profit_order_id, None)
+            logger.debug("Unregistered OrderIntent [%s] from TradingStateManager", intent_id)
+
+    def close_or_prune_product_intents(self, product_id: int, reason: str = "Position closed") -> None:
+        """Marks any active intents for product_id as closed and unregisters them."""
+        for intent in list(self._intents_by_id.values()):
+            if intent.product_id == product_id and intent.is_active:
+                if intent.is_triggered:
+                    intent.close_position(
+                        OrderStatus.CLOSED_SL,
+                        exit_price=intent.current_stop_loss or intent.fill_price or 0.0,
+                        timestamp=time.time(),
+                    )
+                else:
+                    intent.cancel(reason, OrderStatus.CANCELLED_MANUAL)
+                self.unregister_intent(intent.intent_id)
+
     def bind_exchange_order_id(self, intent_id: str, exchange_order_id: int) -> None:
         """Binds the parent entry order ID to the tracked intent."""
         intent = self._intents_by_id.get(intent_id)
@@ -153,7 +179,7 @@ class TradingStateManager:
 
     def get_active_intent_for_product(self, product_id: int) -> OrderIntent | None:
         """Retrieves the active (PENDING or TRIGGERED) OrderIntent for a product."""
-        for intent in self._intents_by_id.values():
+        for intent in list(self._intents_by_id.values()):
             if intent.product_id == product_id and intent.is_active:
                 return intent
         return None

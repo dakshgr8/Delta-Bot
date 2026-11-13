@@ -846,10 +846,12 @@ class TenantInstance:
             # 1. Process and guard open orders
             formatted_orders: list[dict[str, Any]] = []
             active_order_ids: set[int] = set()
+            active_order_pids: set[int] = set()
             active_pos_pids = {p.product_id for p in positions if getattr(p, "size", 0) != 0}
             for o in open_orders:
                 if getattr(o, "is_open", False) or str(getattr(o, "state", "open")).lower() in ("open", "pending"):
                     active_order_ids.add(o.id)
+                    active_order_pids.add(o.product_id)
                     sym = o.symbol
                     if not sym:
                         for s_sym, s_spec in self.contract_specs.items():
@@ -961,6 +963,24 @@ class TenantInstance:
                         self.execution_manager.registry.remove(ex_id)
 
             self.live_orders = formatted_orders
+
+            # Reconcile strategy pending orders: if strategy has a pending_order that is NOT on the exchange, clear it
+            for s_sym, strat in self.strategies.items():
+                if strat.pending_order is not None:
+                    p_order = strat.pending_order
+                    spec = self.contract_specs.get(s_sym)
+                    p_pid = spec.product_id if spec else p_order.product_id
+                    if p_order.exchange_order_id and p_order.exchange_order_id not in active_order_ids and p_pid not in active_pos_pids:
+                        logger.info(
+                            "[TENANT %s] Pending entry order #%s for %s no longer open on exchange. Clearing pending_order.",
+                            self.config.tenant_id,
+                            p_order.exchange_order_id,
+                            s_sym,
+                        )
+                        p_order.cancel("Exchange order closed/cancelled", OrderStatus.CANCELLED_MANUAL)
+                        if hasattr(self, "state_manager") and self.state_manager is not None:
+                            self.state_manager.unregister_intent(p_order.intent_id)
+                        strat.pending_order = None
 
             # 2. Process and guard open positions
             formatted_positions: list[dict[str, Any]] = []
@@ -1331,6 +1351,13 @@ class TenantInstance:
                         self.config.tenant_id,
                         s_sym,
                     )
+                    pos_obj.close_position(
+                        OrderStatus.CLOSED_SL,
+                        exit_price=pos_obj.current_stop_loss or pos_obj.fill_price or 0.0,
+                        timestamp=time.time(),
+                    )
+                    if hasattr(self, "state_manager") and self.state_manager is not None:
+                        self.state_manager.unregister_intent(pos_obj.intent_id)
                     # Cleanup leftover child orders on exchange so they never turn into rogue trades
                     if self.execution_manager is not None:
                         for child_id in (pos_obj.child_stop_loss_order_id, pos_obj.child_take_profit_order_id):
@@ -1349,6 +1376,29 @@ class TenantInstance:
                                 except Exception as c_err:
                                     logger.debug("[TENANT %s] Cleanup child order #%d failed: %s", self.config.tenant_id, child_id, c_err)
                     strat.active_position = None
+
+            # Reconcile state_manager: purge any stale active intents for products that are flat (no open position and no open entry order)
+            if hasattr(self, "state_manager") and self.state_manager is not None:
+                for spec in self.contract_specs.values():
+                    if spec.product_id not in active_pos_pids and spec.product_id not in active_order_pids:
+                        stale_intent = self.state_manager.get_active_intent_for_product(spec.product_id)
+                        if stale_intent is not None and stale_intent.is_active:
+                            logger.info(
+                                "[TENANT %s] Reconciling and purging stale intent [%s] for flat product %s (id=%d)",
+                                self.config.tenant_id,
+                                stale_intent.intent_id,
+                                spec.symbol,
+                                spec.product_id,
+                            )
+                            if stale_intent.is_triggered:
+                                stale_intent.close_position(
+                                    OrderStatus.CLOSED_SL,
+                                    exit_price=stale_intent.current_stop_loss or stale_intent.fill_price or 0.0,
+                                    timestamp=time.time(),
+                                )
+                            else:
+                                stale_intent.cancel("Reconciled with flat exchange state", OrderStatus.CANCELLED_MANUAL)
+                            self.state_manager.unregister_intent(stale_intent.intent_id)
             if formatted_positions and self.live_unrealized_pnl == 0.0:
                 self.live_unrealized_pnl = round(pos_pnl_acc, 4)
                 self.live_equity = round(self.live_balance + self.live_unrealized_pnl, 4)
@@ -1422,6 +1472,21 @@ class TenantInstance:
             closed_positions = len(self.paper_simulator._open_positions)
             self.paper_simulator.cancel_all_orders()
             self.paper_simulator.flatten_all()
+
+        if hasattr(self, "state_manager") and self.state_manager is not None:
+            for intent in list(self.state_manager._intents_by_id.values()):
+                if intent.is_active:
+                    if intent.is_triggered:
+                        intent.close_position(OrderStatus.CLOSED_SL, intent.current_stop_loss or 0.0, time.time())
+                    else:
+                        intent.cancel("Emergency flatten", OrderStatus.CANCELLED_MANUAL)
+                    self.state_manager.unregister_intent(intent.intent_id)
+            if hasattr(self.state_manager, "_open_positions"):
+                self.state_manager._open_positions.clear()
+
+        for strat in self.strategies.values():
+            strat.active_position = None
+            strat.pending_order = None
 
         if hasattr(self, "tenant_manager") and self.tenant_manager is not None:
             try:
@@ -2560,13 +2625,38 @@ class TenantManager:
             # Ensure tenant does not already have an active position or pending order
             tracked_intent = tenant.state_manager.get_active_intent_for_product(spec.product_id)
             if tracked_intent is not None and tracked_intent.is_active:
-                logger.debug(
-                    "[FANOUT %s:%s] Tenant already has active intent [%s]. Skipping fan-out.",
-                    tenant.config.tenant_id,
-                    clean_symbol,
-                    tracked_intent.intent_id,
+                has_real_pos = any(
+                    p.get("product_id") == spec.product_id and p.get("size", 0) != 0
+                    for p in getattr(tenant, "live_positions", [])
                 )
-                continue
+                has_real_ord = any(
+                    o.get("product_id") == spec.product_id
+                    for o in getattr(tenant, "live_orders", [])
+                )
+                if has_real_pos or has_real_ord:
+                    logger.debug(
+                        "[FANOUT %s:%s] Tenant already has active intent/order [%s] on exchange. Skipping fan-out.",
+                        tenant.config.tenant_id,
+                        clean_symbol,
+                        tracked_intent.intent_id,
+                    )
+                    continue
+                else:
+                    logger.warning(
+                        "[FANOUT %s:%s] Purging stale active intent [%s] from state_manager (exchange is flat).",
+                        tenant.config.tenant_id,
+                        clean_symbol,
+                        tracked_intent.intent_id,
+                    )
+                    if tracked_intent.is_triggered:
+                        tracked_intent.close_position(
+                            OrderStatus.CLOSED_SL,
+                            tracked_intent.current_stop_loss or tracked_intent.fill_price or 0.0,
+                            time.time(),
+                        )
+                    else:
+                        tracked_intent.cancel("Purged stale fanout intent", OrderStatus.CANCELLED_MANUAL)
+                    tenant.state_manager.unregister_intent(tracked_intent.intent_id)
 
             strategy = tenant.strategies.get(clean_symbol)
             if not strategy:
@@ -2723,13 +2813,38 @@ class TenantManager:
             # Ensure tenant does not already have an active position or pending order
             tracked_intent = tenant.state_manager.get_active_intent_for_product(spec.product_id)
             if tracked_intent is not None and tracked_intent.is_active:
-                logger.debug(
-                    "[FANOUT %s:%s] Tenant already has active intent [%s]. Skipping fan-out.",
-                    tenant.config.tenant_id,
-                    clean_symbol,
-                    tracked_intent.intent_id,
+                has_real_pos = any(
+                    p.get("product_id") == spec.product_id and p.get("size", 0) != 0
+                    for p in getattr(tenant, "live_positions", [])
                 )
-                continue
+                has_real_ord = any(
+                    o.get("product_id") == spec.product_id
+                    for o in getattr(tenant, "live_orders", [])
+                )
+                if has_real_pos or has_real_ord:
+                    logger.debug(
+                        "[FANOUT %s:%s] Tenant already has active intent/order [%s] on exchange. Skipping fan-out.",
+                        tenant.config.tenant_id,
+                        clean_symbol,
+                        tracked_intent.intent_id,
+                    )
+                    continue
+                else:
+                    logger.warning(
+                        "[FANOUT %s:%s] Purging stale active intent [%s] from state_manager (exchange is flat).",
+                        tenant.config.tenant_id,
+                        clean_symbol,
+                        tracked_intent.intent_id,
+                    )
+                    if tracked_intent.is_triggered:
+                        tracked_intent.close_position(
+                            OrderStatus.CLOSED_SL,
+                            tracked_intent.current_stop_loss or tracked_intent.fill_price or 0.0,
+                            time.time(),
+                        )
+                    else:
+                        tracked_intent.cancel("Purged stale fanout intent", OrderStatus.CANCELLED_MANUAL)
+                    tenant.state_manager.unregister_intent(tracked_intent.intent_id)
 
             tenant.register_contract_spec(spec)
             account_equity = await tenant.get_account_equity()

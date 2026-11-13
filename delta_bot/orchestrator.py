@@ -702,8 +702,33 @@ class TradingBotOrchestrator:
         # Ensure tenant does not already have an active position or pending order
         tracked = tenant.state_manager.get_active_intent_for_product(spec.product_id)
         if tracked is not None and tracked.is_active:
-            logger.debug("[TENANT %s:%s] Tenant already has active intent. Skipping duplicate execution.", t_id, clean_symbol)
-            return
+            has_real_pos = any(
+                p.get("product_id") == spec.product_id and p.get("size", 0) != 0
+                for p in getattr(tenant, "live_positions", [])
+            )
+            has_real_ord = any(
+                o.get("product_id") == spec.product_id
+                for o in getattr(tenant, "live_orders", [])
+            )
+            if has_real_pos or has_real_ord:
+                logger.debug("[TENANT %s:%s] Tenant already has active intent/order on exchange. Skipping duplicate execution.", t_id, clean_symbol)
+                return
+            else:
+                logger.warning(
+                    "[TENANT %s:%s] Stale active intent [%s] found in state_manager but exchange is flat. Purging stale intent.",
+                    t_id,
+                    clean_symbol,
+                    tracked.intent_id,
+                )
+                if tracked.is_triggered:
+                    tracked.close_position(
+                        OrderStatus.CLOSED_SL,
+                        tracked.current_stop_loss or tracked.fill_price or 0.0,
+                        time.time(),
+                    )
+                else:
+                    tracked.cancel("Purged stale intent during breakout evaluation", OrderStatus.CANCELLED_MANUAL)
+                tenant.state_manager.unregister_intent(tracked.intent_id)
         t_equity = await tenant.get_account_equity()
         if tenant.mode.is_real and t_equity <= 0:
             logger.warning(
